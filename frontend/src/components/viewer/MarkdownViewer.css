@@ -1,0 +1,487 @@
+/* ============================================
+   MarkdownViewer.css
+   ============================================ */
+
+.md-viewer-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ── Controls bar ── */
+.md-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px;
+  background: linear-gradient(135deg, rgba(255, 248, 235, 0.97) 0%, rgba(253, 246, 236, 0.95) 100%);
+  border-bottom: 2px solid #F0E6D6;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  flex-wrap: wrap;
+}
+
+/* ── Zoom controls ── */
+.md-zoom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.md-zoom button {
+  padding: 6px 14px;
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 600;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.3);
+  line-height: 1;
+}
+
+.md-zoom button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0px 4px 12px rgba(139, 69, 19, 0.4);
+}
+
+.md-zoom button:disabled {
+  background: linear-gradient(135deg, #718096 0%, #4a5568 100%);
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.md-zoom span {
+  font-size: 13px;
+  font-weight: 700;
+  color: #5C2E0A;
+  min-width: 40px;
+  text-align: center;
+  letter-spacing: 0.3px;
+}
+
+/* ── Padding slider ── */
+.padding-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #7A5035;
+}
+
+.padding-control input[type="range"] {
+  width: 80px;
+  accent-color: #D2691E;
+  cursor: pointer;
+}
+
+/* ── Edit actions ── */
+.md-edit-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+/* Edit button — matches chunk-edit-btn style */
+.md-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 16px;
+  background: white;
+  border: 1.5px solid rgba(139, 69, 19, 0.25);
+  border-radius: 6px;
+  color: #5C2E0A;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 4px rgba(139, 69, 19, 0.12);
+  font-family: inherit;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.md-edit-btn:hover {
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  border-color: transparent;
+  color: white;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(139, 69, 19, 0.3);
+}
+
+/* Save button */
+.md-save-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 16px;
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.3);
+  font-family: inherit;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.md-save-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0px 4px 12px rgba(139, 69, 19, 0.4);
+}
+
+.md-save-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Cancel button */
+.md-cancel-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 16px;
+  background: white;
+  border: 1.5px solid rgba(204, 34, 0, 0.25);
+  border-radius: 6px;
+  color: #CC2200;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: inherit;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  box-shadow: 0 1px 4px rgba(204, 34, 0, 0.08);
+}
+
+.md-cancel-btn:hover {
+  background: linear-gradient(135deg, #CC2200 0%, #A81B00 100%);
+  border-color: transparent;
+  color: white;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(204, 34, 0, 0.3);
+}
+
+/* ── Viewer / editor area ── */
+.md-viewer {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: #FDF6EC;
+  color: #2c2c2c;
+  line-height: 1.7;
+}
+
+.md-viewer::-webkit-scrollbar { width: 10px; }
+.md-viewer::-webkit-scrollbar-track { background: #F5EDE0; }
+.md-viewer::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #8B4513 0%, #D2691E 100%);
+  border-radius: 8px;
+  border: 2px solid #F5EDE0;
+}
+
+.md-raw-editor {
+  width: 100%;
+  height: 100%;
+  background: #FFF8EB;
+  color: #3B1A05;
+  border: none;
+  outline: none;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  resize: none;
+  box-sizing: border-box;
+}
+
+.markdown-content {
+  max-width: 100%;
+}
+
+/* ── Chunk visualization ── */
+.chunk-block {
+  border-radius: 8px;
+  padding: 14px 18px;
+  margin-bottom: 12px;
+  position: relative;
+  transition: box-shadow 0.2s;
+}
+
+.chunk-block:hover {
+  box-shadow: 0 2px 12px rgba(139, 69, 19, 0.12);
+}
+
+.chunk-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(139, 69, 19, 0.12);
+}
+
+/* ── Chunk badge — much more readable ── */
+.chunk-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  border-radius: 20px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 800;
+  color: white;
+  letter-spacing: 0.3px;
+  box-shadow: 0 2px 6px rgba(139, 69, 19, 0.3);
+  user-select: none;
+}
+
+.chunk-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.85);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-right: 3px;
+}
+
+.chunk-current {
+  font-size: 13px;
+  font-weight: 900;
+  color: #fff;
+}
+
+.chunk-sep {
+  margin: 0 4px;
+  color: rgba(255, 255, 255, 0.6);
+  font-weight: 400;
+  font-size: 12px;
+}
+
+.chunk-total {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+/* Chunk edit button — same style as md-edit-btn */
+.chunk-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: white;
+  border: 1.5px solid rgba(139, 69, 19, 0.25);
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  color: #5C2E0A;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: inherit;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  box-shadow: 0 1px 4px rgba(139, 69, 19, 0.12);
+}
+
+.chunk-edit-btn:hover {
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  border-color: transparent;
+  color: white;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(139, 69, 19, 0.3);
+}
+
+.no-markdown {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #9A7050;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+/* ── Markdown typography ── */
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 {
+  color: #3B1A05;
+  font-weight: 800;
+  line-height: 1.3;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  letter-spacing: -0.3px;
+}
+
+.markdown-content h1 {
+  font-size: 2em;
+  border-bottom: 3px solid #F0E6D6;
+  padding-bottom: 0.3em;
+}
+
+.markdown-content h2 {
+  font-size: 1.5em;
+  border-bottom: 2px solid #F0E6D6;
+  padding-bottom: 0.2em;
+}
+
+.markdown-content h3 { font-size: 1.25em; }
+.markdown-content h4 { font-size: 1.1em; }
+.markdown-content h5,
+.markdown-content h6 { font-size: 1em; color: #7A5035; }
+
+.markdown-content p {
+  margin: 0 0 1em 0;
+  color: #2c2c2c;
+  line-height: 1.8;
+}
+
+.markdown-content a {
+  color: #D2691E;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color 0.2s;
+}
+
+.markdown-content a:hover { color: #8B4513; }
+
+.markdown-content strong { font-weight: 700; color: #3B1A05; }
+.markdown-content em     { font-style: italic; color: #5C2E0A; }
+
+.markdown-content ul,
+.markdown-content ol {
+  margin: 0 0 1em 0;
+  padding-left: 1.8em;
+  color: #2c2c2c;
+}
+
+.markdown-content li {
+  margin-bottom: 0.3em;
+  line-height: 1.7;
+}
+
+.markdown-content li > ul,
+.markdown-content li > ol {
+  margin-top: 0.3em;
+  margin-bottom: 0;
+}
+
+.markdown-content blockquote {
+  margin: 1em 0;
+  padding: 10px 18px;
+  border-left: 4px solid #D2691E;
+  background: rgba(139, 69, 19, 0.06);
+  border-radius: 0 8px 8px 0;
+  color: #5C2E0A;
+  font-style: italic;
+}
+
+.markdown-content blockquote p { margin: 0; }
+
+/* ── Inline code — readable dark bg ── */
+.markdown-content code {
+  background: #3a1f0d;
+  color: #F5DEB3;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+  font-size: 0.88em;
+}
+
+/* ── Code blocks ── */
+.markdown-content pre {
+  background: #2c1a0e;
+  color: #F5DEB3;
+  padding: 16px 20px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 1em 0;
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.markdown-content pre code {
+  background: none;
+  color: #F5DEB3;
+  padding: 0;
+  font-size: 0.9em;
+  border-radius: 0;
+}
+
+.markdown-content hr {
+  border: none;
+  border-top: 2px solid #F0E6D6;
+  margin: 2em 0;
+}
+
+.markdown-content img {
+  max-width: 100%;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  margin: 0.5em 0;
+}
+
+/* ── Tables ── */
+.markdown-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.92em;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 12px rgba(139, 69, 19, 0.1);
+}
+
+.markdown-content thead {
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  color: white;
+}
+
+.markdown-content thead th {
+  padding: 11px 16px;
+  text-align: left;
+  font-weight: 700;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border: none;
+  color: white;
+}
+
+.markdown-content tbody tr {
+  border-bottom: 1px solid #F0E6D6;
+  transition: background 0.15s;
+}
+
+.markdown-content tbody tr:last-child { border-bottom: none; }
+
+.markdown-content tbody tr:nth-child(even) {
+  background: rgba(139, 69, 19, 0.04);
+}
+
+.markdown-content tbody tr:hover {
+  background: rgba(139, 69, 19, 0.08);
+}
+
+.markdown-content tbody td {
+  padding: 10px 16px;
+  color: #3B1A05;
+  vertical-align: top;
+  line-height: 1.6;
+}

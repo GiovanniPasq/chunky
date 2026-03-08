@@ -1,0 +1,50 @@
+#!/bin/bash
+
+echo "========================================="
+echo "       Chunky - Starting All Services    "
+echo "========================================="
+echo ""
+
+cleanup() {
+    echo ""
+    echo "Shutting down services..."
+    kill $BACKEND_PID $FRONTEND_PID 2>/dev/null
+    exit
+}
+
+trap cleanup EXIT INT TERM
+
+# Start backend
+echo "Starting FastAPI backend..."
+source venv/bin/activate
+python main.py &
+BACKEND_PID=$!
+echo "Backend started (PID: $BACKEND_PID) at http://localhost:8000"
+echo ""
+
+sleep 2
+
+# Start frontend
+echo "Starting React frontend..."
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+
+cd frontend
+
+if [ ! -d "node_modules" ]; then
+    echo "node_modules not found. Installing dependencies..."
+    npm install
+fi
+
+npm run dev &
+FRONTEND_PID=$!
+echo "Frontend started (PID: $FRONTEND_PID) at http://localhost:5173"
+echo ""
+
+echo "========================================="
+echo "  Backend:  http://localhost:8000"
+echo "  Frontend: http://localhost:5173"
+echo "  Press Ctrl+C to stop all services"
+echo "========================================="
+
+wait

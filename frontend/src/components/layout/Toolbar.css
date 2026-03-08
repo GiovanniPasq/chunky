@@ -1,0 +1,175 @@
+/* ============================================
+   Toolbar.css
+   Styles for Toolbar.tsx
+   ============================================ */
+
+/* ── Toolbar container ── */
+.toolbar {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  background: linear-gradient(135deg, rgba(255, 248, 235, 0.97) 0%, rgba(253, 246, 236, 0.95) 100%);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  flex-wrap: wrap;
+}
+
+/* ── Base toolbar button ── */
+.toolbar-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: #5C2E0A;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.15);
+  position: relative;
+  overflow: hidden;
+  font-family: 'Work Sans', Helvetica, Arial, Lucida, sans-serif;
+}
+
+/* Shimmer effect on hover */
+.toolbar-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  transition: left 0.5s;
+}
+
+.toolbar-btn:hover::before {
+  left: 100%;
+}
+
+.toolbar-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0px 1px 10px 0px rgba(0, 0, 0, 0.17);
+}
+
+/* ── Active state (toggle ON) ── */
+.toolbar-btn.active {
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  color: #fff;
+  box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.35);
+}
+
+.toolbar-btn.active:hover {
+  transform: translateY(-2px);
+  box-shadow: 0px 1px 10px 0px rgba(139, 69, 19, 0.5);
+}
+
+/* ── Disabled state ── */
+.toolbar-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  filter: grayscale(0.5);
+}
+
+.toolbar-btn:disabled:hover {
+  transform: none;
+  box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.15);
+}
+
+.toolbar-btn:disabled::before {
+  display: none;
+}
+
+/* ── Settings variant (green) ── */
+.toolbar-btn.settings {
+  background: linear-gradient(135deg, #3D6B27 0%, #5A8C3E 100%);
+  color: white;
+  box-shadow: 0px 2px 8px rgba(61, 107, 39, 0.3);
+}
+
+.toolbar-btn.settings:hover {
+  transform: translateY(-2px);
+  box-shadow: 0px 1px 10px 0px rgba(61, 107, 39, 0.45);
+}
+
+.toolbar-btn.settings::before {
+  display: none;
+}
+
+/* Spin the gear icon slowly, faster on hover */
+.toolbar-btn.settings .btn-icon {
+  animation: rotate 20s linear infinite;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+}
+
+.toolbar-btn.settings:hover .btn-icon {
+  animation: rotate 2s linear infinite;
+}
+
+@keyframes rotate {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ── Save variant (brown gradient) ── */
+.toolbar-btn.save {
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  color: white;
+  box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.3);
+}
+
+.toolbar-btn.save:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0px 1px 10px 0px rgba(139, 69, 19, 0.45);
+}
+
+.toolbar-btn.save::before {
+  display: none;
+}
+
+/* ── Button internals ── */
+.btn-icon {
+  font-size: 18px;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+  flex-shrink: 0;
+}
+
+.btn-label {
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+/* Status badge (ON / OFF / BLOCKS / SEAMLESS) */
+.btn-status {
+  padding: 3px 10px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  background-color: rgba(0, 0, 0, 0.1);
+}
+
+.btn-status.on {
+  background-color: rgba(255, 255, 255, 0.25);
+}
+
+.btn-status.off {
+  background-color: rgba(0, 0, 0, 0.1);
+}
+
+/* ── Separator ── */
+.toolbar-separator {
+  width: 1.5px;
+  height: 32px;
+  background: linear-gradient(180deg, transparent, rgba(139, 69, 19, 0.3), transparent);
+  border-radius: 2px;
+  flex-shrink: 0;
+  margin: 0 4px;
+}

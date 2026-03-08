@@ -1,0 +1,477 @@
+/* ============================================
+   Sidebar.css
+   ============================================ */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  width: 300px;
+  height: 100vh;
+  background: rgba(255, 248, 235, 0.97);
+  backdrop-filter: blur(10px);
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.sidebar.collapsed { width: 68px; }
+
+/* ── Fixed top block ── */
+.sidebar-fixed {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Brand ── */
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 14px 14px;
+  min-height: 68px;
+}
+
+.sidebar-logo {
+  width: 80px;
+  height: 80px;
+  object-fit: contain;
+  border-radius: 10px;
+  flex-shrink: 0;
+  filter: drop-shadow(0 2px 6px rgba(139, 69, 19, 0.25));
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-logo:hover {
+  transform: scale(1.08) rotate(-3deg);
+}
+
+.sidebar-app-name {
+  flex: 1;
+  font-size: 30px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: -0.5px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.sidebar.collapsed .sidebar-brand {
+  justify-content: center;
+  padding: 16px 0 12px;
+  min-height: unset;
+}
+
+.sidebar.collapsed .sidebar-logo { width: 40px; height: 40px; }
+
+/* ── Collapsed toggle ── */
+.sidebar-collapsed-toggle {
+  display: flex;
+  justify-content: center;
+  padding: 0 0 14px;
+}
+
+/* ── Menu toggle ── */
+.menu-toggle {
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 700;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.3);
+  flex-shrink: 0;
+  line-height: 1;
+  font-family: inherit;
+}
+
+.menu-toggle:hover {
+  transform: translateY(-2px) scale(1.05);
+  box-shadow: 0px 4px 12px rgba(139, 69, 19, 0.45);
+}
+
+.menu-toggle:active { transform: scale(0.95); }
+
+/* ── Divider ── */
+.sidebar-divider {
+  height: 2px;
+  margin: 0 14px 14px;
+  background: linear-gradient(90deg, transparent, rgba(139, 69, 19, 0.2), transparent);
+  border-radius: 2px;
+}
+
+/* ── Section row ── */
+.sidebar-section-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px 12px;
+}
+
+.sidebar-section-label {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #9A7050;
+}
+
+/* ── Upload ── */
+.sidebar-upload {
+  padding: 0 14px 10px;
+}
+
+.upload-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 11px 16px;
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: inherit;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.3);
+  letter-spacing: 0.3px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.upload-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0px 4px 12px rgba(139, 69, 19, 0.45);
+}
+
+/* ── Search ── */
+.sidebar-search { padding: 0 14px 8px; }
+
+.search-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 14px;
+  border: 1.5px solid rgba(139, 69, 19, 0.2);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #3B1A05;
+  background: white;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  font-family: inherit;
+}
+
+.search-input::placeholder { color: #B08060; }
+.search-input:focus {
+  border-color: #D2691E;
+  box-shadow: 0 0 0 3px rgba(210, 105, 30, 0.12);
+}
+
+/* ── Doc count row ── */
+.doc-count-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px 8px;
+}
+
+.doc-count {
+  font-size: 11px;
+  font-weight: 700;
+  color: #9A7050;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+/* ── Select toggle button ── */
+.select-toggle-btn {
+  background: white;
+  border: 1.5px solid rgba(139, 69, 19, 0.2);
+  border-radius: 6px;
+  height: 26px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: inherit;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #8B4513;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.select-toggle-btn:hover {
+  background: rgba(139, 69, 19, 0.08);
+  border-color: #8B4513;
+}
+
+.select-toggle-btn.active {
+  background: linear-gradient(135deg, #CC2200 0%, #A81B00 100%);
+  border-color: transparent;
+  color: white;
+  box-shadow: 0 2px 6px rgba(204, 34, 0, 0.3);
+}
+
+/* ── Bulk actions bar ── */
+.bulk-actions {
+  display: flex;
+  gap: 8px;
+  padding: 0 14px 10px;
+}
+
+.bulk-btn {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 7px;
+  border: none;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: inherit;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.bulk-btn.select-all {
+  background: white;
+  border: 1.5px solid rgba(139, 69, 19, 0.25);
+  color: #5C2E0A;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+
+.bulk-btn.select-all:hover:not(:disabled) {
+  background: rgba(139, 69, 19, 0.06);
+  border-color: #8B4513;
+}
+
+.bulk-btn.delete-selected {
+  background: linear-gradient(135deg, #CC2200 0%, #A81B00 100%);
+  color: white;
+  box-shadow: 0 2px 6px rgba(204, 34, 0, 0.25);
+}
+
+.bulk-btn.delete-selected:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(204, 34, 0, 0.35);
+}
+
+.bulk-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ── Scrollable list area ── */
+.sidebar-list-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 14px 16px;
+  min-height: 0;
+}
+
+.sidebar-list-scroll::-webkit-scrollbar { width: 6px; }
+.sidebar-list-scroll::-webkit-scrollbar-track { background: transparent; }
+.sidebar-list-scroll::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #8B4513 0%, #D2691E 100%);
+  border-radius: 8px;
+}
+
+/* ── Document list ── */
+.doc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.doc-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: #5C2E0A;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  background: white;
+  border: 2px solid transparent;
+  overflow: hidden;
+  position: relative;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+}
+
+/* Left accent bar */
+.doc-list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 4px;
+  height: 100%;
+  background: linear-gradient(180deg, #8B4513 0%, #D2691E 100%);
+  transform: scaleY(0);
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.doc-list li:hover::before { transform: scaleY(1); }
+
+.doc-list li:hover {
+  transform: translateX(4px);
+  border-color: rgba(139, 69, 19, 0.2);
+  box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.15);
+  background: linear-gradient(135deg, rgba(139, 69, 19, 0.04) 0%, rgba(210, 105, 30, 0.04) 100%);
+}
+
+/* Hover reveals delete button */
+.doc-list li:hover .doc-delete-btn { opacity: 1; }
+
+/* Active item */
+.doc-list li.active {
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  color: #fff;
+  border-color: transparent;
+  font-weight: 600;
+  box-shadow: 0px 2px 10px rgba(139, 69, 19, 0.35);
+  transform: translateX(0);
+}
+
+.doc-list li.active::before { display: none; }
+
+.doc-list li.active:hover {
+  transform: scale(1.02);
+  box-shadow: 0px 4px 14px rgba(139, 69, 19, 0.45);
+}
+
+/* Selected item (multi-select mode) */
+.doc-list li.selected {
+  background: rgba(139, 69, 19, 0.1);
+  border-color: rgba(139, 69, 19, 0.35);
+  transform: translateX(0);
+}
+
+.doc-list li.selected::before { display: none; }
+
+/* Empty state */
+.no-docs {
+  font-size: 13px;
+  color: #9A7050;
+  padding: 16px;
+  text-align: center;
+  font-weight: 500;
+  font-style: italic;
+  cursor: default !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.no-docs::before { display: none !important; }
+.no-docs:hover { transform: none !important; background: transparent !important; }
+
+/* ── Doc icon & name ── */
+.doc-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
+}
+
+.doc-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+/* ── Checkbox (select mode) — CSS only, no emoji ── */
+.doc-checkbox {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 2px solid rgba(139, 69, 19, 0.35);
+  background: white;
+  flex-shrink: 0;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+
+.doc-checkbox.checked {
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  border-color: transparent;
+  box-shadow: 0 1px 4px rgba(139, 69, 19, 0.35);
+}
+
+/* Checkmark via pseudo-element */
+.doc-checkbox.checked::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 1px;
+  width: 5px;
+  height: 8px;
+  border: 2px solid white;
+  border-top: none;
+  border-left: none;
+  transform: rotate(45deg);
+}
+
+/* ── Per-row delete button ── */
+.doc-delete-btn {
+  opacity: 0;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: all 0.15s;
+  line-height: 1;
+  color: #CC2200;
+}
+
+.doc-delete-btn:hover:not(:disabled) {
+  background: rgba(204, 34, 0, 0.1);
+  transform: scale(1.15);
+}
+
+.doc-delete-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* Keep delete visible on active row */
+.doc-list li.active .doc-delete-btn {
+  opacity: 0.7;
+  color: rgba(255,255,255,0.9);
+}
+
+.doc-list li.active .doc-delete-btn:hover:not(:disabled) {
+  background: rgba(255,255,255,0.2);
+  opacity: 1;
+}

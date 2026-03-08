@@ -1,0 +1,262 @@
+/* ============================================
+   ChunkSettingsModal.css
+   Styles for ChunkSettingsModal.tsx
+   ============================================ */
+
+/* ── Overlay ── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(circle at center, rgba(139, 69, 19, 0.2), rgba(0, 0, 0, 0.7));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(12px);
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ── Modal box ── */
+.modal {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 248, 235, 0.95) 100%);
+  backdrop-filter: blur(20px);
+  border-radius: 16px;
+  width: 460px;
+  max-width: 95vw;
+  max-height: 90vh;
+  overflow: hidden;
+  box-shadow: 0 30px 80px rgba(139, 69, 19, 0.3);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  animation: modalSlideIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes modalSlideIn {
+  from {
+    transform: translateY(-50px) scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+/* ── Header ── */
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px 16px;
+  background: linear-gradient(135deg, rgba(139, 69, 19, 0.08) 0%, rgba(210, 105, 30, 0.08) 100%);
+  border-bottom: 2px solid #F0E6D6;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: -0.5px;
+}
+
+/* ── Close button ── */
+.modal-close {
+  background: linear-gradient(135deg, #CC2200 0%, #A81B00 100%);
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  color: white;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0px 2px 8px rgba(204, 34, 0, 0.3);
+}
+
+.modal-close:hover {
+  transform: rotate(90deg) scale(1.1);
+  box-shadow: 0px 1px 10px 0px rgba(204, 34, 0, 0.45);
+}
+
+/* ── Body ── */
+.modal-body {
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-height: calc(90vh - 160px);
+  overflow-y: auto;
+}
+
+/* ── Form group ── */
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-group label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #7A5035;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.form-group select,
+.form-group input[type="number"] {
+  background: white;
+  border: 2px solid #E8D5C0;
+  border-radius: 8px;
+  color: #3B1A05;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  outline: none;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: inherit;
+}
+
+.form-group select:hover,
+.form-group input[type="number"]:not(:disabled):hover {
+  border-color: rgba(139, 69, 19, 0.35);
+}
+
+.form-group select:focus,
+.form-group input[type="number"]:focus {
+  border-color: #8B4513;
+  box-shadow: 0 0 0 4px rgba(139, 69, 19, 0.1);
+  transform: translateY(-1px);
+}
+
+.form-group select:disabled,
+.form-group input[type="number"]:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: #F5EDE0;
+  transform: none;
+}
+
+.form-group small {
+  font-size: 11px;
+  color: #9A7050;
+  line-height: 1.5;
+}
+
+/* ── Checkbox group ── */
+.checkbox-group label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  font-size: 13px;
+  color: #5C2E0A;
+  cursor: pointer;
+}
+
+/* ── Preview box ── */
+.modal-preview {
+  background: linear-gradient(135deg, rgba(139, 69, 19, 0.07) 0%, rgba(210, 105, 30, 0.07) 100%);
+  border-left: 4px solid transparent;
+  border-image: linear-gradient(180deg, #8B4513 0%, #D2691E 100%);
+  border-image-slice: 1;
+  border-radius: 8px;
+  padding: 14px 16px;
+  font-size: 13px;
+  box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.1);
+}
+
+.modal-preview strong {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  display: block;
+  margin-bottom: 6px;
+}
+
+.modal-preview p {
+  margin: 0;
+  color: #5C2E0A;
+  font-weight: 500;
+}
+
+/* ── Footer ── */
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 24px;
+  border-top: 2px solid #EDD9C0;
+  background-color: #FDF6EC;
+}
+
+/* ── Buttons ── */
+.btn-secondary {
+  background: white;
+  border: 2px solid #E8D5C0;
+  border-radius: 8px;
+  color: #7A5035;
+  padding: 10px 24px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: inherit;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.btn-secondary:hover {
+  background: linear-gradient(135deg, rgba(139, 69, 19, 0.05) 0%, rgba(210, 105, 30, 0.05) 100%);
+  border-color: rgba(139, 69, 19, 0.3);
+  color: #5C2E0A;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  border: none;
+  border-radius: 8px;
+  color: white;
+  padding: 10px 24px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.3);
+  font-family: inherit;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.btn-primary:hover {
+  transform: translateY(-3px);
+  box-shadow: 0px 1px 10px 0px rgba(139, 69, 19, 0.45);
+}
+
+.btn-primary:active {
+  transform: translateY(-1px);
+  box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.3);
+}

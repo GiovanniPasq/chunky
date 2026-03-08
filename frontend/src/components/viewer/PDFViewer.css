@@ -1,0 +1,140 @@
+.pdf-viewer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #3B1A05;
+}
+
+.pdf-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  background: linear-gradient(135deg, rgba(139, 69, 19, 0.06) 0%, rgba(210, 105, 30, 0.06) 100%);
+  border-bottom: 2px solid #F0E6D6;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.pdf-controls button {
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.3);
+}
+
+.pdf-controls button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0px 1px 10px 0px rgba(139, 69, 19, 0.45);
+}
+
+.pdf-controls button:disabled {
+  background: linear-gradient(135deg, #718096 0%, #4a5568 100%);
+  cursor: not-allowed;
+  opacity: 0.5;
+  box-shadow: none;
+}
+
+.pdf-controls span {
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: 0.5px;
+  min-width: 44px;
+  text-align: center;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+
+.pdf-container {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.pdf-container::-webkit-scrollbar {
+  width: 12px;
+}
+
+.pdf-container::-webkit-scrollbar-track {
+  background: #1E0C02;
+}
+
+.pdf-container::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #8B4513 0%, #D2691E 100%);
+  border-radius: 8px;
+  border: 2px solid #1E0C02;
+}
+
+.pdf-container::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #5C2E0A 0%, #A0521A 100%);
+}
+
+.pdf-page {
+  margin-bottom: 3px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  position: relative;
+  background-color: #fff;
+  border-radius: 8px;
+  overflow: visible;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  padding-bottom: 40px;
+}
+
+.pdf-page:hover {
+  transform: scale(1.005);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+}
+
+.pdf-page canvas {
+  display: block;
+  border-radius: 8px 8px 0 0;
+}
+
+.pdf-page .textLayer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 40px;
+  overflow: hidden;
+  opacity: 1;
+  line-height: 1.0;
+}
+
+.pdf-page .textLayer > span {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+
+.pdf-page .textLayer ::selection {
+  background: rgba(210, 105, 30, 0.3);
+}
+
+.page-number {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  padding: 6px 14px;
+  border-radius: 99px;
+  box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.3);
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
