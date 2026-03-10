@@ -27,6 +27,8 @@
 
 The core workflow is simple: bring your document as a PDF or an existing Markdown file, pick a conversion strategy and a chunking strategy, and inspect every chunk side-by-side with the source. If something looks off, edit it directly in the UI. Only when the chunks are clean do you export them for indexing.
 
+> 🚧 Chunky is in early development and actively evolving — new features and improvements are on the way!
+
 ### Why validation matters
 
 Chunking is one of the most underestimated steps in a RAG pipeline. As NVIDIA's research shows in [*Finding the Best Chunking Strategy for Accurate AI Responses*](https://developer.nvidia.com/blog/finding-the-best-chunking-strategy-for-accurate-ai-responses/), no single strategy wins universally — the right choice depends on content type and query characteristics, and poor chunking directly degrades retrieval quality and answer coherence. **Chunking is not a set-and-forget parameter**, yet most tools give you zero visibility into what your chunks actually look like. That's the gap Chunky fills.
