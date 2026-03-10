@@ -1,23 +1,51 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Sidebar from './components/layout/Sidebar'
 import Toolbar from './components/layout/Toolbar'
 import MarkdownViewer from './components/viewer/MarkdownViewer'
-import ChunkSettingsModal from './components/chunks/ChunkSettingsModal'
+import SettingsModal from './components/modals/SettingsModal'
+import Toast from './components/viewer/Toast'
 import { useDocument, useChunks } from './hooks/useDocument'
 import PDFViewer from './components/viewer/PDFViewer'
 import './App.css'
 
+const CONVERTER_LABELS: Record<string, string> = {
+  pymupdf: 'PyMuPDF',
+  docling: 'Docling',
+  markitdown: 'MarkItDown',
+  vlm: 'VLM',
+}
+
+interface ToastState {
+  message: string
+  type: 'success' | 'error'
+  id: number
+}
+
 export default function App() {
+  // ── Toast ───────────────────────────────────────────────────
+  const [toast, setToast] = useState<ToastState | null>(null)
+
+  const showToast = useCallback((message: string, type: 'success' | 'error') => {
+    setToast({ message, type, id: Date.now() })
+  }, [])
+
+  const toastCallbacks = {
+    onSuccess: (msg: string) => showToast(msg, 'success'),
+    onError: (msg: string) => showToast(msg, 'error'),
+  }
+
+  // ── Hooks ────────────────────────────────────────────────────
   const {
     documents, selectedDoc, documentData, loading, uploading, converting, savingMd,
-    selectDocument, uploadFiles, deleteDocuments, convertToMarkdown, saveMarkdown,
-  } = useDocument()
+    selectDocument, uploadFiles, deleteDocuments, convertToMarkdown, saveMarkdown, deleteMarkdown,
+  } = useDocument(toastCallbacks)
 
   const {
     chunks, settings, saving: savingChunks,
     applySettings, editChunk, saveChunks,
-  } = useChunks(documentData, selectedDoc)
+  } = useChunks(documentData, selectedDoc, toastCallbacks)
 
+  // ── UI state ─────────────────────────────────────────────────
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [scrollSync, setScrollSync] = useState(true)
   const [chunkViz, setChunkViz] = useState(false)
@@ -28,6 +56,7 @@ export default function App() {
   const [splitPct, setSplitPct] = useState(50)
   const [isDragging, setIsDragging] = useState(false)
 
+  // ── Divider drag ─────────────────────────────────────────────
   useEffect(() => {
     if (!isDragging) return
     const onMove = (e: MouseEvent) => {
@@ -46,8 +75,20 @@ export default function App() {
     }
   }, [isDragging])
 
+  const handleConvert = () =>
+    convertToMarkdown(settings.converter, settings.vlm)
+
   return (
     <div className="app">
+      {toast && (
+        <Toast
+          key={toast.id}
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
+
       <Sidebar
         documents={documents}
         selectedDoc={selectedDoc}
@@ -74,12 +115,9 @@ export default function App() {
             <Toolbar
               scrollSync={scrollSync}
               chunkViz={chunkViz}
-              chunksReady={!!chunks}
               onToggleScrollSync={() => setScrollSync(v => !v)}
               onToggleChunkViz={() => setChunkViz(v => !v)}
               onOpenSettings={() => setSettingsOpen(true)}
-              onSaveChunks={saveChunks}
-              savingChunks={savingChunks}
             />
 
             <div className="viewers">
@@ -109,7 +147,11 @@ export default function App() {
                     chunkVisualizationEnabled={chunkViz}
                     onChunkEdit={editChunk}
                     onSaveMarkdown={saveMarkdown}
+                    onSaveChunks={saveChunks}
+                    onDeleteMarkdown={deleteMarkdown}
                     savingMd={savingMd}
+                    savingChunks={savingChunks}
+                    chunksReady={!!chunks}
                   />
                 ) : (
                   <div className="md-not-found">
@@ -125,8 +167,8 @@ export default function App() {
                         <span className="static-icon">📄</span>
                         <h2>Markdown not found</h2>
                         <p>This document hasn't been converted yet.</p>
-                        <button onClick={convertToMarkdown}>
-                          ✨ Convert to Markdown
+                        <button onClick={handleConvert}>
+                          ✨ Convert with {CONVERTER_LABELS[settings.converter]}
                         </button>
                       </>
                     )}
@@ -137,7 +179,7 @@ export default function App() {
           </>
         )}
 
-        <ChunkSettingsModal
+        <SettingsModal
           isOpen={settingsOpen}
           onClose={() => setSettingsOpen(false)}
           onSave={applySettings}

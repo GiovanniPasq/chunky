@@ -1,18 +1,23 @@
-from typing import List, Dict, Any
-from fastapi import HTTPException
+"""
+Text chunking service — splits Markdown / plain text into overlapping chunks.
+"""
 
+from __future__ import annotations
+
+from typing import Callable, Dict, List
+
+from fastapi import HTTPException
 from langchain_text_splitters import (
-    RecursiveCharacterTextSplitter,
     CharacterTextSplitter,
     MarkdownHeaderTextSplitter,
+    RecursiveCharacterTextSplitter,
     TokenTextSplitter,
 )
 
-from backend.models.schemas import ChunkRequest, ChunkResponse, ChunkItem
+from backend.models.schemas import ChunkItem, ChunkRequest, ChunkResponse, SplitterType
 
-SUPPORTED_SPLITTERS = {"token", "recursive", "character", "markdown"}
-
-MARKDOWN_HEADERS = [
+# Headers recognised by the Markdown splitter (H1 → H3).
+_MARKDOWN_HEADERS = [
     ("#", "Header 1"),
     ("##", "Header 2"),
     ("###", "Header 3"),
@@ -20,18 +25,19 @@ MARKDOWN_HEADERS = [
 
 
 class ChunkingService:
+    """Splits text into chunks using a variety of LangChain splitters."""
 
     def chunk_text(self, request: ChunkRequest) -> ChunkResponse:
-        if request.splitter_type not in SUPPORTED_SPLITTERS:
+        """Dispatch to the correct split strategy and return a :class:`ChunkResponse`."""
+        handler = self._DISPATCH.get(request.splitter_type)
+        if handler is None:
+            # Should never happen thanks to Pydantic enum validation, but be safe.
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid splitter type '{request.splitter_type}'. "
-                       f"Valid options: {sorted(SUPPORTED_SPLITTERS)}",
+                detail=f"Unknown splitter type '{request.splitter_type}'",
             )
 
-        handler = getattr(self, f"_split_{request.splitter_type}")
-        chunks = handler(request)
-
+        chunks = handler(self, request)
         return ChunkResponse(
             chunks=chunks,
             total_chunks=len(chunks),
@@ -39,7 +45,7 @@ class ChunkingService:
         )
 
     # ------------------------------------------------------------------
-    # Private split strategies
+    # Split strategies
     # ------------------------------------------------------------------
 
     def _split_token(self, request: ChunkRequest) -> List[ChunkItem]:
@@ -47,7 +53,11 @@ class ChunkingService:
             chunk_size=request.chunk_size,
             chunk_overlap=request.chunk_overlap,
         )
-        return self._build_chunks(request.content, splitter.split_text(request.content), request.chunk_overlap)
+        return self._build_chunks(
+            request.content,
+            splitter.split_text(request.content),
+            request.chunk_overlap,
+        )
 
     def _split_recursive(self, request: ChunkRequest) -> List[ChunkItem]:
         splitter = RecursiveCharacterTextSplitter(
@@ -55,7 +65,11 @@ class ChunkingService:
             chunk_overlap=request.chunk_overlap,
             length_function=len,
         )
-        return self._build_chunks(request.content, splitter.split_text(request.content), request.chunk_overlap)
+        return self._build_chunks(
+            request.content,
+            splitter.split_text(request.content),
+            request.chunk_overlap,
+        )
 
     def _split_character(self, request: ChunkRequest) -> List[ChunkItem]:
         splitter = CharacterTextSplitter(
@@ -63,29 +77,32 @@ class ChunkingService:
             chunk_overlap=request.chunk_overlap,
             separator="\n\n",
         )
-        return self._build_chunks(request.content, splitter.split_text(request.content), request.chunk_overlap)
+        return self._build_chunks(
+            request.content,
+            splitter.split_text(request.content),
+            request.chunk_overlap,
+        )
 
     def _split_markdown(self, request: ChunkRequest) -> List[ChunkItem]:
-        """
-        Two-phase markdown splitting:
-          1. Split on headers (H1 / H2 / H3) via MarkdownHeaderTextSplitter.
-          2. Optionally apply a secondary RecursiveCharacterTextSplitter when
-             `enable_markdown_sizing` is True, to cap each section at chunk_size.
+        """Two-phase Markdown splitting.
+
+        Phase 1 — split on H1/H2/H3 headers via :class:`MarkdownHeaderTextSplitter`.
+        Phase 2 (optional) — apply a secondary :class:`RecursiveCharacterTextSplitter`
+        to cap each section at ``chunk_size`` characters when
+        ``enable_markdown_sizing`` is *True*.
         """
         md_splitter = MarkdownHeaderTextSplitter(
-            headers_to_split_on=MARKDOWN_HEADERS,
-            strip_headers=False,   # preserve header text inside each chunk
+            headers_to_split_on=_MARKDOWN_HEADERS,
+            strip_headers=False,  # keep header text inside each chunk
         )
-        header_docs = md_splitter.split_text(request.content)
+        docs = md_splitter.split_text(request.content)
 
         if request.enable_markdown_sizing:
             secondary = RecursiveCharacterTextSplitter(
                 chunk_size=request.chunk_size,
                 chunk_overlap=request.chunk_overlap,
             )
-            docs = secondary.split_documents(header_docs)
-        else:
-            docs = header_docs
+            docs = secondary.split_documents(docs)
 
         return [
             ChunkItem(
@@ -99,6 +116,17 @@ class ChunkingService:
         ]
 
     # ------------------------------------------------------------------
+    # Dispatch table (avoids dynamic getattr on user input)
+    # ------------------------------------------------------------------
+
+    _DISPATCH: Dict[SplitterType, Callable[[ChunkingService, ChunkRequest], List[ChunkItem]]] = {
+        SplitterType.token: _split_token,
+        SplitterType.recursive: _split_recursive,
+        SplitterType.character: _split_character,
+        SplitterType.markdown: _split_markdown,
+    }
+
+    # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
@@ -108,7 +136,7 @@ class ChunkingService:
         splits: List[str],
         overlap: int,
     ) -> List[ChunkItem]:
-        """Map raw text splits back to their positions in the original string."""
+        """Map raw text splits back to their character positions in *original*."""
         chunks: List[ChunkItem] = []
         search_start = 0
 

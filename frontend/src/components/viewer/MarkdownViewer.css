@@ -6,7 +6,7 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  overflow: hidden;
+  overflow: hidden;        /* keep vertical clipping for the panel */
   position: relative;
 }
 
@@ -14,33 +14,49 @@
 .md-controls {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 20px;
+  justify-content: space-between;   /* left group / right group */
+  padding: 10px 16px;
   background: linear-gradient(135deg, rgba(255, 248, 235, 0.97) 0%, rgba(253, 246, 236, 0.95) 100%);
   border-bottom: 2px solid #F0E6D6;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-  flex-wrap: wrap;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.md-controls-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+
+.md-controls-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 /* ── Zoom controls ── */
 .md-zoom {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .md-zoom button {
-  padding: 6px 14px;
+  padding: 5px 12px;
   background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
   color: white;
   border: none;
-  border-radius: 8px;
+  border-radius: 7px;
   cursor: pointer;
   font-size: 15px;
   font-weight: 600;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.3);
   line-height: 1;
+  font-family: inherit;
 }
 
 .md-zoom button:hover:not(:disabled) {
@@ -56,10 +72,10 @@
 }
 
 .md-zoom span {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   color: #5C2E0A;
-  min-width: 40px;
+  min-width: 38px;
   text-align: center;
   letter-spacing: 0.3px;
 }
@@ -69,45 +85,51 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   color: #7A5035;
+  white-space: nowrap;
 }
 
 .padding-control input[type="range"] {
-  width: 80px;
+  width: 72px;
   accent-color: #D2691E;
   cursor: pointer;
 }
 
-/* ── Edit actions ── */
+/* ── Edit actions wrapper (right side legacy) ── */
 .md-edit-actions {
-  margin-left: auto;
   display: flex;
-  gap: 8px;
+  gap: 6px;
 }
 
-/* Edit button — matches chunk-edit-btn style */
-.md-edit-btn {
+/* ── Shared action button base ── */
+.md-action-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 7px 16px;
-  background: white;
-  border: 1.5px solid rgba(139, 69, 19, 0.25);
-  border-radius: 6px;
-  color: #5C2E0A;
+  gap: 5px;
+  padding: 6px 14px;
+  border-radius: 7px;
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 1px 4px rgba(139, 69, 19, 0.12);
-  font-family: inherit;
+  font-family: 'Work Sans', Helvetica, Arial, Lucida, sans-serif;
   letter-spacing: 0.3px;
   text-transform: uppercase;
+  white-space: nowrap;
+  border: none;
 }
 
-.md-edit-btn:hover {
+/* Edit variant */
+.md-action-btn.edit {
+  background: white;
+  border: 1.5px solid rgba(139, 69, 19, 0.25);
+  color: #5C2E0A;
+  box-shadow: 0 1px 4px rgba(139, 69, 19, 0.12);
+}
+
+.md-action-btn.edit:hover {
   background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
   border-color: transparent;
   color: white;
@@ -115,58 +137,33 @@
   box-shadow: 0 2px 8px rgba(139, 69, 19, 0.3);
 }
 
-/* Save button */
-.md-save-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 16px;
+/* Save MD variant */
+.md-action-btn.save-md {
   background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
-  border: none;
-  border-radius: 6px;
   color: white;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.3);
-  font-family: inherit;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
 }
 
-.md-save-btn:hover:not(:disabled) {
+.md-action-btn.save-md:hover:not(:disabled) {
   transform: translateY(-1px);
   box-shadow: 0px 4px 12px rgba(139, 69, 19, 0.4);
 }
 
-.md-save-btn:disabled {
+.md-action-btn.save-md:disabled {
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;
 }
 
-/* Cancel button */
-.md-cancel-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 16px;
+/* Cancel variant */
+.md-action-btn.cancel {
   background: white;
-  border: 1.5px solid rgba(204, 34, 0, 0.25);
-  border-radius: 6px;
+  border: 1.5px solid rgba(204, 34, 0, 0.3);
   color: #CC2200;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  font-family: inherit;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
   box-shadow: 0 1px 4px rgba(204, 34, 0, 0.08);
 }
 
-.md-cancel-btn:hover {
+.md-action-btn.cancel:hover {
   background: linear-gradient(135deg, #CC2200 0%, #A81B00 100%);
   border-color: transparent;
   color: white;
@@ -174,14 +171,118 @@
   box-shadow: 0 2px 8px rgba(204, 34, 0, 0.3);
 }
 
+/* Save Chunks variant */
+.md-action-btn.save-chunks {
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  color: white;
+  box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.3);
+}
+
+.md-action-btn.save-chunks:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0px 4px 12px rgba(139, 69, 19, 0.4);
+}
+
+.md-action-btn.save-chunks:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Reconvert variant */
+.md-action-btn.reconvert {
+  background: white;
+  border: 1.5px solid rgba(61, 107, 39, 0.3);
+  color: #3D6B27;
+  box-shadow: 0 1px 4px rgba(61, 107, 39, 0.1);
+}
+
+.md-action-btn.reconvert:hover {
+  background: linear-gradient(135deg, #3D6B27 0%, #5A8C3E 100%);
+  border-color: transparent;
+  color: white;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(61, 107, 39, 0.3);
+}
+
+/* ── Reconvert confirm inline dialog ── */
+.reconvert-confirm-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(59, 26, 5, 0.55);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.reconvert-confirm {
+  background: linear-gradient(135deg, #fff 0%, #FFF8EB 100%);
+  border-radius: 12px;
+  padding: 24px 28px;
+  max-width: 340px;
+  width: 90%;
+  box-shadow: 0 16px 48px rgba(139, 69, 19, 0.25);
+  border: 2px solid #F0E6D6;
+  animation: modalSlideIn 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.reconvert-confirm p {
+  margin: 0 0 18px 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: #3B1A05;
+  line-height: 1.6;
+}
+
+.reconvert-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.btn-danger {
+  background: linear-gradient(135deg, #CC2200 0%, #A81B00 100%);
+  border: none;
+  border-radius: 8px;
+  color: white;
+  padding: 9px 20px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: inherit;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  box-shadow: 0 2px 8px rgba(204, 34, 0, 0.3);
+}
+
+.btn-danger:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(204, 34, 0, 0.4);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes modalSlideIn {
+  from { transform: translateY(-16px) scale(0.97); opacity: 0; }
+  to   { transform: translateY(0) scale(1); opacity: 1; }
+}
+
 /* ── Viewer / editor area ── */
 .md-viewer {
   flex: 1;
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: auto;        /* allow horizontal scroll for wide tables */
   background: #FDF6EC;
   color: #2c2c2c;
   line-height: 1.7;
+  min-height: 0;
 }
 
 .md-viewer::-webkit-scrollbar { width: 10px; }
@@ -208,6 +309,7 @@
 
 .markdown-content {
   max-width: 100%;
+  min-width: 0;
 }
 
 /* ── Chunk visualization ── */
@@ -232,7 +334,6 @@
   border-bottom: 1px solid rgba(139, 69, 19, 0.12);
 }
 
-/* ── Chunk badge — much more readable ── */
 .chunk-badge {
   display: inline-flex;
   align-items: center;
@@ -276,7 +377,6 @@
   color: rgba(255, 255, 255, 0.8);
 }
 
-/* Chunk edit button — same style as md-edit-btn */
 .chunk-edit-btn {
   display: inline-flex;
   align-items: center;
@@ -315,7 +415,6 @@
 }
 
 /* ── Markdown typography ── */
-
 .markdown-content h1,
 .markdown-content h2,
 .markdown-content h3,
@@ -395,7 +494,6 @@
 
 .markdown-content blockquote p { margin: 0; }
 
-/* ── Inline code — readable dark bg ── */
 .markdown-content code {
   background: #3a1f0d;
   color: #F5DEB3;
@@ -405,7 +503,6 @@
   font-size: 0.88em;
 }
 
-/* ── Code blocks ── */
 .markdown-content pre {
   background: #2c1a0e;
   color: #F5DEB3;
@@ -437,9 +534,9 @@
   margin: 0.5em 0;
 }
 
-/* ── Tables ── */
 .markdown-content table {
-  width: 100%;
+  width: max-content;      /* grows with content instead of being clipped */
+  min-width: 100%;         /* still fills the container when content is narrow */
   border-collapse: collapse;
   margin: 1em 0;
   font-size: 0.92em;

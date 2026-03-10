@@ -1,3 +1,7 @@
+/* ============================================
+   Toast.css
+   ============================================ */
+
 .toast {
   position: fixed;
   top: 24px;
@@ -6,23 +10,36 @@
   z-index: 10000;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 16px 24px;
-  background: linear-gradient(135deg, rgba(91, 46, 10, 0.98) 0%, rgba(139, 69, 19, 0.98) 100%);
-  backdrop-filter: blur(20px);
-  border-radius: 8px;
-  box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.35);
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  color: white;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 20px;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  border: 2px solid rgba(255, 255, 255, 0.25);
   font-weight: 600;
-  font-size: 14px;
+  font-size: 13px;
   letter-spacing: 0.3px;
+  min-width: 260px;
+  max-width: 440px;
   animation: toastSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: 'Work Sans', Helvetica, Arial, sans-serif;
+}
+
+/* Success: warm brown theme */
+.toast--success {
+  background: linear-gradient(135deg, rgba(59, 26, 5, 0.97) 0%, rgba(139, 69, 19, 0.97) 100%);
+  color: white;
+}
+
+/* Error: red */
+.toast--error {
+  background: linear-gradient(135deg, rgba(140, 20, 0, 0.97) 0%, rgba(200, 40, 10, 0.97) 100%);
+  color: white;
 }
 
 @keyframes toastSlideIn {
   from {
-    transform: translateX(-50%) translateY(-100px);
+    transform: translateX(-50%) translateY(-80px);
     opacity: 0;
   }
   to {
@@ -31,5 +48,45 @@
   }
 }
 
-.toast-icon { font-size: 20px; }
-.toast-message { line-height: 1.4; }
+.toast-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+}
+
+.toast-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.toast-message {
+  line-height: 1.4;
+  font-size: 13px;
+}
+
+.toast-close {
+  background: rgba(255, 255, 255, 0.15);
+  border: none;
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  flex-shrink: 0;
+  font-family: inherit;
+  padding: 0;
+}
+
+.toast-close:hover {
+  background: rgba(255, 255, 255, 0.28);
+  color: white;
+  transform: scale(1.1);
+}

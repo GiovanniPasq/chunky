@@ -3,7 +3,6 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Chunk } from '../../types'
 import ChunkEditModal from '../chunks/ChunkEditModal'
-import Toast from './Toast'
 import './MarkdownViewer.css'
 
 interface Props {
@@ -17,7 +16,11 @@ interface Props {
   chunkVisualizationEnabled?: boolean
   onChunkEdit: (index: number, content: string) => void
   onSaveMarkdown: (content: string) => void
+  onSaveChunks: () => void
+  onDeleteMarkdown: () => void
   savingMd: boolean
+  savingChunks: boolean
+  chunksReady: boolean
 }
 
 const CHUNK_COLORS = [
@@ -28,30 +31,28 @@ const CHUNK_COLORS = [
 ]
 
 const CHUNK_BORDER_COLORS = [
-  '#8B4513', '#3D6B27', '#CC2200',
-  '#B48C3C', '#1E5A8C', '#D2691E',
-  '#5A3278', '#146E64', '#A03C1E',
-  '#3C783C',
+  '#8B4513', '#3D6B27', '#CC2200', '#B48C3C', '#1E5A8C',
+  '#D2691E', '#5A3278', '#146E64', '#A03C1E', '#3C783C',
 ]
 
 export default function MarkdownViewer({
   content, scale = 1.0, onScaleChange, padding = 20, onPaddingChange,
   scrollSyncEnabled = true, chunks, chunkVisualizationEnabled = false,
-  onChunkEdit, onSaveMarkdown, savingMd
+  onChunkEdit, onSaveMarkdown, onSaveChunks, onDeleteMarkdown,
+  savingMd, savingChunks, chunksReady,
 }: Props) {
   const [editMode, setEditMode] = useState(false)
   const [editContent, setEditContent] = useState(content)
   const [editingChunkIndex, setEditingChunkIndex] = useState<number | null>(null)
-  const [toast, setToast] = useState<string | null>(null)
+  const [showReconvertConfirm, setShowReconvertConfirm] = useState(false)
 
   const containerRef = useRef<HTMLDivElement>(null)
   const isScrollingRef = useRef(false)
   const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout>>()
   const rafRef = useRef<number>()
-  // Store scroll position as a ratio so it survives edit mode toggle
   const savedScrollRatioRef = useRef<number>(0)
 
-  // Sync editContent when content prop changes (doc switch)
+  // Sync editContent when content changes (doc switch)
   useEffect(() => {
     setEditContent(content)
     setEditMode(false)
@@ -65,67 +66,51 @@ export default function MarkdownViewer({
     }
   }, [chunkVisualizationEnabled])
 
-  const showToast = (msg: string) => {
-    setToast(msg)
-    setTimeout(() => setToast(null), 3000)
+  const saveScrollRatio = () => {
+    if (!containerRef.current) return
+    const el = containerRef.current
+    const max = el.scrollHeight - el.clientHeight
+    savedScrollRatioRef.current = max > 0 ? el.scrollTop / max : 0
   }
 
-  // ── Enter edit mode: save scroll ratio ──────────────────────────────────
-  const handleEnterEdit = () => {
-    if (containerRef.current) {
+  const restoreScrollRatio = () => {
+    requestAnimationFrame(() => {
+      if (!containerRef.current) return
       const el = containerRef.current
       const max = el.scrollHeight - el.clientHeight
-      savedScrollRatioRef.current = max > 0 ? el.scrollTop / max : 0
-    }
+      if (max > 0) el.scrollTop = savedScrollRatioRef.current * max
+    })
+  }
+
+  const handleEnterEdit = () => {
+    saveScrollRatio()
     setEditMode(true)
   }
 
-  // ── After edit mode renders, restore scroll ──────────────────────────────
-  useEffect(() => {
-    if (!editMode || !containerRef.current) return
-    const el = containerRef.current
-    // Use rAF to wait for textarea render
-    requestAnimationFrame(() => {
-      const max = el.scrollHeight - el.clientHeight
-      if (max > 0) el.scrollTop = savedScrollRatioRef.current * max
-    })
-  }, [editMode])
-
-  // ── After leaving edit mode, restore scroll ──────────────────────────────
-  useEffect(() => {
-    if (editMode || !containerRef.current) return
-    const el = containerRef.current
-    requestAnimationFrame(() => {
-      const max = el.scrollHeight - el.clientHeight
-      if (max > 0) el.scrollTop = savedScrollRatioRef.current * max
-    })
-  }, [editMode])
+  useEffect(() => { if (editMode) restoreScrollRatio() }, [editMode])
+  useEffect(() => { if (!editMode) restoreScrollRatio() }, [editMode])
 
   const handleSaveMd = async () => {
-    if (containerRef.current) {
-      const el = containerRef.current
-      const max = el.scrollHeight - el.clientHeight
-      savedScrollRatioRef.current = max > 0 ? el.scrollTop / max : 0
-    }
+    saveScrollRatio()
     await onSaveMarkdown(editContent)
     setEditMode(false)
-    showToast('✅ Markdown saved')
   }
 
   const handleCancelEdit = () => {
-    if (containerRef.current) {
-      const el = containerRef.current
-      const max = el.scrollHeight - el.clientHeight
-      savedScrollRatioRef.current = max > 0 ? el.scrollTop / max : 0
-    }
+    saveScrollRatio()
     setEditContent(content)
     setEditMode(false)
+  }
+
+  const handleReconvert = () => {
+    setShowReconvertConfirm(false)
+    onDeleteMarkdown()
   }
 
   const getColor = (i: number) => CHUNK_COLORS[i % CHUNK_COLORS.length]
   const getBorderColor = (i: number) => CHUNK_BORDER_COLORS[i % CHUNK_BORDER_COLORS.length]
 
-  // ── Scroll sync ─────────────────────────────────────────────────────────
+  // ── Scroll sync ──────────────────────────────────────────────
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     if (isScrollingRef.current || !scrollSyncEnabled) return
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
@@ -134,7 +119,6 @@ export default function MarkdownViewer({
       const maxScroll = el.scrollHeight - el.clientHeight
       if (maxScroll <= 0) return
       const pct = Math.min(1, Math.max(0, el.scrollTop / maxScroll))
-      // Update saved ratio too so edit mode toggle preserves position
       savedScrollRatioRef.current = pct
       window.dispatchEvent(new CustomEvent('viewer-scroll', {
         detail: { source: 'markdown', percentage: pct }
@@ -165,8 +149,7 @@ export default function MarkdownViewer({
       const el = containerRef.current
       const maxScroll = el.scrollHeight - el.clientHeight
       if (maxScroll <= 0) { isScrollingRef.current = false; return }
-      const target = Math.round(Math.min(1, Math.max(0, ev.detail.percentage)) * maxScroll)
-      el.scrollTo({ top: target, behavior: 'instant' })
+      el.scrollTo({ top: Math.round(Math.min(1, Math.max(0, ev.detail.percentage)) * maxScroll), behavior: 'instant' })
       savedScrollRatioRef.current = ev.detail.percentage
       scrollTimeoutRef.current = setTimeout(() => { isScrollingRef.current = false }, 50)
     }
@@ -174,7 +157,7 @@ export default function MarkdownViewer({
     return () => window.removeEventListener('viewer-scroll', onExtScroll)
   }, [scrollSyncEnabled])
 
-  // ── Render ───────────────────────────────────────────────────────────────
+  // ── Render ───────────────────────────────────────────────────
   const renderChunks = () => {
     if (!chunks?.length || !chunkVisualizationEnabled) {
       return <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
@@ -214,7 +197,18 @@ export default function MarkdownViewer({
 
   return (
     <div className="md-viewer-wrapper">
-      {toast && <Toast message={toast} onClose={() => setToast(null)} />}
+      {/* Reconvert confirmation dialog */}
+      {showReconvertConfirm && (
+        <div className="reconvert-confirm-overlay" onClick={() => setShowReconvertConfirm(false)}>
+          <div className="reconvert-confirm" onClick={e => e.stopPropagation()}>
+            <p>This will delete the current Markdown so you can reconvert it. Continue?</p>
+            <div className="reconvert-confirm-actions">
+              <button className="btn-secondary" onClick={() => setShowReconvertConfirm(false)}>Cancel</button>
+              <button className="btn-danger" onClick={handleReconvert}>Delete &amp; Reconvert</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {editingChunkIndex !== null && chunks && (
         <ChunkEditModal
@@ -229,34 +223,60 @@ export default function MarkdownViewer({
 
       {/* Controls bar */}
       <div className="md-controls">
-        <div className="md-zoom">
-          <button onClick={() => onScaleChange(Math.max(0.5, scale - 0.1))} disabled={scale <= 0.5}>−</button>
-          <span>{(scale * 100).toFixed(0)}%</span>
-          <button onClick={() => onScaleChange(Math.min(3, scale + 0.1))} disabled={scale >= 3}>+</button>
-        </div>
-
-        <div className="padding-control">
-          <label>Padding: {padding}px</label>
-          <input type="range" min={0} max={100} value={padding} onChange={e => onPaddingChange(+e.target.value)} />
-        </div>
-
-        {/* Edit actions — hidden when chunk visualization is active */}
-        {!chunkVisualizationEnabled && (
-          <div className="md-edit-actions">
-            {!editMode ? (
-              <button className="md-edit-btn" onClick={handleEnterEdit} title="Edit markdown">
-                ✏️ Edit
-              </button>
-            ) : (
-              <>
-                <button className="md-save-btn" onClick={handleSaveMd} disabled={savingMd}>
-                  {savingMd ? '⏳ Saving…' : '💾 Save'}
-                </button>
-                <button className="md-cancel-btn" onClick={handleCancelEdit}>✕ Cancel</button>
-              </>
-            )}
+        <div className="md-controls-left">
+          <div className="md-zoom">
+            <button onClick={() => onScaleChange(Math.max(0.5, scale - 0.1))} disabled={scale <= 0.5}>−</button>
+            <span>{(scale * 100).toFixed(0)}%</span>
+            <button onClick={() => onScaleChange(Math.min(3, scale + 0.1))} disabled={scale >= 3}>+</button>
           </div>
-        )}
+
+          <div className="padding-control">
+            <label>Padding: {padding}px</label>
+            <input type="range" min={0} max={100} value={padding} onChange={e => onPaddingChange(+e.target.value)} />
+          </div>
+        </div>
+
+        <div className="md-controls-right">
+          {/* Save Chunks — only visible when chunk visualization is active */}
+          {chunkVisualizationEnabled && (
+            <button
+              className="md-action-btn save-chunks"
+              onClick={onSaveChunks}
+              disabled={!chunksReady || savingChunks}
+              title="Save chunks to disk"
+            >
+              <span>{savingChunks ? '⏳' : '💾'}</span>
+              {savingChunks ? 'Saving…' : 'Save Chunks'}
+            </button>
+          )}
+
+          {/* Reconvert */}
+          <button
+            className="md-action-btn reconvert"
+            onClick={() => setShowReconvertConfirm(true)}
+            title="Delete Markdown and reconvert"
+          >
+            <span>🔄</span> Reconvert
+          </button>
+
+          {/* Edit / Save / Cancel — hidden when chunk visualization is active */}
+          {!chunkVisualizationEnabled && (
+            <div className="md-edit-actions">
+              {!editMode ? (
+                <button className="md-action-btn edit" onClick={handleEnterEdit}>
+                  ✏️ Edit
+                </button>
+              ) : (
+                <>
+                  <button className="md-action-btn save-md" onClick={handleSaveMd} disabled={savingMd}>
+                    {savingMd ? '⏳ Saving…' : '💾 Save'}
+                  </button>
+                  <button className="md-action-btn cancel" onClick={handleCancelEdit}>✕ Cancel</button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Viewer / editor */}
@@ -265,7 +285,7 @@ export default function MarkdownViewer({
         ref={containerRef}
         onScroll={handleScroll}
         onMouseUp={handleMouseUp}
-        style={{ fontSize: `${(11 * scale).toFixed(1)}pt`, position: 'relative' }}
+        style={{ fontSize: `${(11 * scale).toFixed(1)}pt` }}
       >
         {content ? (
           editMode ? (

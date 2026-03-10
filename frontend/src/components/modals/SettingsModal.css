@@ -1,0 +1,347 @@
+/* ============================================
+   SettingsModal.css
+   ============================================ */
+
+/* ── Overlay ── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(circle at center, rgba(139, 69, 19, 0.2), rgba(0, 0, 0, 0.7));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(12px);
+  animation: smFadeIn 0.3s ease-out;
+}
+
+@keyframes smFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ── Modal box ── */
+/* Uses .settings-modal (NOT .modal) to avoid collision with ChunkEditModal */
+.settings-modal {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 248, 235, 0.97) 100%);
+  backdrop-filter: blur(20px);
+  border-radius: 16px;
+  width: min(560px, 95vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 30px 80px rgba(139, 69, 19, 0.28), 0 8px 24px rgba(0, 0, 0, 0.1);
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  animation: smSlideIn 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes smSlideIn {
+  from { transform: translateY(-40px) scale(0.96); opacity: 0; }
+  to   { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+/* ── Header ── */
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 18px 24px 14px;
+  background: linear-gradient(135deg, rgba(139, 69, 19, 0.08) 0%, rgba(210, 105, 30, 0.08) 100%);
+  border-bottom: 2px solid #F0E6D6;
+  flex-shrink: 0;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: -0.5px;
+}
+
+/* ── Close button ── */
+.modal-close {
+  background: linear-gradient(135deg, #CC2200 0%, #A81B00 100%);
+  border: none;
+  font-size: 15px;
+  cursor: pointer;
+  color: white;
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0px 2px 8px rgba(204, 34, 0, 0.3);
+  flex-shrink: 0;
+  font-family: inherit;
+}
+
+.modal-close:hover {
+  transform: rotate(90deg) scale(1.1);
+  box-shadow: 0px 1px 10px 0px rgba(204, 34, 0, 0.45);
+}
+
+/* ── Body — scrollable ── */
+.modal-body {
+  padding: 18px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.modal-body::-webkit-scrollbar { width: 6px; }
+.modal-body::-webkit-scrollbar-track { background: transparent; }
+.modal-body::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #8B4513 0%, #D2691E 100%);
+  border-radius: 8px;
+}
+
+/* ── Section title ── */
+.modal-section-title {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #9A7050;
+  margin-bottom: -4px;
+}
+
+/* ── Divider ── */
+.modal-divider {
+  border: none;
+  border-top: 2px solid #F0E6D6;
+  margin: 2px 0;
+}
+
+/* ── Form group ── */
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.form-group label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #7A5035;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.label-hint {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #B08060;
+}
+
+.form-group select,
+.form-group input[type="number"],
+.form-group input[type="text"],
+.form-group input[type="password"] {
+  background: white;
+  border: 2px solid #E8D5C0;
+  border-radius: 8px;
+  color: #3B1A05;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  outline: none;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: inherit;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.form-group select:hover,
+.form-group input:not(:disabled):hover {
+  border-color: rgba(139, 69, 19, 0.4);
+}
+
+.form-group select:focus,
+.form-group input:focus {
+  border-color: #8B4513;
+  box-shadow: 0 0 0 3px rgba(139, 69, 19, 0.1);
+}
+
+.form-group select:disabled,
+.form-group input:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: #F5EDE0;
+}
+
+.form-group small {
+  font-size: 11px;
+  color: #9A7050;
+  line-height: 1.5;
+}
+
+.size-hint {
+  font-size: 11px;
+  color: #B08060;
+  font-style: italic;
+}
+
+/* ── Side-by-side row (chunk size + overlap) ── */
+.form-row {
+  display: flex;
+  gap: 12px;
+}
+
+.form-row .form-group {
+  flex: 1;
+}
+
+/* ── Checkbox group ── */
+.checkbox-group label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  font-size: 13px;
+  color: #5C2E0A;
+  cursor: pointer;
+}
+
+/* ── Converter options ── */
+.converter-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.converter-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 10px 14px;
+  border: 2px solid #E8D5C0;             /* warm border, not generic gray */
+  border-radius: 8px;
+  background: white;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  font-family: inherit;
+}
+
+.converter-option:hover {
+  border-color: rgba(139, 69, 19, 0.45);
+  background: rgba(139, 69, 19, 0.03);
+}
+
+.converter-option.selected {
+  border-color: #8B4513;                  /* brown, not indigo */
+  background: linear-gradient(135deg, rgba(139, 69, 19, 0.07) 0%, rgba(210, 105, 30, 0.07) 100%);
+  box-shadow: 0 0 0 1px rgba(139, 69, 19, 0.15);
+}
+
+.converter-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #3B1A05;
+}
+
+.converter-option.selected .converter-label {
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.converter-desc {
+  font-size: 11px;
+  color: #9A7050;
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+/* ── VLM settings block ── */
+.vlm-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, rgba(139, 69, 19, 0.05) 0%, rgba(210, 105, 30, 0.05) 100%);
+  border-radius: 8px;
+  border: 1.5px solid rgba(139, 69, 19, 0.15);
+}
+
+/* ── Footer ── */
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 24px;
+  border-top: 2px solid #EDD9C0;
+  background-color: #FDF6EC;
+  flex-shrink: 0;
+}
+
+/* ── Shared buttons (also used by ChunkEditModal) ── */
+.btn-secondary {
+  background: white;
+  border: 2px solid #E8D5C0;
+  border-radius: 8px;
+  color: #7A5035;
+  padding: 9px 22px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: inherit;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.btn-secondary:hover {
+  background: rgba(139, 69, 19, 0.05);
+  border-color: rgba(139, 69, 19, 0.3);
+  color: #5C2E0A;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  border: none;
+  border-radius: 8px;
+  color: white;
+  padding: 9px 22px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.3);
+  font-family: inherit;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0px 4px 12px rgba(139, 69, 19, 0.45);
+}
+
+.btn-primary:active {
+  transform: translateY(-1px);
+  box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.3);
+}

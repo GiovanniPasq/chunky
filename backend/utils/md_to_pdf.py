@@ -1,22 +1,27 @@
 #!/usr/bin/env python3
 """
-Utility to convert Markdown files to PDF
-Converts all .md files from docs/mds/ to PDF in docs/pdfs/
+Utility script: convert all Markdown files in docs/mds/ to PDF in docs/pdfs/.
+
+Usage:
+    python -m backend.utils.md_to_pdf
+
+Dependencies:
+    pip install markdown weasyprint
 """
 
-import os
+from __future__ import annotations
+
 import sys
 from pathlib import Path
+
 import markdown
-from weasyprint import HTML, CSS
+from weasyprint import CSS, HTML
 from weasyprint.text.fonts import FontConfiguration
 
-# Directories
 MDS_DIR = Path("docs/mds")
 PDFS_DIR = Path("docs/pdfs")
 
-# CSS styling for better PDF appearance
-CSS_STYLE = """
+_CSS = """
 @page {
     size: A4;
     margin: 2cm;
@@ -133,105 +138,66 @@ img {
 """
 
 
-def markdown_to_html(md_content):
-    """Convert markdown content to HTML"""
-    md = markdown.Markdown(extensions=[
-        'extra',      # Tables, fenced code blocks, etc.
-        'codehilite', # Syntax highlighting
-        'toc',        # Table of contents
-        'nl2br',      # New line to break
-    ])
-
-    html_body = md.convert(md_content)
-
-    # Wrap in a complete HTML document
-    html = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <title>Document</title>
-    </head>
-    <body>
-        {html_body}
-    </body>
-    </html>
-    """
-
-    return html
+def _md_to_html(md_content: str) -> str:
+    """Convert a Markdown string to a complete HTML document."""
+    md = markdown.Markdown(
+        extensions=["extra", "codehilite", "toc", "nl2br"],
+    )
+    body = md.convert(md_content)
+    return (
+        "<!DOCTYPE html><html><head>"
+        '<meta charset="utf-8"><title>Document</title>'
+        f"</head><body>{body}</body></html>"
+    )
 
 
-def convert_md_to_pdf(md_file_path, pdf_file_path):
-    """Convert a single markdown file to PDF"""
+def _convert_file(md_path: Path, pdf_path: Path) -> bool:
+    """Convert a single Markdown file to PDF. Returns True on success."""
     try:
-        # Read markdown file
-        with open(md_file_path, 'r', encoding='utf-8') as f:
-            md_content = f.read()
+        md_content = md_path.read_text(encoding="utf-8")
+        html_content = _md_to_html(md_content)
 
-        # Convert to HTML
-        html_content = markdown_to_html(md_content)
-
-        # Create PDF
         font_config = FontConfiguration()
-        html = HTML(string=html_content)
-        css = CSS(string=CSS_STYLE, font_config=font_config)
-
-        html.write_pdf(
-            pdf_file_path,
-            stylesheets=[css],
-            font_config=font_config
+        HTML(string=html_content).write_pdf(
+            pdf_path,
+            stylesheets=[CSS(string=_CSS, font_config=font_config)],
+            font_config=font_config,
         )
-
         return True
-    except Exception as e:
-        print(f"Error converting {md_file_path}: {e}")
+    except Exception as exc:
+        print(f"  ERROR: {exc}")
         return False
 
 
-def main():
-    """Main function to convert all markdown files to PDF"""
-
-    # Check if directories exist
+def main() -> int:
     if not MDS_DIR.exists():
-        print(f"Error: Directory {MDS_DIR} does not exist!")
+        print(f"Error: source directory '{MDS_DIR}' does not exist.")
         return 1
 
-    # Create PDFs directory if it doesn't exist
     PDFS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Find all markdown files
-    md_files = list(MDS_DIR.glob("*.md"))
-
+    md_files = sorted(MDS_DIR.glob("*.md"))
     if not md_files:
-        print(f"No markdown files found in {MDS_DIR}")
+        print(f"No Markdown files found in '{MDS_DIR}'.")
         return 0
 
-    print(f"Found {len(md_files)} markdown file(s)")
-    print("=" * 60)
+    print(f"Converting {len(md_files)} file(s)…")
+    print("─" * 60)
 
-    converted = 0
-    failed = 0
-
+    converted = failed = 0
     for md_file in md_files:
-        # Generate PDF filename
-        pdf_filename = md_file.stem + ".pdf"
-        pdf_file_path = PDFS_DIR / pdf_filename
-
-        print(f"Converting: {md_file.name} -> {pdf_filename}... ", end='')
-
-        if convert_md_to_pdf(md_file, pdf_file_path):
-            print("✓ Success")
+        pdf_path = PDFS_DIR / f"{md_file.stem}.pdf"
+        print(f"  {md_file.name}  →  {pdf_path.name} … ", end="", flush=True)
+        if _convert_file(md_file, pdf_path):
+            print("✓")
             converted += 1
         else:
-            print("✗ Failed")
+            print("✗")
             failed += 1
 
-    print("=" * 60)
-    print(f"Conversion complete!")
-    print(f"  Successfully converted: {converted}")
-    print(f"  Failed: {failed}")
-    print(f"  PDFs saved in: {PDFS_DIR.absolute()}")
-
+    print("─" * 60)
+    print(f"Done — converted: {converted}, failed: {failed}")
+    print(f"PDFs saved in: {PDFS_DIR.resolve()}")
     return 0 if failed == 0 else 1
 
 
