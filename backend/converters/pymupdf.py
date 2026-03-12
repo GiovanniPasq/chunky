@@ -5,10 +5,14 @@ PDF-to-Markdown converter backed by pymupdf4llm.
 from pathlib import Path
 
 import pymupdf4llm
-
+from backend.registry import register_converter
 from .base import PDFConverter
 
-
+@register_converter(
+    name="pymupdf",
+    label="PyMuPDF",
+    description="Fast, lightweight. Best for standard digital PDFs with selectable text.",
+)
 class PyMuPDFConverter(PDFConverter):
     """Fast, lightweight converter using pymupdf4llm.
 

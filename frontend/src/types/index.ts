@@ -1,6 +1,18 @@
 export interface Chunk {
   index: number
   content: string
+  /** Cleaned/normalised text — populated post-enrichment */
+  cleaned_chunk: string
+  /** Auto-generated title — populated post-enrichment */
+  title: string
+  /** Surrounding document context — populated post-enrichment */
+  context: string
+  /** One-sentence summary — populated post-enrichment */
+  summary: string
+  /** Extracted keywords — populated post-enrichment */
+  keywords: string[]
+  /** Questions this chunk could answer — populated post-enrichment */
+  questions: string[]
   metadata: Record<string, unknown>
   start: number
   end: number
@@ -13,10 +25,14 @@ export interface DocumentData {
   has_markdown: boolean
 }
 
-// DocumentInfo and DocumentData are identical shapes — one alias is enough
 export type DocumentInfo = DocumentData
 
-export type ConverterType = 'pymupdf' | 'docling' | 'markitdown' | 'vlm'
+// ---------------------------------------------------------------------------
+// Converter types — kept in sync with backend ConverterType enum.
+// The canonical list now comes from GET /api/capabilities; this union type
+// is kept as a fallback / TS convenience.
+// ---------------------------------------------------------------------------
+export type ConverterType = string   // open string so new converters need no FE change
 
 export interface VLMSettings {
   model?: string
@@ -24,11 +40,45 @@ export interface VLMSettings {
   api_key?: string
 }
 
+// ---------------------------------------------------------------------------
+// Splitter types — open strings; the authoritative list comes from
+// GET /api/capabilities so new strategies appear automatically.
+// ---------------------------------------------------------------------------
+export type SplitterType = string
+export type SplitterLibrary = string
+
 export interface ChunkSettings {
-  splitterType: 'token' | 'recursive' | 'character' | 'markdown'
+  splitterType: SplitterType
+  splitterLibrary: SplitterLibrary
   chunkSize: number
   chunkOverlap: number
   enableMarkdownSizing: boolean
   converter: ConverterType
   vlm?: VLMSettings
+}
+
+// ---------------------------------------------------------------------------
+// Capabilities — shape returned by GET /api/capabilities
+// ---------------------------------------------------------------------------
+export interface CapabilityStrategy {
+  strategy: string
+  label: string
+  description: string
+}
+
+export interface CapabilityLibrary {
+  library: string
+  label: string
+  strategies: CapabilityStrategy[]
+}
+
+export interface CapabilityConverter {
+  name: string
+  label: string
+  description: string
+}
+
+export interface Capabilities {
+  splitters: CapabilityLibrary[]
+  converters: CapabilityConverter[]
 }

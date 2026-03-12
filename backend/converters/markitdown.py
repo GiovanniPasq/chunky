@@ -3,10 +3,14 @@ PDF-to-Markdown converter backed by Microsoft MarkItDown.
 """
 
 from pathlib import Path
-
+from backend.registry import register_converter
 from .base import PDFConverter
 
-
+@register_converter(
+    name="markitdown",
+    label="MarkItDown",
+    description="Microsoft MarkItDown. Simple and reliable for standard PDFs.",
+)
 class MarkItDownConverter(PDFConverter):
     """Broad-format converter using Microsoft's MarkItDown library.
 

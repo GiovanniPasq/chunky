@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.routers.documents_router import router as documents_router
 from backend.routers.chunks_router import router as chunks_router
+from backend.routers.capabilities_router import router as capabilities_router
 
 ALLOWED_ORIGINS = [
     "http://localhost:5173",  # Vite dev server
@@ -42,6 +43,7 @@ def create_app() -> FastAPI:
 
     app.include_router(documents_router)
     app.include_router(chunks_router)
+    app.include_router(capabilities_router)
 
     @app.get("/", tags=["health"])
     async def health_check():

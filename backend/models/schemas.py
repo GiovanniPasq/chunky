@@ -24,10 +24,44 @@ class ConverterType(str, Enum):
 
 
 class SplitterType(str, Enum):
+    """Splitting strategy.
+
+    Strategies shared by both LangChain and Chonkie:
+        token, recursive, character, markdown
+
+    Chonkie-only strategies (ignored by LangChainSplitter):
+        sentence   → SentenceChunker
+        fast       → FastChunker
+        semantic   → SemanticChunker  (requires chonkie[semantic])
+        late       → LateChunker      (requires chonkie[st])
+        neural     → NeuralChunker    (requires chonkie[neural])
+        slumber    → SlumberChunker   (requires chonkie[genie])
+        table      → TableChunker
+        code       → CodeChunker
+    """
+
+    # Shared
     token = "token"
     recursive = "recursive"
     character = "character"
     markdown = "markdown"
+
+    # Chonkie-only
+    sentence = "sentence"
+    fast = "fast"
+    semantic = "semantic"
+    late = "late"
+    neural = "neural"
+    slumber = "slumber"
+    table = "table"
+    code = "code"
+
+
+class SplitterLibrary(str, Enum):
+    """Underlying splitting library to use."""
+
+    langchain = "langchain"
+    chonkie = "chonkie"
 
 
 # ---------------------------------------------------------------------------
@@ -36,27 +70,11 @@ class SplitterType(str, Enum):
 
 
 class VLMSettings(BaseModel):
-    """Optional overrides for the VLM converter.
+    """Optional overrides for the VLM converter."""
 
-    All fields are optional; omitted fields fall back to VLMConverter defaults
-    (Ollama running locally with llama3.2-vision).
-    """
-
-    model: Optional[str] = Field(
-        default=None,
-        description="Model identifier (e.g. 'llama3.2-vision', 'gpt-4o', 'gemini-2.5-flash').",
-    )
-    base_url: Optional[str] = Field(
-        default=None,
-        description=(
-            "OpenAI-compatible API base URL. "
-            "Defaults to http://localhost:11434/v1 (Ollama)."
-        ),
-    )
-    api_key: Optional[str] = Field(
-        default=None,
-        description="API key. Any non-empty string works for Ollama.",
-    )
+    model: Optional[str] = Field(default=None)
+    base_url: Optional[str] = Field(default=None)
+    api_key: Optional[str] = Field(default=None)
 
 
 # ---------------------------------------------------------------------------
@@ -65,16 +83,8 @@ class VLMSettings(BaseModel):
 
 
 class ConvertRequest(BaseModel):
-    """Body for POST /api/convert/{filename}."""
-
-    converter: ConverterType = Field(
-        default=ConverterType.pymupdf,
-        description="Conversion engine to use.",
-    )
-    vlm: Optional[VLMSettings] = Field(
-        default=None,
-        description="VLM-specific settings. Ignored unless converter == 'vlm'.",
-    )
+    converter: ConverterType = Field(default=ConverterType.pymupdf)
+    vlm: Optional[VLMSettings] = Field(default=None)
 
 
 class DocumentInfo(BaseModel):
@@ -116,7 +126,7 @@ class DeleteResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Chunk endpoints
+# Chunk endpoints — request
 # ---------------------------------------------------------------------------
 
 
@@ -127,6 +137,10 @@ class ChunkRequest(BaseModel):
     splitter_type: SplitterType = Field(
         default=SplitterType.token,
         description="Splitting strategy.",
+    )
+    splitter_library: SplitterLibrary = Field(
+        default=SplitterLibrary.langchain,
+        description="Underlying splitting library to use.",
     )
     chunk_size: int = Field(default=512, gt=0, description="Maximum chunk size.")
     chunk_overlap: int = Field(default=51, ge=0, description="Overlap between chunks.")
@@ -147,9 +161,20 @@ class ChunkRequest(BaseModel):
         return v
 
 
+# ---------------------------------------------------------------------------
+# Chunk item — enriched format
+# ---------------------------------------------------------------------------
+
+
 class ChunkItem(BaseModel):
     index: int
     content: str
+    cleaned_chunk: str = Field(default="")
+    title: str = Field(default="")
+    context: str = Field(default="")
+    summary: str = Field(default="")
+    keywords: List[str] = Field(default_factory=list)
+    questions: List[str] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
     start: int = 0
     end: int = 0
@@ -159,6 +184,12 @@ class ChunkResponse(BaseModel):
     chunks: List[ChunkItem]
     total_chunks: int
     splitter_type: str
+    splitter_library: str
+
+
+# ---------------------------------------------------------------------------
+# Chunk storage endpoints
+# ---------------------------------------------------------------------------
 
 
 class SaveChunksRequest(BaseModel):

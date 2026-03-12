@@ -8,13 +8,6 @@ import { useDocument, useChunks } from './hooks/useDocument'
 import PDFViewer from './components/viewer/PDFViewer'
 import './App.css'
 
-const CONVERTER_LABELS: Record<string, string> = {
-  pymupdf: 'PyMuPDF',
-  docling: 'Docling',
-  markitdown: 'MarkItDown',
-  vlm: 'VLM',
-}
-
 interface ToastState {
   message: string
   type: 'success' | 'error'
@@ -37,12 +30,14 @@ export default function App() {
   // ── Hooks ────────────────────────────────────────────────────
   const {
     documents, selectedDoc, documentData, loading, uploading, converting, savingMd,
-    selectDocument, uploadFiles, deleteDocuments, convertToMarkdown, saveMarkdown, deleteMarkdown,
+    selectDocument, uploadFiles, deleteDocuments,
+    convertToMarkdown, cancelConversion,
+    saveMarkdown, deleteMarkdown,
   } = useDocument(toastCallbacks)
 
   const {
-    chunks, settings, saving: savingChunks,
-    applySettings, editChunk, saveChunks,
+    chunks, settings, saving: savingChunks, chunking,
+    applySettings, editChunk, saveChunks, cancelChunking,
   } = useChunks(documentData, selectedDoc, toastCallbacks)
 
   // ── UI state ─────────────────────────────────────────────────
@@ -77,6 +72,8 @@ export default function App() {
 
   const handleConvert = () =>
     convertToMarkdown(settings.converter, settings.vlm)
+
+  const converterLabel = settings.converter ?? 'Convert'
 
   return (
     <div className="app">
@@ -152,6 +149,8 @@ export default function App() {
                     savingMd={savingMd}
                     savingChunks={savingChunks}
                     chunksReady={!!chunks}
+                    chunking={chunking}
+                    onCancelChunking={cancelChunking}
                   />
                 ) : (
                   <div className="md-not-found">
@@ -161,6 +160,9 @@ export default function App() {
                         <h2>Converting…</h2>
                         <p>Please wait while we process your document.</p>
                         <div className="converting-bar" />
+                        <button className="btn-cancel-op" onClick={cancelConversion}>
+                          ✕ Cancel
+                        </button>
                       </>
                     ) : (
                       <>
@@ -168,7 +170,7 @@ export default function App() {
                         <h2>Markdown not found</h2>
                         <p>This document hasn't been converted yet.</p>
                         <button onClick={handleConvert}>
-                          ✨ Convert with {CONVERTER_LABELS[settings.converter]}
+                          ✨ Convert with {converterLabel}
                         </button>
                       </>
                     )}

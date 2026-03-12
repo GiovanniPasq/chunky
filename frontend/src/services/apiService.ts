@@ -1,4 +1,4 @@
-import type { DocumentInfo, Chunk, ChunkSettings } from '../types'
+import type { DocumentInfo, Chunk, ChunkSettings, Capabilities } from '../types'
 
 const BASE = '/api'
 
@@ -26,7 +26,6 @@ export const documentService = {
   async convert(filename: string): Promise<DocumentInfo> {
     const res = await fetch(`${BASE}/convert/${filename}`, { method: 'POST' })
     if (!res.ok) throw new Error('Conversion failed')
-    // reload after convert
     return documentService.get(filename)
   },
 
@@ -46,6 +45,7 @@ export const chunkService = {
       body: JSON.stringify({
         content,
         splitter_type: settings.splitterType,
+        splitter_library: settings.splitterLibrary,
         chunk_size: settings.chunkSize,
         chunk_overlap: settings.chunkOverlap,
         enable_markdown_sizing: settings.enableMarkdownSizing,
@@ -71,5 +71,13 @@ export const chunkService = {
     if (!res.ok) throw new Error('Load failed')
     const data = await res.json()
     return data.chunks
+  },
+}
+
+export const capabilityService = {
+  async get(): Promise<Capabilities> {
+    const res = await fetch(`${BASE}/capabilities`)
+    if (!res.ok) throw new Error('Failed to fetch capabilities')
+    return res.json()
   },
 }

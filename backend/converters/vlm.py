@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 import base64
 from pathlib import Path
-
+from backend.registry import register_converter
 from .base import PDFConverter
 
 # ---------------------------------------------------------------------------
@@ -73,6 +73,14 @@ _RENDER_DPI = 300
 _DPI_SCALE = _RENDER_DPI / 72  # fitz uses 72 DPI as its baseline
 
 
+@register_converter(
+    name="vlm",
+    label="VLM (Vision-Language Model)",
+    description=(
+        "Rasterises each page and sends it to an OpenAI-compatible VLM. "
+        "Best quality for scanned PDFs. Requires a running model endpoint."
+    ),
+)
 class VLMConverter(PDFConverter):
     """PDF-to-Markdown converter using any OpenAI-compatible VLM.
 

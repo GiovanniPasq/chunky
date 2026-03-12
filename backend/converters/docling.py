@@ -3,10 +3,14 @@ PDF-to-Markdown converter backed by Docling.
 """
 
 from pathlib import Path
-
+from backend.registry import register_converter
 from .base import PDFConverter
 
-
+@register_converter(
+    name="docling",
+    label="Docling",
+    description="Layout-aware. Handles multi-column, tables, and complex structures.",
+)
 class DoclingConverter(PDFConverter):
     """Advanced layout-aware converter using the Docling library.
 

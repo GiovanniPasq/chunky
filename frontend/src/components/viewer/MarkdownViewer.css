@@ -582,3 +582,31 @@
   vertical-align: top;
   line-height: 1.6;
 }
+/* ── Cancel buttons for conversion and chunking ── */
+.btn-cancel-op {
+  margin-top: 12px;
+  padding: 8px 20px;
+  background: transparent;
+  border: 1.5px solid rgba(139, 69, 19, 0.4);
+  border-radius: 6px;
+  color: #8B4513;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.btn-cancel-op:hover {
+  background: rgba(139, 69, 19, 0.08);
+  border-color: #8B4513;
+}
+
+.md-action-btn.cancel-chunking {
+  background: transparent;
+  border: 1.5px solid rgba(139, 69, 19, 0.4);
+  color: #8B4513;
+}
+
+.md-action-btn.cancel-chunking:hover {
+  background: rgba(139, 69, 19, 0.08);
+  border-color: #8B4513;
+}

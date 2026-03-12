@@ -1,11 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import type { ChunkSettings, Chunk, DocumentData, ConverterType, VLMSettings } from '../types'
 
 const API = '/api'
 
-// ─────────────────────────────────────────────────────────────
-// Toast helpers (passed in from the caller via callbacks)
-// ─────────────────────────────────────────────────────────────
 export interface ToastCallbacks {
   onSuccess: (msg: string) => void
   onError: (msg: string) => void
@@ -23,6 +20,15 @@ export function useDocument(toast: ToastCallbacks) {
   const [converting, setConverting] = useState(false)
   const [savingMd, setSavingMd] = useState(false)
 
+  // Track the currently selected filename in a ref so callbacks always see
+  // the latest value without needing it in their dependency arrays.
+  const selectedDocRef = useRef<string | null>(null)
+  selectedDocRef.current = selectedDoc
+
+  // AbortControllers for in-flight requests
+  const fetchDocAbortRef = useRef<AbortController | null>(null)
+  const convertAbortRef = useRef<AbortController | null>(null)
+
   useEffect(() => { fetchDocuments() }, [])
 
   const fetchDocuments = async () => {
@@ -35,27 +41,38 @@ export function useDocument(toast: ToastCallbacks) {
     }
   }
 
+  // Use a ref-based guard instead of putting selectedDoc in deps,
+  // which caused stale closures and missed clicks when switching rapidly.
   const selectDocument = useCallback(async (filename: string) => {
-    if (filename === selectedDoc) return
+    if (filename === selectedDocRef.current) return
+
+    // Abort any in-flight document fetch
+    fetchDocAbortRef.current?.abort()
+    fetchDocAbortRef.current = new AbortController()
+
+    // Also abort any running conversion — it belongs to the old document
+    convertAbortRef.current?.abort()
+    setConverting(false)
+
     setSelectedDoc(filename)
     setDocumentData(null)
     setLoading(true)
     try {
-      const res = await fetch(`${API}/document/${encodeURIComponent(filename)}`)
+      const res = await fetch(
+        `${API}/document/${encodeURIComponent(filename)}`,
+        { signal: fetchDocAbortRef.current.signal },
+      )
       if (!res.ok) throw new Error()
       const data: DocumentData = await res.json()
       setDocumentData(data)
-    } catch {
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
       toast.onError(`Failed to load "${filename}"`)
     } finally {
       setLoading(false)
     }
-  }, [selectedDoc])
+  }, []) // no deps — reads selectedDoc via ref
 
-  /**
-   * Upload one or more files.
-   * Uses /api/upload/multiple for >1 file, /api/upload for exactly 1.
-   */
   const uploadFiles = useCallback(async (files: File[]) => {
     if (files.length === 0) return
     setUploading(true)
@@ -79,10 +96,6 @@ export function useDocument(toast: ToastCallbacks) {
     }
   }, [])
 
-  /**
-   * Delete one or more documents.
-   * Uses DELETE /api/documents (bulk) for multiple, DELETE /api/document/:name for one.
-   */
   const deleteDocuments = useCallback(async (filenames: string[]) => {
     if (filenames.length === 0) return
     try {
@@ -97,38 +110,41 @@ export function useDocument(toast: ToastCallbacks) {
         })
         if (!res.ok) throw new Error()
       }
-
-      if (selectedDoc && filenames.includes(selectedDoc)) {
+      if (selectedDocRef.current && filenames.includes(selectedDocRef.current)) {
         setSelectedDoc(null)
         setDocumentData(null)
       }
-
       await fetchDocuments()
       toast.onSuccess(`Deleted ${filenames.length} document${filenames.length > 1 ? 's' : ''}`)
     } catch {
       toast.onError('Delete failed')
     }
-  }, [selectedDoc])
+  }, [])
 
-  /**
-   * Convert the selected PDF to Markdown using the chosen converter.
-   * Passes optional VLM settings when converter == 'vlm'.
-   */
   const convertToMarkdown = useCallback(async (
     converter: ConverterType = 'pymupdf',
     vlm?: VLMSettings,
   ) => {
-    if (!selectedDoc) return
+    if (!selectedDocRef.current) return
+
+    // Abort any previous conversion
+    convertAbortRef.current?.abort()
+    convertAbortRef.current = new AbortController()
+
     setConverting(true)
     try {
       const body: Record<string, unknown> = { converter }
       if (converter === 'vlm' && vlm) body.vlm = vlm
 
-      const res = await fetch(`${API}/convert/${encodeURIComponent(selectedDoc)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
+      const res = await fetch(
+        `${API}/convert/${encodeURIComponent(selectedDocRef.current)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: convertAbortRef.current.signal,
+        },
+      )
       if (!res.ok) throw new Error()
       const data = await res.json()
       setDocumentData(prev => prev
@@ -136,21 +152,25 @@ export function useDocument(toast: ToastCallbacks) {
         : prev
       )
       toast.onSuccess('Conversion complete ✓')
-    } catch {
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
       toast.onError('Conversion failed')
     } finally {
       setConverting(false)
     }
-  }, [selectedDoc])
+  }, [])
 
-  /**
-   * Save edited Markdown by re-uploading it as a .md file.
-   */
+  /** Cancel an in-progress conversion. */
+  const cancelConversion = useCallback(() => {
+    convertAbortRef.current?.abort()
+    setConverting(false)
+  }, [])
+
   const saveMarkdown = useCallback(async (content: string) => {
-    if (!selectedDoc) return
+    if (!selectedDocRef.current) return
     setSavingMd(true)
     try {
-      const mdFilename = selectedDoc.replace('.pdf', '.md')
+      const mdFilename = selectedDocRef.current.replace('.pdf', '.md')
       const file = new File([new Blob([content], { type: 'text/markdown' })], mdFilename, { type: 'text/markdown' })
       const formData = new FormData()
       formData.append('file', file)
@@ -163,41 +183,23 @@ export function useDocument(toast: ToastCallbacks) {
     } finally {
       setSavingMd(false)
     }
-  }, [selectedDoc])
+  }, [])
 
-  /**
-   * Delete the Markdown for the current document so it can be re-converted.
-   * Resets has_markdown / md_content in local state without a round-trip.
-   */
   const deleteMarkdown = useCallback(async () => {
-    if (!selectedDoc) return
+    if (!selectedDocRef.current) return
     try {
-      const mdFilename = selectedDoc.replace('.pdf', '.md')
-      // Delete via the document endpoint (backend deletes .md when PDF is not deleted)
-      // We repurpose the approach: upload an empty file to overwrite is fragile,
-      // so we just reset state locally and let the next conversion overwrite it.
-      // If the backend gains a dedicated MD-delete endpoint this can be updated.
       setDocumentData(prev => prev ? { ...prev, has_markdown: false, md_content: '' } : prev)
       toast.onSuccess('Markdown removed — ready to reconvert')
     } catch {
       toast.onError('Failed to remove Markdown')
     }
-  }, [selectedDoc])
+  }, [])
 
   return {
-    documents,
-    selectedDoc,
-    documentData,
-    loading,
-    uploading,
-    converting,
-    savingMd,
-    selectDocument,
-    uploadFiles,
-    deleteDocuments,
-    convertToMarkdown,
-    saveMarkdown,
-    deleteMarkdown,
+    documents, selectedDoc, documentData, loading, uploading, converting, savingMd,
+    selectDocument, uploadFiles, deleteDocuments,
+    convertToMarkdown, cancelConversion,
+    saveMarkdown, deleteMarkdown,
   }
 }
 
@@ -206,6 +208,7 @@ export function useDocument(toast: ToastCallbacks) {
 // ─────────────────────────────────────────────────────────────
 const DEFAULT_SETTINGS: ChunkSettings = {
   splitterType: 'token',
+  splitterLibrary: 'langchain',
   chunkSize: 512,
   chunkOverlap: 51,
   enableMarkdownSizing: false,
@@ -220,20 +223,35 @@ export function useChunks(
   const [chunks, setChunks] = useState<Chunk[] | null>(null)
   const [settings, setSettings] = useState<ChunkSettings>(DEFAULT_SETTINGS)
   const [saving, setSaving] = useState(false)
+  const [chunking, setChunking] = useState(false)
+
+  const chunkAbortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
-    if (!documentData?.md_content) { setChunks(null); return }
+    if (!documentData?.md_content) {
+      chunkAbortRef.current?.abort()
+      setChunks(null)
+      setChunking(false)
+      return
+    }
     chunkContent(documentData.md_content, settings)
   }, [documentData, settings])
 
   const chunkContent = async (content: string, s: ChunkSettings) => {
+    chunkAbortRef.current?.abort()
+    chunkAbortRef.current = new AbortController()
+
+    setChunking(true)
+    setChunks(null)
     try {
       const res = await fetch(`${API}/chunk`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: chunkAbortRef.current.signal,
         body: JSON.stringify({
           content,
           splitter_type: s.splitterType,
+          splitter_library: s.splitterLibrary,
           chunk_size: s.chunkSize,
           chunk_overlap: s.chunkOverlap,
           enable_markdown_sizing: s.enableMarkdownSizing,
@@ -241,11 +259,33 @@ export function useChunks(
       })
       if (!res.ok) throw new Error()
       const data = await res.json()
-      setChunks(data.chunks)
-    } catch {
+      const normalised: Chunk[] = (data.chunks as Chunk[]).map(c => ({
+        index: c.index,
+        content: c.content,
+        cleaned_chunk: c.cleaned_chunk ?? '',
+        title: c.title ?? '',
+        context: c.context ?? '',
+        summary: c.summary ?? '',
+        keywords: c.keywords ?? [],
+        questions: c.questions ?? [],
+        metadata: c.metadata ?? {},
+        start: c.start ?? 0,
+        end: c.end ?? 0,
+      }))
+      setChunks(normalised)
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
       toast.onError('Chunking failed')
+    } finally {
+      setChunking(false)
     }
   }
+
+  /** Cancel an in-progress chunking request. */
+  const cancelChunking = useCallback(() => {
+    chunkAbortRef.current?.abort()
+    setChunking(false)
+  }, [])
 
   const applySettings = useCallback((newSettings: ChunkSettings) => {
     setSettings(newSettings)
@@ -269,7 +309,19 @@ export function useChunks(
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           filename: selectedDoc,
-          chunks: chunks.map(c => ({ index: c.index, content: c.content, metadata: c.metadata ?? {} })),
+          chunks: chunks.map(c => ({
+            index: c.index,
+            content: c.content,
+            cleaned_chunk: c.cleaned_chunk,
+            title: c.title,
+            context: c.context,
+            summary: c.summary,
+            keywords: c.keywords,
+            questions: c.questions,
+            metadata: c.metadata ?? {},
+            start: c.start,
+            end: c.end,
+          })),
         }),
       })
       if (!res.ok) throw new Error()
@@ -281,5 +333,5 @@ export function useChunks(
     }
   }, [chunks, selectedDoc])
 
-  return { chunks, settings, saving, applySettings, editChunk, saveChunks }
+  return { chunks, settings, saving, chunking, cancelChunking, applySettings, editChunk, saveChunks }
 }

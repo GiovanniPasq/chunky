@@ -21,6 +21,10 @@ interface Props {
   savingMd: boolean
   savingChunks: boolean
   chunksReady: boolean
+  /** True while a chunking request is in flight */
+  chunking?: boolean
+  /** Cancel the in-flight chunking request */
+  onCancelChunking?: () => void
 }
 
 const CHUNK_COLORS = [
@@ -40,6 +44,7 @@ export default function MarkdownViewer({
   scrollSyncEnabled = true, chunks, chunkVisualizationEnabled = false,
   onChunkEdit, onSaveMarkdown, onSaveChunks, onDeleteMarkdown,
   savingMd, savingChunks, chunksReady,
+  chunking = false, onCancelChunking,
 }: Props) {
   const [editMode, setEditMode] = useState(false)
   const [editContent, setEditContent] = useState(content)
@@ -52,13 +57,11 @@ export default function MarkdownViewer({
   const rafRef = useRef<number>()
   const savedScrollRatioRef = useRef<number>(0)
 
-  // Sync editContent when content changes (doc switch)
   useEffect(() => {
     setEditContent(content)
     setEditMode(false)
   }, [content])
 
-  // Exit edit mode when chunk visualization is enabled
   useEffect(() => {
     if (chunkVisualizationEnabled && editMode) {
       setEditContent(content)
@@ -239,25 +242,38 @@ export default function MarkdownViewer({
         <div className="md-controls-right">
           {/* Save Chunks — only visible when chunk visualization is active */}
           {chunkVisualizationEnabled && (
-            <button
-              className="md-action-btn save-chunks"
-              onClick={onSaveChunks}
-              disabled={!chunksReady || savingChunks}
-              title="Save chunks to disk"
-            >
-              <span>{savingChunks ? '⏳' : '💾'}</span>
-              {savingChunks ? 'Saving…' : 'Save Chunks'}
-            </button>
+            <>
+              {chunking && (
+                <button
+                  className="md-action-btn cancel-chunking"
+                  onClick={onCancelChunking}
+                  title="Cancel chunking"
+                >
+                  ✕ Cancel
+                </button>
+              )}
+              <button
+                className="md-action-btn save-chunks"
+                onClick={onSaveChunks}
+                disabled={!chunksReady || savingChunks || chunking}
+                title="Save chunks to disk"
+              >
+                <span>{savingChunks ? '⏳' : '💾'}</span>
+                {savingChunks ? 'Saving…' : chunking ? 'Chunking…' : 'Save Chunks'}
+              </button>
+            </>
           )}
 
-          {/* Reconvert */}
-          <button
-            className="md-action-btn reconvert"
-            onClick={() => setShowReconvertConfirm(true)}
-            title="Delete Markdown and reconvert"
-          >
-            <span>🔄</span> Reconvert
-          </button>
+          {/* Reconvert — hidden when chunk visualization is active */}
+          {!chunkVisualizationEnabled && (
+            <button
+              className="md-action-btn reconvert"
+              onClick={() => setShowReconvertConfirm(true)}
+              title="Delete Markdown and reconvert"
+            >
+              <span>🔄</span> Reconvert
+            </button>
+          )}
 
           {/* Edit / Save / Cancel — hidden when chunk visualization is active */}
           {!chunkVisualizationEnabled && (

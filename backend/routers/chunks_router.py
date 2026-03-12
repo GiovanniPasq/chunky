@@ -23,16 +23,25 @@ _storage = ChunkStorageService()
 
 @router.post("/chunk", response_model=ChunkResponse)
 async def chunk_text(request: ChunkRequest):
-    """Split text into chunks using the specified strategy.
+    """Split text into chunks using the specified strategy and library.
 
-    Supported strategies: ``token``, ``recursive``, ``character``, ``markdown``.
+    **splitter_type** controls the splitting algorithm:
+    ``token``, ``recursive``, ``character``, ``markdown``.
+
+    **splitter_library** selects the underlying implementation:
+    ``langchain`` (default) or ``chonkie``.
     """
     return _chunking.chunk_text(request)
 
 
 @router.post("/chunks/save", response_model=SaveChunksResponse)
 async def save_chunks(request: SaveChunksRequest):
-    """Persist a chunk set to a timestamped JSON file on disk."""
+    """Persist a chunk set to a timestamped JSON file on disk.
+
+    Chunks are stored in the enriched format with placeholder fields for
+    ``CleanedChunk``, ``Title``, ``Context``, ``Summary``, ``Keywords``,
+    and ``Questions`` — ready for the enrichment pipeline.
+    """
     return _storage.save_chunks(request)
 
 

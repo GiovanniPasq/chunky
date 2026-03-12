@@ -233,7 +233,7 @@
   flex-direction: column;
   align-items: flex-start;
   padding: 10px 14px;
-  border: 2px solid #E8D5C0;             /* warm border, not generic gray */
+  border: 2px solid #E8D5C0;
   border-radius: 8px;
   background: white;
   cursor: pointer;
@@ -248,7 +248,7 @@
 }
 
 .converter-option.selected {
-  border-color: #8B4513;                  /* brown, not indigo */
+  border-color: #8B4513;
   background: linear-gradient(135deg, rgba(139, 69, 19, 0.07) 0%, rgba(210, 105, 30, 0.07) 100%);
   box-shadow: 0 0 0 1px rgba(139, 69, 19, 0.15);
 }
@@ -282,6 +282,81 @@
   background: linear-gradient(135deg, rgba(139, 69, 19, 0.05) 0%, rgba(210, 105, 30, 0.05) 100%);
   border-radius: 8px;
   border: 1.5px solid rgba(139, 69, 19, 0.15);
+}
+
+/* ── Library toggle ── */
+/* Two side-by-side cards, same visual language as converter-option */
+.library-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.library-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 2px solid #E8D5C0;
+  border-radius: 8px;
+  background: white;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  font-family: inherit;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Subtle left-accent bar — hidden by default */
+.library-option::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(180deg, #8B4513, #D2691E);
+  opacity: 0;
+  transition: opacity 0.15s;
+  border-radius: 0 2px 2px 0;
+}
+
+.library-option:hover {
+  border-color: rgba(139, 69, 19, 0.45);
+  background: rgba(139, 69, 19, 0.03);
+}
+
+.library-option.selected {
+  border-color: #8B4513;
+  background: linear-gradient(135deg, rgba(139, 69, 19, 0.07) 0%, rgba(210, 105, 30, 0.07) 100%);
+  box-shadow: 0 0 0 1px rgba(139, 69, 19, 0.15);
+}
+
+.library-option.selected::before {
+  opacity: 1;
+}
+
+.library-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #3B1A05;
+  padding-left: 2px;
+}
+
+.library-option.selected .library-label {
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.library-desc {
+  font-size: 11px;
+  color: #9A7050;
+  margin-top: 3px;
+  line-height: 1.4;
+  padding-left: 2px;
 }
 
 /* ── Footer ── */
@@ -344,4 +419,65 @@
 .btn-primary:active {
   transform: translateY(-1px);
   box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.3);
+}
+/* ── Capabilities loading / error states ── */
+.caps-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 48px 24px;
+  flex: 1;
+}
+
+.caps-state p {
+  margin: 0;
+  font-size: 13px;
+  color: #9A7050;
+  text-align: center;
+  line-height: 1.6;
+}
+
+/* Spinner */
+.caps-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid #F0E6D6;
+  border-top-color: #8B4513;
+  border-radius: 50%;
+  animation: capsSpin 0.7s linear infinite;
+}
+
+@keyframes capsSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* Error */
+.caps-error-icon {
+  font-size: 28px;
+}
+
+/* Retry button */
+.btn-retry {
+  background: white;
+  border: 2px solid #E8D5C0;
+  border-radius: 8px;
+  color: #8B4513;
+  padding: 8px 20px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+
+.btn-retry:hover {
+  border-color: #8B4513;
+  background: rgba(139, 69, 19, 0.05);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(139, 69, 19, 0.15);
 }
