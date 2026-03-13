@@ -4,7 +4,10 @@ Router for chunking endpoints.
 Prefix: /api
 """
 
-from fastapi import APIRouter
+import asyncio
+
+from fastapi import APIRouter, Request
+from fastapi.responses import Response
 
 from backend.models.schemas import (
     ChunkRequest,
@@ -22,7 +25,7 @@ _storage = ChunkStorageService()
 
 
 @router.post("/chunk", response_model=ChunkResponse)
-async def chunk_text(request: ChunkRequest):
+async def chunk_text(http_request: Request, request: ChunkRequest):
     """Split text into chunks using the specified strategy and library.
 
     **splitter_type** controls the splitting algorithm:
@@ -30,8 +33,21 @@ async def chunk_text(request: ChunkRequest):
 
     **splitter_library** selects the underlying implementation:
     ``langchain`` (default) or ``chonkie``.
+
+    Runs in a thread pool so the event loop stays free for other requests.
     """
-    return _chunking.chunk_text(request)
+    task = asyncio.create_task(
+        asyncio.to_thread(_chunking.chunk_text, request)
+    )
+    try:
+        while not task.done():
+            if await http_request.is_disconnected():
+                task.cancel()
+                return Response(status_code=499)
+            await asyncio.sleep(0.5)
+        return task.result()
+    except asyncio.CancelledError:
+        return Response(status_code=499)
 
 
 @router.post("/chunks/save", response_model=SaveChunksResponse)

@@ -5,9 +5,9 @@ Document service — orchestrates PDF upload, conversion, and deletion.
 from __future__ import annotations
 
 import shutil
-from dataclasses import dataclass, field
+import threading
 from pathlib import Path
-from typing import List, Optional, Type
+from typing import Callable, List, Optional, Type
 
 from fastapi import HTTPException, UploadFile
 
@@ -17,13 +17,14 @@ from backend.converters.markitdown import MarkItDownConverter
 from backend.converters.pymupdf import PyMuPDFConverter
 from backend.converters.vlm import VLMConverter
 from backend.models.schemas import (
+    ConversionProgressResponse,
     ConvertResponse,
     ConverterType,
     DeleteResponse,
     DocumentInfo,
+    MdToPdfResponse,
     MultiUploadResponse,
     UploadFileResult,
-    UploadResponse,
     VLMSettings,
 )
 
@@ -34,6 +35,44 @@ from backend.models.schemas import (
 PDFS_DIR = Path("docs/pdfs")
 MDS_DIR = Path("docs/mds")
 CHUNKS_DIR = Path("chunks")
+
+
+# ---------------------------------------------------------------------------
+# Conversion progress store
+# ---------------------------------------------------------------------------
+
+
+class _ProgressStore:
+    """Thread-safe store that tracks in-flight conversion progress per filename."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._data: dict[str, dict] = {}
+
+    def start(self, filename: str) -> None:
+        with self._lock:
+            self._data[filename] = {"active": True, "current": 0, "total": 0}
+
+    def update(self, filename: str, current: int, total: int) -> None:
+        with self._lock:
+            self._data[filename] = {"active": True, "current": current, "total": total}
+
+    def finish(self, filename: str) -> None:
+        with self._lock:
+            self._data.pop(filename, None)
+
+    def get(self, filename: str) -> ConversionProgressResponse:
+        with self._lock:
+            d = self._data.get(filename, {})
+        return ConversionProgressResponse(
+            active=d.get("active", False),
+            current=d.get("current", 0),
+            total=d.get("total", 0),
+        )
+
+
+# Module-level singleton — imported by the router to serve the progress endpoint.
+progress_store = _ProgressStore()
 
 # Converter registry — maps enum value to class (excludes VLM which needs args)
 _CONVERTER_MAP: dict[ConverterType, Type[PDFConverter]] = {
@@ -70,6 +109,7 @@ def _dest_dir(filename: str) -> Path:
 def _build_converter(
     converter_type: ConverterType,
     vlm_settings: Optional[VLMSettings],
+    on_progress: Optional[Callable[[int, int], None]] = None,
 ) -> PDFConverter:
     """Instantiate the requested converter, forwarding VLM settings when relevant."""
     if converter_type == ConverterType.vlm:
@@ -81,6 +121,8 @@ def _build_converter(
                 kwargs["base_url"] = vlm_settings.base_url
             if vlm_settings.api_key:
                 kwargs["api_key"] = vlm_settings.api_key
+        if on_progress:
+            kwargs["on_progress"] = on_progress
         return VLMConverter(**kwargs)
 
     return _CONVERTER_MAP[converter_type]()
@@ -99,13 +141,42 @@ class DocumentService:
     # ------------------------------------------------------------------
 
     def list_documents(self) -> List[str]:
-        """Return a sorted list of all available PDF filenames."""
-        if not PDFS_DIR.exists():
-            return []
-        return sorted(f.name for f in PDFS_DIR.glob("*.pdf"))
+        """Return a sorted list of all available documents (PDFs + MD-only files)."""
+        results: List[str] = []
+        pdf_stems: set = set()
+
+        if PDFS_DIR.exists():
+            for f in PDFS_DIR.glob("*.pdf"):
+                results.append(f.name)
+                pdf_stems.add(f.stem)
+
+        # Include MD files that have no matching PDF
+        if MDS_DIR.exists():
+            for f in MDS_DIR.glob("*.md"):
+                if f.stem not in pdf_stems:
+                    results.append(f.name)
+
+        return sorted(results)
 
     def get_document(self, filename: str) -> DocumentInfo:
-        """Return metadata and existing Markdown content for a PDF."""
+        """Return metadata and existing Markdown content for a PDF or MD-only file."""
+        ext = Path(filename).suffix.lower()
+
+        if ext == ".md":
+            md_path = MDS_DIR / filename
+            if not md_path.exists():
+                raise HTTPException(status_code=404, detail=f"MD '{filename}' not found")
+            md_content = md_path.read_text(encoding="utf-8")
+            pdf_filename = f"{_stem(filename)}.pdf"
+            return DocumentInfo(
+                pdf_filename=pdf_filename,
+                md_filename=filename,
+                md_content=md_content,
+                has_markdown=True,
+                has_pdf=False,
+            )
+
+        # Default: PDF file
         pdf_path = PDFS_DIR / filename
         if not pdf_path.exists():
             raise HTTPException(status_code=404, detail=f"PDF '{filename}' not found")
@@ -119,6 +190,7 @@ class DocumentService:
             md_filename=md_filename,
             md_content=md_content,
             has_markdown=md_path.exists(),
+            has_pdf=True,
         )
 
     def get_pdf_path(self, filename: str) -> Path:
@@ -195,8 +267,19 @@ class DocumentService:
         if not pdf_path.exists():
             raise HTTPException(status_code=404, detail=f"PDF '{filename}' not found")
 
-        converter = _build_converter(converter_type, vlm_settings)
-        md_content = converter.convert(pdf_path)
+        def _on_progress(current: int, total: int) -> None:
+            progress_store.update(filename, current, total)
+
+        progress_store.start(filename)
+        try:
+            converter = _build_converter(
+                converter_type,
+                vlm_settings,
+                on_progress=_on_progress if converter_type == ConverterType.vlm else None,
+            )
+            md_content = converter.convert(pdf_path)
+        finally:
+            progress_store.finish(filename)
 
         MDS_DIR.mkdir(parents=True, exist_ok=True)
         md_filename = f"{_stem(filename)}.md"
@@ -213,17 +296,61 @@ class DocumentService:
     # Delete
     # ------------------------------------------------------------------
 
-    def delete_document(self, filename: str) -> DeleteResponse:
-        """Delete a PDF and all its derived files (Markdown, chunks).
+    def convert_md_to_pdf(self, md_filename: str) -> MdToPdfResponse:
+        """Convert a stored Markdown file to PDF using weasyprint."""
+        from backend.utils.md_to_pdf import _convert_file
 
-        Raises 404 if the PDF does not exist.
+        md_path = MDS_DIR / md_filename
+        if not md_path.exists():
+            raise HTTPException(status_code=404, detail=f"MD '{md_filename}' not found")
+
+        PDFS_DIR.mkdir(parents=True, exist_ok=True)
+        pdf_filename = f"{_stem(md_filename)}.pdf"
+        pdf_path = PDFS_DIR / pdf_filename
+
+        success = _convert_file(md_path, pdf_path)
+        if not success:
+            raise HTTPException(status_code=500, detail="MD to PDF conversion failed")
+
+        return MdToPdfResponse(
+            success=True,
+            pdf_filename=pdf_filename,
+            message=f"Converted '{md_filename}' to PDF",
+        )
+
+    def delete_document(self, filename: str) -> DeleteResponse:
+        """Delete a document and all its derived files (Markdown, chunks).
+
+        Handles both PDF files and MD-only files. Raises 404 if not found.
         """
+        ext = Path(filename).suffix.lower()
+        deleted: List[str] = []
+        stem = _stem(filename)
+
+        if ext == ".md":
+            # MD-only file: delete the MD and any associated chunks
+            md_path = MDS_DIR / filename
+            if not md_path.exists():
+                raise HTTPException(status_code=404, detail=f"MD '{filename}' not found")
+            md_path.unlink()
+            deleted.append(str(md_path))
+
+            chunks_path = CHUNKS_DIR / stem
+            if chunks_path.exists():
+                shutil.rmtree(chunks_path)
+                deleted.append(str(chunks_path))
+
+            associated = len(deleted) - 1
+            return DeleteResponse(
+                success=True,
+                deleted=deleted,
+                message=f"Deleted '{filename}' and {associated} associated file(s)",
+            )
+
+        # Default: PDF file
         pdf_path = PDFS_DIR / filename
         if not pdf_path.exists():
             raise HTTPException(status_code=404, detail=f"PDF '{filename}' not found")
-
-        deleted: List[str] = []
-        stem = _stem(filename)
 
         pdf_path.unlink()
         deleted.append(str(pdf_path))

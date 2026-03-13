@@ -183,7 +183,7 @@ class ChonkieSplitter(TextSplitter):
         )
         return self._chunks_from_chonkie(chunker, request.content)
 
-    """
+    
     @register_splitter(
         library=_LIB, library_label=_LIB_LABEL,
         strategy="neural", label="Neural",
@@ -200,7 +200,7 @@ class ChonkieSplitter(TextSplitter):
             device_map="cpu",
         )
         return self._chunks_from_chonkie(chunker, request.content)
-    """
+    
     # ------------------------------------------------------------------
     # Shared helper
     # ------------------------------------------------------------------
@@ -236,5 +236,5 @@ class ChonkieSplitter(TextSplitter):
         SplitterType.table: _split_table,
         SplitterType.code: _split_code,
         SplitterType.semantic: _split_semantic,
-        #SplitterType.neural: _split_neural,
+        SplitterType.neural: _split_neural,
     }

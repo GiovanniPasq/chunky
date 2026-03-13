@@ -29,7 +29,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Chunky API",
         description="PDF to Markdown conversion and text chunking service.",
-        version="1.0.0",
+        version="0.1.0",
         lifespan=lifespan,
     )
 

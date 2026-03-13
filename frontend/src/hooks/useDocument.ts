@@ -8,6 +8,12 @@ export interface ToastCallbacks {
   onError: (msg: string) => void
 }
 
+export interface ConversionProgress {
+  active: boolean
+  current: number
+  total: number
+}
+
 // ─────────────────────────────────────────────────────────────
 // useDocument
 // ─────────────────────────────────────────────────────────────
@@ -18,7 +24,9 @@ export function useDocument(toast: ToastCallbacks) {
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [converting, setConverting] = useState(false)
+  const [convertingToPdf, setConvertingToPdf] = useState(false)
   const [savingMd, setSavingMd] = useState(false)
+  const [conversionProgress, setConversionProgress] = useState<ConversionProgress | null>(null)
 
   // Track the currently selected filename in a ref so callbacks always see
   // the latest value without needing it in their dependency arrays.
@@ -28,8 +36,35 @@ export function useDocument(toast: ToastCallbacks) {
   // AbortControllers for in-flight requests
   const fetchDocAbortRef = useRef<AbortController | null>(null)
   const convertAbortRef = useRef<AbortController | null>(null)
+  const convertToPdfAbortRef = useRef<AbortController | null>(null)
+  const progressPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => { fetchDocuments() }, [])
+
+  // Poll conversion progress while converting
+  useEffect(() => {
+    if (converting && selectedDocRef.current) {
+      const filename = selectedDocRef.current
+      progressPollRef.current = setInterval(async () => {
+        try {
+          const res = await fetch(`${API}/convert-progress/${encodeURIComponent(filename)}`)
+          if (res.ok) setConversionProgress(await res.json())
+        } catch { /* ignore transient errors */ }
+      }, 500)
+    } else {
+      if (progressPollRef.current) {
+        clearInterval(progressPollRef.current)
+        progressPollRef.current = null
+      }
+      setConversionProgress(null)
+    }
+    return () => {
+      if (progressPollRef.current) {
+        clearInterval(progressPollRef.current)
+        progressPollRef.current = null
+      }
+    }
+  }, [converting])
 
   const fetchDocuments = async () => {
     try {
@@ -78,15 +113,9 @@ export function useDocument(toast: ToastCallbacks) {
     setUploading(true)
     try {
       const formData = new FormData()
-      if (files.length === 1) {
-        formData.append('file', files[0])
-        const res = await fetch(`${API}/upload`, { method: 'POST', body: formData })
-        if (!res.ok) throw new Error()
-      } else {
-        files.forEach(f => formData.append('files', f))
-        const res = await fetch(`${API}/upload/multiple`, { method: 'POST', body: formData })
-        if (!res.ok) throw new Error()
-      }
+      files.forEach(f => formData.append('files', f))
+      const res = await fetch(`${API}/upload`, { method: 'POST', body: formData })
+      if (!res.ok) throw new Error()
       await fetchDocuments()
       toast.onSuccess(`Uploaded ${files.length} file${files.length > 1 ? 's' : ''}`)
     } catch {
@@ -99,17 +128,12 @@ export function useDocument(toast: ToastCallbacks) {
   const deleteDocuments = useCallback(async (filenames: string[]) => {
     if (filenames.length === 0) return
     try {
-      if (filenames.length === 1) {
-        const res = await fetch(`${API}/document/${encodeURIComponent(filenames[0])}`, { method: 'DELETE' })
-        if (!res.ok) throw new Error()
-      } else {
-        const res = await fetch(`${API}/documents`, {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(filenames),
-        })
-        if (!res.ok) throw new Error()
-      }
+      const res = await fetch(`${API}/documents`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(filenames),
+      })
+      if (!res.ok) throw new Error()
       if (selectedDocRef.current && filenames.includes(selectedDocRef.current)) {
         setSelectedDoc(null)
         setDocumentData(null)
@@ -166,6 +190,38 @@ export function useDocument(toast: ToastCallbacks) {
     setConverting(false)
   }, [])
 
+  const convertMdToPdf = useCallback(async () => {
+    if (!selectedDocRef.current) return
+
+    convertToPdfAbortRef.current?.abort()
+    convertToPdfAbortRef.current = new AbortController()
+
+    setConvertingToPdf(true)
+    try {
+      const res = await fetch(
+        `${API}/md-to-pdf/${encodeURIComponent(selectedDocRef.current)}`,
+        { method: 'POST', signal: convertToPdfAbortRef.current.signal },
+      )
+      if (!res.ok) throw new Error()
+      const data = await res.json()
+      // Switch to the newly created PDF document
+      setSelectedDoc(data.pdf_filename)
+      setDocumentData(prev => prev ? { ...prev, has_pdf: true, pdf_filename: data.pdf_filename } : prev)
+      await fetchDocuments()
+      toast.onSuccess('Converted to PDF ✓')
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
+      toast.onError('MD to PDF conversion failed')
+    } finally {
+      setConvertingToPdf(false)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const cancelMdToPdfConversion = useCallback(() => {
+    convertToPdfAbortRef.current?.abort()
+    setConvertingToPdf(false)
+  }, [])
+
   const saveMarkdown = useCallback(async (content: string) => {
     if (!selectedDocRef.current) return
     setSavingMd(true)
@@ -173,7 +229,7 @@ export function useDocument(toast: ToastCallbacks) {
       const mdFilename = selectedDocRef.current.replace('.pdf', '.md')
       const file = new File([new Blob([content], { type: 'text/markdown' })], mdFilename, { type: 'text/markdown' })
       const formData = new FormData()
-      formData.append('file', file)
+      formData.append('files', file)
       const res = await fetch(`${API}/upload`, { method: 'POST', body: formData })
       if (!res.ok) throw new Error()
       setDocumentData(prev => prev ? { ...prev, md_content: content } : prev)
@@ -196,9 +252,11 @@ export function useDocument(toast: ToastCallbacks) {
   }, [])
 
   return {
-    documents, selectedDoc, documentData, loading, uploading, converting, savingMd,
+    documents, selectedDoc, documentData, loading, uploading, converting, convertingToPdf, savingMd,
+    conversionProgress,
     selectDocument, uploadFiles, deleteDocuments,
     convertToMarkdown, cancelConversion,
+    convertMdToPdf, cancelMdToPdfConversion,
     saveMarkdown, deleteMarkdown,
   }
 }
@@ -218,6 +276,7 @@ const DEFAULT_SETTINGS: ChunkSettings = {
 export function useChunks(
   documentData: DocumentData | null,
   selectedDoc: string | null,
+  chunkingEnabled: boolean,
   toast: ToastCallbacks,
 ) {
   const [chunks, setChunks] = useState<Chunk[] | null>(null)
@@ -228,14 +287,14 @@ export function useChunks(
   const chunkAbortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
-    if (!documentData?.md_content) {
+    if (!chunkingEnabled || !documentData?.md_content) {
       chunkAbortRef.current?.abort()
       setChunks(null)
       setChunking(false)
       return
     }
     chunkContent(documentData.md_content, settings)
-  }, [documentData, settings])
+  }, [documentData, settings, chunkingEnabled])
 
   const chunkContent = async (content: string, s: ChunkSettings) => {
     chunkAbortRef.current?.abort()
@@ -300,6 +359,61 @@ export function useChunks(
     })
   }, [])
 
+  const deleteChunk = useCallback((index: number) => {
+    setChunks(prev => {
+      if (!prev) return prev
+      return prev
+        .filter(c => c.index !== index)
+        .map((c, i) => ({ ...c, index: i }))
+    })
+  }, [])
+
+  const deleteChunks = useCallback((indices: Set<number>) => {
+    setChunks(prev => {
+      if (!prev) return prev
+      return prev
+        .filter(c => !indices.has(c.index))
+        .map((c, i) => ({ ...c, index: i }))
+    })
+  }, [])
+
+  /** Merge an ordered list of chunk indices into a single chunk, removing overlap. */
+  const mergeChunks = useCallback((indices: number[]) => {
+    if (indices.length < 2) return
+    setChunks(prev => {
+      if (!prev) return prev
+      const sorted = [...indices].sort((a, b) => a - b)
+      const toMerge = sorted.map(i => prev[i]).filter(Boolean)
+      if (toMerge.length < 2) return prev
+
+      // Concatenate, removing the overlap suffix/prefix between consecutive chunks.
+      let merged = toMerge[0].content
+      for (let i = 1; i < toMerge.length; i++) {
+        const b = toMerge[i].content
+        const maxLen = Math.min(merged.length, b.length, 300)
+        let overlapLen = 0
+        for (let len = maxLen; len > 0; len--) {
+          if (merged.slice(-len) === b.slice(0, len)) {
+            overlapLen = len
+            break
+          }
+        }
+        merged = overlapLen > 0 ? merged + b.slice(overlapLen) : merged + '\n\n' + b
+      }
+
+      const sortedSet = new Set(sorted)
+      const newChunks: Chunk[] = []
+      for (let i = 0; i < prev.length; i++) {
+        if (i === sorted[0]) {
+          newChunks.push({ ...toMerge[0], content: merged, end: toMerge[toMerge.length - 1].end })
+        } else if (!sortedSet.has(i)) {
+          newChunks.push(prev[i])
+        }
+      }
+      return newChunks.map((c, i) => ({ ...c, index: i }))
+    })
+  }, [])
+
   const saveChunks = useCallback(async () => {
     if (!chunks || !selectedDoc) return
     setSaving(true)
@@ -333,5 +447,5 @@ export function useChunks(
     }
   }, [chunks, selectedDoc])
 
-  return { chunks, settings, saving, chunking, cancelChunking, applySettings, editChunk, saveChunks }
+  return { chunks, settings, saving, chunking, cancelChunking, applySettings, editChunk, deleteChunk, deleteChunks, mergeChunks, saveChunks }
 }

@@ -92,6 +92,13 @@ class DocumentInfo(BaseModel):
     md_filename: str
     md_content: str
     has_markdown: bool
+    has_pdf: bool = True
+
+
+class MdToPdfResponse(BaseModel):
+    success: bool
+    pdf_filename: str
+    message: str
 
 
 class UploadResponse(BaseModel):
@@ -117,6 +124,14 @@ class ConvertResponse(BaseModel):
     md_filename: str
     message: str
     md_content: str
+
+
+class ConversionProgressResponse(BaseModel):
+    """Current progress of an active conversion job."""
+
+    active: bool
+    current: int = 0
+    total: int = 0
 
 
 class DeleteResponse(BaseModel):

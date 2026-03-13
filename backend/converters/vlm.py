@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 import base64
 from pathlib import Path
+from typing import Callable, Optional
 from backend.registry import register_converter
 from .base import PDFConverter
 
@@ -122,18 +123,22 @@ class VLMConverter(PDFConverter):
         model: str = "qwen3-vl:4b-instruct-q4_K_M",
         base_url: str = "http://localhost:11434/v1",
         api_key: str = "ollama",
+        on_progress: Optional[Callable[[int, int], None]] = None,
     ) -> None:
         """Initialise the converter and create the OpenAI client.
 
         Args:
-            model:    Model identifier passed to the completions endpoint.
-            base_url: Root URL of the OpenAI-compatible API.
-            api_key:  Authentication key. Any non-empty string works for Ollama.
+            model:       Model identifier passed to the completions endpoint.
+            base_url:    Root URL of the OpenAI-compatible API.
+            api_key:     Authentication key. Any non-empty string works for Ollama.
+            on_progress: Optional callback called after each page with
+                         ``(current_page, total_pages)`` (1-based).
         """
         from openai import OpenAI
 
         self._model = model
         self._client = OpenAI(base_url=base_url, api_key=api_key)
+        self._on_progress = on_progress
 
     # ------------------------------------------------------------------
     # PDFConverter interface
@@ -155,11 +160,14 @@ class VLMConverter(PDFConverter):
         pages: list[str] = []
 
         with fitz.open(str(pdf_path)) as pdf_document:
-            for page_num in range(pdf_document.page_count):
+            total = pdf_document.page_count
+            for page_num in range(total):
                 page = pdf_document[page_num]
                 img_b64 = self._render_page_as_b64(page)
                 markdown = self._transcribe_page(img_b64)
                 pages.append(markdown)
+                if self._on_progress:
+                    self._on_progress(page_num + 1, total)
 
         return "\n\n---\n\n".join(pages)
 

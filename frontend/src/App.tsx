@@ -29,27 +29,31 @@ export default function App() {
 
   // ── Hooks ────────────────────────────────────────────────────
   const {
-    documents, selectedDoc, documentData, loading, uploading, converting, savingMd,
+    documents, selectedDoc, documentData, loading, uploading, converting, convertingToPdf, savingMd,
+    conversionProgress,
     selectDocument, uploadFiles, deleteDocuments,
     convertToMarkdown, cancelConversion,
+    convertMdToPdf, cancelMdToPdfConversion,
     saveMarkdown, deleteMarkdown,
   } = useDocument(toastCallbacks)
-
-  const {
-    chunks, settings, saving: savingChunks, chunking,
-    applySettings, editChunk, saveChunks, cancelChunking,
-  } = useChunks(documentData, selectedDoc, toastCallbacks)
 
   // ── UI state ─────────────────────────────────────────────────
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [scrollSync, setScrollSync] = useState(true)
   const [chunkViz, setChunkViz] = useState(false)
+
+  const {
+    chunks, settings, saving: savingChunks, chunking,
+    applySettings, editChunk, deleteChunk, deleteChunks, mergeChunks, saveChunks, cancelChunking,
+  } = useChunks(documentData, selectedDoc, chunkViz, toastCallbacks)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [pdfScale, setPdfScale] = useState(1.0)
   const [mdScale, setMdScale] = useState(1.0)
   const [mdPadding, setMdPadding] = useState(20)
   const [splitPct, setSplitPct] = useState(50)
   const [isDragging, setIsDragging] = useState(false)
+  /** Pending document switch while a conversion/chunking is in progress. */
+  const [pendingDoc, setPendingDoc] = useState<string | null>(null)
 
   // ── Divider drag ─────────────────────────────────────────────
   useEffect(() => {
@@ -75,6 +79,26 @@ export default function App() {
 
   const converterLabel = settings.converter ?? 'Convert'
 
+  // ── Document selection with in-progress guard ─────────────────
+  const handleSelectDocument = useCallback((filename: string) => {
+    if (converting || convertingToPdf || chunking) {
+      setPendingDoc(filename)
+    } else {
+      selectDocument(filename)
+    }
+  }, [converting, convertingToPdf, chunking, selectDocument])
+
+  const confirmSwitch = useCallback(() => {
+    if (!pendingDoc) return
+    cancelConversion()
+    cancelMdToPdfConversion()
+    cancelChunking()
+    selectDocument(pendingDoc)
+    setPendingDoc(null)
+  }, [pendingDoc, cancelConversion, cancelMdToPdfConversion, cancelChunking, selectDocument])
+
+  const cancelSwitch = useCallback(() => setPendingDoc(null), [])
+
   return (
     <div className="app">
       {toast && (
@@ -86,10 +110,26 @@ export default function App() {
         />
       )}
 
+      {/* ── Confirm switch while processing ── */}
+      {pendingDoc && (
+        <div className="confirm-switch-overlay" onClick={cancelSwitch}>
+          <div className="confirm-switch-dialog" onClick={e => e.stopPropagation()}>
+            <p>
+              A {converting || convertingToPdf ? 'conversion' : 'chunking'} is in progress.
+              Switching documents will cancel it. Continue?
+            </p>
+            <div className="confirm-switch-actions">
+              <button className="btn-secondary" onClick={cancelSwitch}>Stay</button>
+              <button className="btn-danger" onClick={confirmSwitch}>Switch document</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <Sidebar
         documents={documents}
         selectedDoc={selectedDoc}
-        onSelect={selectDocument}
+        onSelect={handleSelectDocument}
         onUpload={uploadFiles}
         uploading={uploading}
         collapsed={sidebarCollapsed}
@@ -120,12 +160,37 @@ export default function App() {
             <div className="viewers">
               <div className="viewer-panel" style={{ width: `${splitPct}%` }}>
                 <div className="panel-label">PDF</div>
-                <PDFViewer
-                  filename={selectedDoc}
-                  scale={pdfScale}
-                  onScaleChange={setPdfScale}
-                  scrollSyncEnabled={scrollSync}
-                />
+                {documentData.has_pdf ? (
+                  <PDFViewer
+                    filename={selectedDoc}
+                    scale={pdfScale}
+                    onScaleChange={setPdfScale}
+                    scrollSyncEnabled={scrollSync}
+                  />
+                ) : (
+                  <div className="md-not-found">
+                    {convertingToPdf ? (
+                      <>
+                        <span className="hourglass-icon">⏳</span>
+                        <h2>Converting to PDF…</h2>
+                        <p>Please wait while we generate your PDF.</p>
+                        <div className="converting-bar" />
+                        <button className="btn-cancel-op" onClick={cancelMdToPdfConversion}>
+                          ✕ Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <span className="static-icon">📝</span>
+                        <h2>No PDF available</h2>
+                        <p>This document only has a Markdown file.</p>
+                        <button onClick={convertMdToPdf}>
+                          ✨ Convert to PDF
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="viewer-divider" onMouseDown={() => setIsDragging(true)} />
@@ -143,6 +208,9 @@ export default function App() {
                     chunks={chunks}
                     chunkVisualizationEnabled={chunkViz}
                     onChunkEdit={editChunk}
+                    onDeleteChunk={deleteChunk}
+                    onDeleteChunks={deleteChunks}
+                    onMergeChunks={mergeChunks}
                     onSaveMarkdown={saveMarkdown}
                     onSaveChunks={saveChunks}
                     onDeleteMarkdown={deleteMarkdown}
@@ -158,7 +226,14 @@ export default function App() {
                       <>
                         <span className="hourglass-icon">⏳</span>
                         <h2>Converting…</h2>
-                        <p>Please wait while we process your document.</p>
+                        {conversionProgress != null && conversionProgress.total > 0 ? (
+                          <p>
+                            Page {conversionProgress.current} of {conversionProgress.total}
+                            {' '}({Math.round(conversionProgress.current / conversionProgress.total * 100)}%)
+                          </p>
+                        ) : (
+                          <p>Please wait while we process your document.</p>
+                        )}
                         <div className="converting-bar" />
                         <button className="btn-cancel-op" onClick={cancelConversion}>
                           ✕ Cancel

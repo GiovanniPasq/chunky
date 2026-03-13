@@ -23,6 +23,7 @@ export interface DocumentData {
   md_filename: string
   md_content: string
   has_markdown: boolean
+  has_pdf: boolean
 }
 
 export type DocumentInfo = DocumentData

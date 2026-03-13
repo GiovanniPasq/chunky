@@ -15,6 +15,9 @@ interface Props {
   chunks?: Chunk[] | null
   chunkVisualizationEnabled?: boolean
   onChunkEdit: (index: number, content: string) => void
+  onDeleteChunk: (index: number) => void
+  onDeleteChunks: (indices: Set<number>) => void
+  onMergeChunks: (indices: number[]) => void
   onSaveMarkdown: (content: string) => void
   onSaveChunks: () => void
   onDeleteMarkdown: () => void
@@ -42,7 +45,8 @@ const CHUNK_BORDER_COLORS = [
 export default function MarkdownViewer({
   content, scale = 1.0, onScaleChange, padding = 20, onPaddingChange,
   scrollSyncEnabled = true, chunks, chunkVisualizationEnabled = false,
-  onChunkEdit, onSaveMarkdown, onSaveChunks, onDeleteMarkdown,
+  onChunkEdit, onDeleteChunk, onDeleteChunks, onMergeChunks,
+  onSaveMarkdown, onSaveChunks, onDeleteMarkdown,
   savingMd, savingChunks, chunksReady,
   chunking = false, onCancelChunking,
 }: Props) {
@@ -50,6 +54,10 @@ export default function MarkdownViewer({
   const [editContent, setEditContent] = useState(content)
   const [editingChunkIndex, setEditingChunkIndex] = useState<number | null>(null)
   const [showReconvertConfirm, setShowReconvertConfirm] = useState(false)
+  const [selectedChunks, setSelectedChunks] = useState<Set<number>>(new Set())
+
+  // Clear selection when chunks change (e.g. re-chunked)
+  useEffect(() => { setSelectedChunks(new Set()) }, [chunks])
 
   const containerRef = useRef<HTMLDivElement>(null)
   const isScrollingRef = useRef(false)
@@ -160,6 +168,25 @@ export default function MarkdownViewer({
     return () => window.removeEventListener('viewer-scroll', onExtScroll)
   }, [scrollSyncEnabled])
 
+  const toggleChunkSelection = (index: number) => {
+    setSelectedChunks(prev => {
+      const next = new Set(prev)
+      next.has(index) ? next.delete(index) : next.add(index)
+      return next
+    })
+  }
+
+  const handleMergeSelected = () => {
+    const indices = Array.from(selectedChunks).sort((a, b) => a - b)
+    onMergeChunks(indices)
+    setSelectedChunks(new Set())
+  }
+
+  const handleDeleteSelected = () => {
+    onDeleteChunks(selectedChunks)
+    setSelectedChunks(new Set())
+  }
+
   // ── Render ───────────────────────────────────────────────────
   const renderChunks = () => {
     if (!chunks?.length || !chunkVisualizationEnabled) {
@@ -167,33 +194,54 @@ export default function MarkdownViewer({
     }
     return (
       <>
-        {chunks.map((chunk, i) => (
-          <div
-            key={i}
-            className="chunk-block"
-            style={{
-              backgroundColor: getColor(i),
-              borderLeft: `4px solid ${getBorderColor(i)}`,
-            }}
-          >
-            <div className="chunk-meta">
-              <span className="chunk-badge">
-                <span className="chunk-label">Chunk</span>
-                <span className="chunk-current">{i + 1}</span>
-                <span className="chunk-sep">/</span>
-                <span className="chunk-total">{chunks.length}</span>
-              </span>
-              <button
-                className="chunk-edit-btn"
-                onClick={() => setEditingChunkIndex(i)}
-                title="Edit chunk"
-              >
-                ✏️ Edit
-              </button>
+        {chunks.map((chunk, i) => {
+          const isSelected = selectedChunks.has(i)
+          return (
+            <div
+              key={i}
+              className={`chunk-block${isSelected ? ' chunk-block--selected' : ''}`}
+              style={{
+                backgroundColor: getColor(i),
+                borderLeft: `4px solid ${getBorderColor(i)}`,
+              }}
+            >
+              <div className="chunk-meta">
+                <div className="chunk-meta-left">
+                  <input
+                    type="checkbox"
+                    className="chunk-checkbox"
+                    checked={isSelected}
+                    onChange={() => toggleChunkSelection(i)}
+                    title="Select chunk"
+                  />
+                  <span className="chunk-badge">
+                    <span className="chunk-label">Chunk</span>
+                    <span className="chunk-current">{i + 1}</span>
+                    <span className="chunk-sep">/</span>
+                    <span className="chunk-total">{chunks.length}</span>
+                  </span>
+                </div>
+                <div className="chunk-meta-actions">
+                  <button
+                    className="chunk-edit-btn"
+                    onClick={() => setEditingChunkIndex(i)}
+                    title="Edit chunk"
+                  >
+                    ✏️ Edit
+                  </button>
+                  <button
+                    className="chunk-delete-btn"
+                    onClick={() => onDeleteChunk(i)}
+                    title="Delete chunk"
+                  >
+                    🗑 Delete
+                  </button>
+                </div>
+              </div>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{chunk.content}</ReactMarkdown>
             </div>
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{chunk.content}</ReactMarkdown>
-          </div>
-        ))}
+          )
+        })}
       </>
     )
   }
@@ -243,6 +291,24 @@ export default function MarkdownViewer({
           {/* Save Chunks — only visible when chunk visualization is active */}
           {chunkVisualizationEnabled && (
             <>
+              {selectedChunks.size >= 2 && (
+                <button
+                  className="md-action-btn merge-chunks"
+                  onClick={handleMergeSelected}
+                  title="Merge selected chunks removing overlap"
+                >
+                  ⛓ Merge ({selectedChunks.size})
+                </button>
+              )}
+              {selectedChunks.size >= 1 && (
+                <button
+                  className="md-action-btn delete-chunks"
+                  onClick={handleDeleteSelected}
+                  title="Delete selected chunks"
+                >
+                  🗑 Delete ({selectedChunks.size})
+                </button>
+              )}
               {chunking && (
                 <button
                   className="md-action-btn cancel-chunking"
