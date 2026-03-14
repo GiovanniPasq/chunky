@@ -42,7 +42,7 @@ Chunking is one of the most underestimated steps in a RAG pipeline. As NVIDIA's 
 1. **Bring your document** — upload a PDF and let Chunky convert it to Markdown, or upload a Markdown file directly if you already have one. Your existing conversion is never overwritten.
 2. **Choose your converter** — pick the PDF-to-Markdown engine that best fits your document type. Not happy with the result? Switch converter and re-run without losing your work.
 3. **Validate the Markdown** — review the converted text side-by-side with the original PDF before chunking. Catch conversion artifacts early.
-4. **Chunk and inspect** — choose a splitting strategy and see every chunk color-coded and enumerable. Spot boundaries that are too aggressive or too loose at a glance.
+4. **Chunk and inspect** — choose a splitting library and strategy, and see every chunk color-coded and enumerable. Spot boundaries that are too aggressive or too loose at a glance.
 5. **Edit and fix** — click any chunk to edit its content directly. No need to re-run the whole pipeline to fix one bad split.
 6. **Export** — save clean, validated chunks as timestamped JSON, ready to feed into your vector store.
 
@@ -51,12 +51,13 @@ Chunking is one of the most underestimated steps in a RAG pipeline. As NVIDIA's 
 ## Features
 
 - 📄 Side-by-side PDF + Markdown viewer with synchronized scrolling
-- ✨ Four PDF → Markdown converters (pymupdf4llm, Docling, MarkItDown, VLM) — skipped if you upload an existing Markdown file
+- ✨ Four PDF → Markdown converters (PyMuPDF, Docling, MarkItDown, VLM) — skipped if you upload an existing Markdown file
 - 🔄 Re-convert on the fly — switch converter and regenerate Markdown without restarting the pipeline
-- ✂️ Four splitters: Token, Recursive Character, Character, Markdown Header
+- ✂️ Two splitting libraries — **LangChain** (4 strategies) and **Chonkie** (8 strategies)
 - 🎨 Color-coded chunk visualization with per-chunk editing
-- 🔌 Pluggable converter architecture — add a new engine in minutes
+- 🔌 Pluggable, decorator-based architecture — add a new converter or splitter in minutes with zero frontend changes
 - 💾 Export chunks as timestamped JSON, ready for indexing
+- 📡 Dynamic `/api/capabilities` endpoint — the frontend discovers all available converters and strategies automatically at startup
 
 ---
 
@@ -68,12 +69,12 @@ Chunky ships with four converters out of the box. You can switch between them in
 |-----------|---------|----------|
 | **PyMuPDF** *(default)* | `pymupdf4llm` | Fast conversion of standard digital PDFs with selectable text |
 | **Docling** | `docling` | Complex layouts: multi-column documents, tables, and figures |
-| **MarkItDown** | `markitdown` | Broad-format documents, simple and deterministic output |
+| **MarkItDown** | `markitdown[all]` | Broad-format documents, simple and deterministic output |
 | **VLM** | `openai` + any vision model | Scanned PDFs, handwriting, diagrams — anything a human can read |
 
 ### VLM converter
 
-The VLM converter sends each page as a rasterised image to any OpenAI-compatible vision model. By default it targets a **locally running Ollama instance** — no API key, no internet access required.
+The VLM converter rasterises each page at 300 DPI and sends it to any OpenAI-compatible vision model. By default it targets a **locally running Ollama instance** — no API key, no internet access required.
 
 ```python
 # Default — Ollama (local, no API key needed)
@@ -93,11 +94,51 @@ VLMConverter(
 )
 ```
 
+VLM conversions report per-page progress, which the frontend polls via `GET /api/convert-progress/{filename}`.
+
 ---
 
-## Extending Chunky — Adding a New Converter
+## Chunking Strategies
 
-The conversion layer is designed to be extended. Every converter inherits from a single abstract base class defined in `backend/utils/base.py`:
+Chunky supports two splitting libraries, each exposing multiple strategies. The library and strategy are selected independently in the UI.
+
+### LangChain (`langchain-text-splitters`)
+
+Install: `pip install langchain-text-splitters tiktoken`
+
+| Strategy | Description |
+|----------|-------------|
+| **Token** | Splits on token boundaries via tiktoken. Ideal for LLM context-window management. |
+| **Recursive** | Tries paragraph → sentence → word boundaries in order. |
+| **Character** | Splits on `\n\n` paragraphs, falls back to `chunk_size` characters. |
+| **Markdown** | Two-phase split: H1/H2/H3 headers first, then optional size cap via `RecursiveCharacterTextSplitter` (activate with `enable_markdown_sizing`). |
+
+### Chonkie
+
+Install: `pip install chonkie[all]`
+
+| Strategy | Description |
+|----------|-------------|
+| **Token** | Splits on token boundaries. Fast, no external tokeniser needed. |
+| **Fast** | SIMD-accelerated byte-based chunking at 100+ GB/s. Best for high-throughput pipelines. |
+| **Sentence** | Splits at sentence boundaries. Preserves semantic completeness. |
+| **Recursive** | Recursively splits using structural delimiters (paragraphs → sentences → words). Note: `chunk_overlap` is not supported. |
+| **Table** | Splits large Markdown tables by row while preserving headers. Ideal for tabular data. |
+| **Code** | Splits source code using AST-based structural analysis. Supports multiple languages. |
+| **Semantic** | Groups content by embedding similarity. Best for preserving topical coherence. |
+| **Neural** | Uses a fine-tuned BERT model to detect semantic shifts. Great for topic-coherent chunks. |
+
+> **Note:** The **Semantic** and **Neural** strategies download ML models on first use and may be slow to initialise. 
+
+---
+
+## Extending Chunky
+
+The converter and splitter layers are designed to be extended with minimal boilerplate. Both use a **decorator-based registry**: adding a new converter or splitter strategy automatically exposes it through the `/api/capabilities` endpoint and the UI — no frontend changes needed.
+
+### Adding a New Converter
+
+Every converter inherits from `PDFConverter` (`backend/converters/base.py`):
 
 ```python
 from abc import ABC, abstractmethod
@@ -113,44 +154,98 @@ class PDFConverter(ABC):
             raise FileNotFoundError(f"PDF file not found: {pdf_path}")
 ```
 
-To add a new converter, you only need to do three things:
+To add a new converter, you only need to do two things:
 
-**1. Create a new file in `backend/utils/`**
+**1. Create a new file in `backend/converters/` and decorate the class**
 
 ```python
-# backend/utils/my_converter.py
+# backend/converters/my_converter.py
 from pathlib import Path
+from backend.registry import register_converter
 from .base import PDFConverter
 
+@register_converter(
+    name="my_converter",
+    label="My Converter",
+    description="Short description shown in the UI.",
+)
 class MyConverter(PDFConverter):
     def __init__(self) -> None:
-        # initialise your library here (lazy imports are encouraged)
+        # Lazy imports are encouraged to avoid slowing down startup
         from my_library import MyParser
         self._parser = MyParser()
 
     def convert(self, pdf_path: Path) -> str:
         self.validate_path(pdf_path)
-        # your conversion logic here
-        return markdown_string
+        return self._parser.to_markdown(str(pdf_path))
 ```
 
-**2. Register it in `backend/utils/pdf_converter.py`**
+**2. Import it in `capabilities_router.py`**
 
 ```python
-from .my_converter import MyConverter
-
-CONVERTERS = {
-    "pymupdf":     PyMuPDFConverter,
-    "docling":     DoclingConverter,
-    "markitdown":  MarkItDownConverter,
-    "vlm":         VLMConverter,
-    "my_converter": MyConverter,   # <-- add this line
-}
+import backend.converters.my_converter  # noqa: F401 — side-effect import
 ```
 
-**3. Done.** Add the new option to the frontend converter selector.
+**Done.** The new converter appears automatically in `/api/capabilities` and the UI.
 
-> **Tip:** Use lazy imports inside `__init__` (like Docling and MarkItDown do) to avoid slowing down startup when your converter is not selected.
+### Adding a New Splitter Strategy
+
+Every splitter inherits from `TextSplitter` (`backend/splitters/base.py`). Strategies are individual methods decorated with `@register_splitter`:
+
+```python
+# Inside an existing or new TextSplitter subclass
+from backend.registry import register_splitter
+
+@register_splitter(
+    library="my_lib",
+    library_label="My Library",
+    strategy="my_strategy",
+    label="My Strategy",
+    description="Short description shown in the UI.",
+)
+def _split_my_strategy(self, request: ChunkRequest) -> List[ChunkItem]:
+    # your splitting logic here
+    splits = my_splitter.split(request.content, request.chunk_size)
+    return self.build_chunks(request.content, splits, request.chunk_overlap)
+```
+
+Import the module in `capabilities_router.py` and add the strategy to the splitter's `_DISPATCH` table. The strategy will appear in the UI automatically.
+
+---
+
+## Storage Layout
+
+```
+docs/
+  pdfs/          # uploaded PDF files
+  mds/           # converted / uploaded Markdown files
+chunks/
+  <stem>/        # one directory per document
+    <stem>_<UTC-ISO8601>.json   # timestamped chunk exports
+```
+
+Chunk files are stored in a normalised enriched format with placeholder fields for `CleanedChunk`, `Title`, `Context`, `Summary`, `Keywords`, and `Questions`, ready for a downstream enrichment pipeline.
+
+---
+
+## API Reference
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/capabilities` | All registered converters and splitter strategies |
+| `GET` | `/api/documents` | List all available documents |
+| `GET` | `/api/document/{filename}` | Metadata + Markdown content for a document |
+| `GET` | `/api/pdf/{filename}` | Serve a PDF for inline viewing |
+| `POST` | `/api/upload` | Upload one or more PDF / Markdown files |
+| `POST` | `/api/convert/{filename}` | Convert a PDF to Markdown |
+| `GET` | `/api/convert-progress/{filename}` | Poll VLM conversion progress |
+| `POST` | `/api/md-to-pdf/{filename}` | Convert Markdown back to PDF |
+| `DELETE` | `/api/documents` | Delete one or more documents and derived files |
+| `POST` | `/api/chunk` | Split text into chunks |
+| `POST` | `/api/chunks/save` | Persist a chunk set to disk |
+| `GET` | `/api/chunks/load/{filename}` | Load the latest chunk set for a document |
+
+Full interactive documentation is available at `http://localhost:8000/docs`.
 
 ---
 
