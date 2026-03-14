@@ -3,7 +3,7 @@
 </p>
 <h1 align="center">Chunky</h1>
 <p align="center">
-<strong>Validate, visualize, edit, and export chunks for RAG pipelines.</strong>
+    <strong>Transform PDFs into clean Markdown and chunk them right — inspect, edit, and export for RAG.</strong>
 </p>
 <p align="center">
 <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white"/>
