@@ -21,6 +21,7 @@ class ConverterType(str, Enum):
     docling = "docling"
     markitdown = "markitdown"
     vlm = "vlm"
+    minimax = "minimax"
 
 
 class SplitterType(str, Enum):

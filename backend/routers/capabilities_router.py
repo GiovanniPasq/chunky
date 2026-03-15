@@ -27,6 +27,7 @@ import backend.converters.pymupdf             # noqa: F401 — side-effect impor
 import backend.converters.markitdown          # noqa: F401 — side-effect import
 import backend.converters.docling             # noqa: F401 — side-effect import
 import backend.converters.vlm                 # noqa: F401 — side-effect import
+import backend.converters.minimax             # noqa: F401 — side-effect import
 
 router = APIRouter(prefix="/api", tags=["capabilities"])
 

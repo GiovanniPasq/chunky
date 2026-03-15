@@ -51,7 +51,7 @@ Chunking is one of the most underestimated steps in a RAG pipeline. As NVIDIA's 
 ## Features
 
 - 📄 Side-by-side PDF + Markdown viewer with synchronized scrolling
-- ✨ Four PDF → Markdown converters (PyMuPDF, Docling, MarkItDown, VLM) — skipped if you upload an existing Markdown file
+- ✨ Five PDF → Markdown converters (PyMuPDF, Docling, MarkItDown, VLM, MiniMax) — skipped if you upload an existing Markdown file
 - 🔄 Re-convert on the fly — switch converter and regenerate Markdown without restarting the pipeline
 - ✂️ Two splitting libraries — **LangChain** (4 strategies) and **Chonkie** (8 strategies)
 - 🎨 Color-coded chunk visualization with per-chunk editing
@@ -71,6 +71,7 @@ Chunky ships with four converters out of the box. You can switch between them in
 | **Docling** | `docling` | Complex layouts: multi-column documents, tables, and figures |
 | **MarkItDown** | `markitdown[all]` | Broad-format documents, simple and deterministic output |
 | **VLM** | `openai` + any vision model | Scanned PDFs, handwriting, diagrams — anything a human can read |
+| **MiniMax** | `openai` + MiniMax API | High-performance cloud vision models with 204K context window |
 
 ### VLM converter
 
@@ -95,6 +96,32 @@ VLMConverter(
 ```
 
 VLM conversions report per-page progress, which the frontend polls via `GET /api/convert-progress/{filename}`.
+
+### MiniMax converter
+
+The [MiniMax](https://www.minimaxi.com) converter is a pre-configured variant of the VLM converter that targets MiniMax's cloud API. It requires only an API key to get started — no local model setup needed.
+
+| Model | Context Window | Description |
+|-------|---------------|-------------|
+| `MiniMax-M2.5` *(default)* | 204,800 tokens | Peak performance, ultimate value |
+| `MiniMax-M2.5-highspeed` | 204,800 tokens | Same performance, faster and more agile |
+
+```bash
+export MINIMAX_API_KEY="your-key-here"
+```
+
+```python
+# Default — uses MiniMax-M2.5
+MinimaxConverter()
+
+# Faster variant
+MinimaxConverter(model="MiniMax-M2.5-highspeed")
+
+# Explicit API key
+MinimaxConverter(api_key="sk-...")
+```
+
+Like the VLM converter, MiniMax conversions report per-page progress.
 
 ---
 

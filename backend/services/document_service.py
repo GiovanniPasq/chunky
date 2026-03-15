@@ -15,6 +15,7 @@ from backend.converters.base import PDFConverter
 from backend.converters.docling import DoclingConverter
 from backend.converters.markitdown import MarkItDownConverter
 from backend.converters.pymupdf import PyMuPDFConverter
+from backend.converters.minimax import MinimaxConverter
 from backend.converters.vlm import VLMConverter
 from backend.models.schemas import (
     ConversionProgressResponse,
@@ -112,7 +113,7 @@ def _build_converter(
     on_progress: Optional[Callable[[int, int], None]] = None,
 ) -> PDFConverter:
     """Instantiate the requested converter, forwarding VLM settings when relevant."""
-    if converter_type == ConverterType.vlm:
+    if converter_type in (ConverterType.vlm, ConverterType.minimax):
         kwargs: dict = {}
         if vlm_settings:
             if vlm_settings.model:
@@ -123,6 +124,8 @@ def _build_converter(
                 kwargs["api_key"] = vlm_settings.api_key
         if on_progress:
             kwargs["on_progress"] = on_progress
+        if converter_type == ConverterType.minimax:
+            return MinimaxConverter(**kwargs)
         return VLMConverter(**kwargs)
 
     return _CONVERTER_MAP[converter_type]()
@@ -275,7 +278,7 @@ class DocumentService:
             converter = _build_converter(
                 converter_type,
                 vlm_settings,
-                on_progress=_on_progress if converter_type == ConverterType.vlm else None,
+                on_progress=_on_progress if converter_type in (ConverterType.vlm, ConverterType.minimax) else None,
             )
             md_content = converter.convert(pdf_path)
         finally:
