@@ -7,6 +7,7 @@ any provider that exposes an OpenAI-compatible chat completions endpoint.
 
 from __future__ import annotations
 
+import os
 import re
 import base64
 from pathlib import Path
@@ -73,6 +74,11 @@ Return raw markdown with no wrapper, no code blocks, no explanations. Start imme
 _RENDER_DPI = 300
 _DPI_SCALE = _RENDER_DPI / 72  # fitz uses 72 DPI as its baseline
 
+# Default base URL: reads from env var if set, otherwise falls back to localhost
+# (localhost works when running outside Docker; inside Docker the compose file
+# sets OLLAMA_BASE_URL=http://host.docker.internal:11434/v1)
+_DEFAULT_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+
 
 @register_converter(
     name="vlm",
@@ -121,7 +127,7 @@ class VLMConverter(PDFConverter):
     def __init__(
         self,
         model: str = "qwen3-vl:4b-instruct-q4_K_M",
-        base_url: str = "http://localhost:11434/v1",
+        base_url: str = _DEFAULT_BASE_URL,
         api_key: str = "ollama",
         on_progress: Optional[Callable[[int, int], None]] = None,
     ) -> None:

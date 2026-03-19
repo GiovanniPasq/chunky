@@ -8,6 +8,10 @@ services:
     volumes:
       - ./docs:/app/docs
       - ./chunks:/app/chunks
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434/v1
 
   frontend:
     build:
