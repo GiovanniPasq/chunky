@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     Increase for very slow models (e.g. large VLMs on CPU). Set to 0 to disable."""
 
     # ── App ────────────────────────────────────────────────────
-    APP_VERSION: str = "0.1.0"
+    APP_VERSION: str = "0.2.0"
 
 
 @lru_cache
