@@ -1,0 +1,159 @@
+/* ============================================
+   ProgressModal.css — blocking operation overlay
+   z-index 2000 ensures it sits above all other UI
+   ============================================ */
+
+.progress-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(20, 8, 2, 0.78);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: pmFadeIn 0.2s ease-out;
+}
+
+@keyframes pmFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ── Card ── */
+.progress-card {
+  background: linear-gradient(145deg, #ffffff 0%, #FFF8EC 100%);
+  border-radius: 16px;
+  width: min(460px, 92vw);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow:
+    0 40px 100px rgba(20, 8, 2, 0.55),
+    0 8px 32px rgba(139, 69, 19, 0.2),
+    0 0 0 1px rgba(255, 255, 255, 0.15);
+  animation: pmSlideIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes pmSlideIn {
+  from { transform: translateY(-24px) scale(0.96); opacity: 0; }
+  to   { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+/* ── Header ── */
+.progress-card-header {
+  padding: 22px 28px 16px;
+  background: linear-gradient(135deg, rgba(139, 69, 19, 0.07) 0%, rgba(210, 105, 30, 0.07) 100%);
+  border-bottom: 2px solid #F0E6D6;
+}
+
+.progress-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.4px;
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Body ── */
+.progress-card-body {
+  padding: 20px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.progress-detail {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #5C2E0A;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+/* ── Progress bar ── */
+.progress-track {
+  height: 10px;
+  background: rgba(139, 69, 19, 0.12);
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #8B4513 0%, #D2691E 60%, #F08030 100%);
+  border-radius: 99px;
+  transition: width 0.35s ease;
+  min-width: 8px;
+}
+
+/* Indeterminate: sweeping animation */
+.progress-fill--indeterminate {
+  width: 42% !important;
+  animation: pmSweep 1.4s ease-in-out infinite;
+}
+
+@keyframes pmSweep {
+  0%   { transform: translateX(-120%); }
+  100% { transform: translateX(340%); }
+}
+
+/* ── Error state ── */
+.progress-error {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #CC2200;
+  line-height: 1.5;
+  word-break: break-word;
+  padding: 10px 14px;
+  background: rgba(204, 34, 0, 0.07);
+  border: 1px solid rgba(204, 34, 0, 0.2);
+  border-radius: 8px;
+}
+
+/* ── Stats ── */
+.progress-stats {
+  font-size: 12px;
+  font-weight: 700;
+  color: #9A7050;
+  letter-spacing: 0.3px;
+  text-align: right;
+}
+
+/* ── Footer ── */
+.progress-card-footer {
+  padding: 14px 28px 22px;
+  display: flex;
+  justify-content: center;
+}
+
+.progress-interrupt-btn {
+  background: linear-gradient(135deg, #CC2200 0%, #A81B00 100%);
+  color: white;
+  border: none;
+  border-radius: 9px;
+  padding: 10px 32px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: inherit;
+  box-shadow: 0 4px 16px rgba(204, 34, 0, 0.35);
+}
+
+.progress-interrupt-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 24px rgba(204, 34, 0, 0.5);
+}
+
+.progress-interrupt-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(204, 34, 0, 0.35);
+}

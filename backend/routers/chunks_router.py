@@ -2,16 +2,33 @@
 Router for chunking endpoints.
 
 Prefix: /api
+
+Chunking streams progress via Server-Sent Events (SSE):
+
+    POST /api/chunk
+        SSE event types:
+            {"type": "start",  "operation": "chunk"}
+            {"type": "done",   "operation": "chunk", "chunks": [...],
+             "total_chunks": N, "splitter_type": "...", "splitter_library": "..."}
+            {"type": "error",  "status": 4xx/5xx, "message": "..."}
+            {"type": "cancelled"}
 """
 
+from __future__ import annotations
+
 import asyncio
+import json
+import logging
+from typing import AsyncGenerator
 
-from fastapi import APIRouter, Request
-from fastapi.responses import Response
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 
+logger = logging.getLogger(__name__)
+
+from backend.config import get_settings
 from backend.models.schemas import (
     ChunkRequest,
-    ChunkResponse,
     LoadChunksResponse,
     SaveChunksRequest,
     SaveChunksResponse,
@@ -24,9 +41,14 @@ _chunking = ChunkingService()
 _storage = ChunkStorageService()
 
 
-@router.post("/chunk", response_model=ChunkResponse)
+def _sse(data: dict) -> str:
+    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+@router.post("/chunk")
 async def chunk_text(http_request: Request, request: ChunkRequest):
-    """Split text into chunks using the specified strategy and library.
+    """Split text into chunks using the specified strategy and library, streaming
+    the result via SSE.
 
     **splitter_type** controls the splitting algorithm:
     ``token``, ``recursive``, ``character``, ``markdown``.
@@ -34,20 +56,57 @@ async def chunk_text(http_request: Request, request: ChunkRequest):
     **splitter_library** selects the underlying implementation:
     ``langchain`` (default) or ``chonkie``.
 
+    SSE events: ``start`` → ``done`` (or ``error`` / ``cancelled``).
     Runs in a thread pool so the event loop stays free for other requests.
     """
-    task = asyncio.create_task(
-        asyncio.to_thread(_chunking.chunk_text, request)
-    )
-    try:
-        while not task.done():
-            if await http_request.is_disconnected():
-                task.cancel()
-                return Response(status_code=499)
-            await asyncio.sleep(0.5)
-        return task.result()
-    except asyncio.CancelledError:
-        return Response(status_code=499)
+
+    async def event_stream() -> AsyncGenerator[str, None]:
+        if await http_request.is_disconnected():
+            yield _sse({"type": "cancelled"})
+            return
+
+        yield _sse({"type": "start", "operation": "chunk"})
+
+        watchdog_s = get_settings().SSE_WATCHDOG_TIMEOUT_S
+        timeout = float(watchdog_s) if watchdog_s > 0 else None
+
+        try:
+            result = await asyncio.wait_for(
+                asyncio.to_thread(_chunking.chunk_text, request),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                "Chunking watchdog fired: no result for %.0fs — aborting",
+                watchdog_s,
+            )
+            yield _sse({
+                "type": "error",
+                "status": 504,
+                "message": f"No result for {watchdog_s}s — operation timed out",
+            })
+            return
+        except asyncio.CancelledError:
+            yield _sse({"type": "cancelled"})
+            return
+        except HTTPException as exc:
+            yield _sse({"type": "error", "status": exc.status_code, "message": exc.detail})
+            return
+        except Exception as exc:
+            logger.exception("Unexpected error during chunking")
+            yield _sse({"type": "error", "status": 500, "message": str(exc)})
+            return
+
+        yield _sse({
+            "type": "done",
+            "operation": "chunk",
+            "chunks": [c.model_dump() for c in result.chunks],
+            "total_chunks": result.total_chunks,
+            "splitter_type": result.splitter_type,
+            "splitter_library": result.splitter_library,
+        })
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.post("/chunks/save", response_model=SaveChunksResponse)

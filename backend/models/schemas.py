@@ -75,6 +75,8 @@ class VLMSettings(BaseModel):
     model: Optional[str] = Field(default=None)
     base_url: Optional[str] = Field(default=None)
     api_key: Optional[str] = Field(default=None)
+    temperature: Optional[float] = Field(default=None)
+    user_prompt: Optional[str] = Field(default=None)
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +85,9 @@ class VLMSettings(BaseModel):
 
 
 class ConvertRequest(BaseModel):
+    """Body for POST /api/convert."""
+
+    filenames: List[str] = Field(..., min_length=1, description="PDF filename(s) to convert.")
     converter: ConverterType = Field(default=ConverterType.pymupdf)
     vlm: Optional[VLMSettings] = Field(default=None)
 
@@ -124,14 +129,6 @@ class ConvertResponse(BaseModel):
     md_filename: str
     message: str
     md_content: str
-
-
-class ConversionProgressResponse(BaseModel):
-    """Current progress of an active conversion job."""
-
-    active: bool
-    current: int = 0
-    total: int = 0
 
 
 class DeleteResponse(BaseModel):
@@ -222,3 +219,61 @@ class LoadChunksResponse(BaseModel):
     chunks: List[Dict[str, Any]]
     total_chunks: int
     filename: str
+
+
+# ---------------------------------------------------------------------------
+# Enrichment endpoints
+# ---------------------------------------------------------------------------
+
+
+class EnrichmentRequest(BaseModel):
+    """OpenAI-compatible connection settings for enrichment."""
+
+    model: str
+    base_url: str = "http://localhost:11434/v1"
+    api_key: str = "ollama"
+    temperature: float = 0.3
+    user_prompt: Optional[str] = None
+
+
+class EnrichMarkdownRequest(BaseModel):
+    content: str = Field(..., min_length=1)
+    settings: EnrichmentRequest
+
+
+class EnrichMarkdownResponse(BaseModel):
+    enriched_content: str
+
+
+class ChunkToEnrich(BaseModel):
+    index: int
+    content: str
+    start: int = 0
+    end: int = 0
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class EnrichChunksRequest(BaseModel):
+    chunks: List[ChunkToEnrich] = Field(..., min_length=1)
+    settings: EnrichmentRequest
+
+
+class EnrichedChunk(BaseModel):
+    index: int
+    content: str
+    cleaned_chunk: str = ""
+    title: str = ""
+    context: str = ""
+    summary: str = ""
+    keywords: List[str] = Field(default_factory=list)
+    questions: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    start: int = 0
+    end: int = 0
+
+
+class EnrichChunksResponse(BaseModel):
+    chunks: List[EnrichedChunk]
+    total_chunks: int
+
+

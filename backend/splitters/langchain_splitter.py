@@ -14,6 +14,7 @@ from typing import Callable, Dict, List
 from fastapi import HTTPException
 from langchain_text_splitters import (
     CharacterTextSplitter,
+    Language,
     MarkdownHeaderTextSplitter,
     RecursiveCharacterTextSplitter,
     TokenTextSplitter,
@@ -81,11 +82,12 @@ class LangChainSplitter(TextSplitter):
             chunk_size=request.chunk_size,
             chunk_overlap=request.chunk_overlap,
         )
-        return self.build_chunks(
-            request.content,
-            splitter.split_text(request.content),
-            request.chunk_overlap,
-        )
+        splits = splitter.split_text(request.content)
+        # chunk_overlap is in *tokens*; build_chunks needs *characters*.
+        # Measure the actual character overlap from the first adjacent pair
+        # rather than estimating a token→char ratio.
+        char_overlap = self.measure_char_overlap(splits)
+        return self.build_chunks(request.content, splits, char_overlap)
 
     @register_splitter(
         library=_LIB, library_label=_LIB_LABEL,
@@ -93,10 +95,13 @@ class LangChainSplitter(TextSplitter):
         description="Tries paragraph → sentence → word boundaries in order.",
     )
     def _split_recursive(self, request: ChunkRequest) -> List[ChunkItem]:
-        splitter = RecursiveCharacterTextSplitter(
+        # Use markdown-aware separators: headings, fences, horizontal rules,
+        # blank lines, newlines — in that priority order.  chunk_size and
+        # chunk_overlap are in characters (length_function=len is the default).
+        splitter = RecursiveCharacterTextSplitter.from_language(
+            Language.MARKDOWN,
             chunk_size=request.chunk_size,
             chunk_overlap=request.chunk_overlap,
-            length_function=len,
         )
         return self.build_chunks(
             request.content,
@@ -147,7 +152,10 @@ class LangChainSplitter(TextSplitter):
         docs = md_splitter.split_text(request.content)
 
         if request.enable_markdown_sizing:
-            secondary = RecursiveCharacterTextSplitter(
+            # Use the same markdown-aware separators as the recursive strategy
+            # so that sub-splits also respect markdown structure.
+            secondary = RecursiveCharacterTextSplitter.from_language(
+                Language.MARKDOWN,
                 chunk_size=request.chunk_size,
                 chunk_overlap=request.chunk_overlap,
             )

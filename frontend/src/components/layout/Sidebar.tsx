@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react'
+import type { BulkProgressFn, BulkResultFn } from '../../hooks/useDocument'
 import './Sidebar.css'
 
 interface Props {
@@ -10,16 +11,28 @@ interface Props {
   collapsed: boolean
   onToggleCollapse: () => void
   onDelete: (filenames: string[]) => Promise<void>
+  onBulkConvert?: (filenames: string[], onProgress: BulkProgressFn, onResult: BulkResultFn) => Promise<void>
+  onBulkChunk?: (filenames: string[], onProgress: BulkProgressFn, onResult: BulkResultFn) => Promise<void>
+}
+
+interface BulkOpState {
+  type: 'convert' | 'chunk'
+  current: number
+  total: number
+  currentFile: string
+  results: Map<string, boolean>
 }
 
 export default function Sidebar({
   documents, selectedDoc, onSelect, onUpload, uploading,
   collapsed, onToggleCollapse, onDelete,
+  onBulkConvert, onBulkChunk,
 }: Props) {
   const [search, setSearch] = useState('')
   const [selectMode, setSelectMode] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [deleting, setDeleting] = useState(false)
+  const [bulkOp, setBulkOp] = useState<BulkOpState | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const filtered = documents.filter(d => d.toLowerCase().includes(search.toLowerCase()))
@@ -65,6 +78,32 @@ export default function Sidebar({
     }
   }
 
+  const runBulkOp = async (type: 'convert' | 'chunk', handler: typeof onBulkConvert) => {
+    if (!handler || selected.size === 0) return
+    const filenames = Array.from(selected)
+    const results = new Map<string, boolean>()
+
+    setBulkOp({ type, current: 0, total: filenames.length, currentFile: '', results })
+
+    const onProgress: BulkProgressFn = (current, total, filename) =>
+      setBulkOp(prev => prev ? { ...prev, current, total, currentFile: filename } : prev)
+
+    const onResult: BulkResultFn = (filename, success) => {
+      results.set(filename, success)
+      setBulkOp(prev => prev ? { ...prev, results: new Map(results) } : prev)
+    }
+
+    try {
+      await handler(filenames, onProgress, onResult)
+    } finally {
+      setBulkOp(null)
+      setSelected(new Set())
+      setSelectMode(false)
+    }
+  }
+
+  const isBusy = deleting || bulkOp !== null
+
   return (
     <div className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
 
@@ -72,8 +111,8 @@ export default function Sidebar({
       <div className="sidebar-fixed">
 
         <div className="sidebar-brand">
-          <img src="./src/assets/logo.png" alt="Chunky logo" className="sidebar-logo" />
-          {!collapsed && <span className="sidebar-app-name">Chunky</span>}
+          <img src="./src/assets/logo.png" alt=" logo" className="sidebar-logo" />
+          {!collapsed && <span className="sidebar-app-name"></span>}
         </div>
 
         {collapsed ? (
@@ -126,6 +165,7 @@ export default function Sidebar({
                   className={`select-toggle-btn ${selectMode ? 'active' : ''}`}
                   onClick={toggleSelectMode}
                   title={selectMode ? 'Cancel selection' : 'Select documents'}
+                  disabled={isBusy}
                 >
                   {selectMode ? '✕' : 'Select'}
                 </button>
@@ -133,24 +173,76 @@ export default function Sidebar({
             </div>
 
             {selectMode && (
-              <div className="bulk-actions">
-                <button
-                  className="bulk-btn select-all"
-                  onClick={() => setSelected(new Set(filtered))}
-                  disabled={selected.size === filtered.length}
-                >
-                  Select all
-                </button>
-                <button
-                  className="bulk-btn delete-selected"
-                  onClick={handleDeleteSelected}
-                  disabled={selected.size === 0 || deleting}
-                >
-                  {deleting
-                    ? '⏳ Deleting…'
-                    : `🗑 Delete${selected.size > 0 ? ` (${selected.size})` : ''}`}
-                </button>
-              </div>
+              <>
+                <div className="bulk-actions">
+                  <button
+                    className="bulk-btn select-all"
+                    onClick={() => setSelected(new Set(filtered))}
+                    disabled={selected.size === filtered.length || isBusy}
+                  >
+                    Select all
+                  </button>
+                  <button
+                    className="bulk-btn delete-selected"
+                    onClick={handleDeleteSelected}
+                    disabled={selected.size === 0 || isBusy}
+                  >
+                    {deleting
+                      ? '⏳ Deleting…'
+                      : `🗑 Delete${selected.size > 0 ? ` (${selected.size})` : ''}`}
+                  </button>
+                </div>
+
+                {(onBulkConvert || onBulkChunk) && (
+                  <div className="bulk-actions bulk-actions-secondary">
+                    {onBulkConvert && (
+                      <button
+                        className="bulk-btn convert-selected"
+                        onClick={() => runBulkOp('convert', onBulkConvert)}
+                        disabled={selected.size === 0 || isBusy}
+                      >
+                        {bulkOp?.type === 'convert'
+                          ? `⏳ ${bulkOp.current}/${bulkOp.total}`
+                          : `✨ Convert${selected.size > 0 ? ` (${selected.size})` : ''}`}
+                      </button>
+                    )}
+                    {onBulkChunk && (
+                      <button
+                        className="bulk-btn chunk-selected"
+                        onClick={() => runBulkOp('chunk', onBulkChunk)}
+                        disabled={selected.size === 0 || isBusy}
+                      >
+                        {bulkOp?.type === 'chunk'
+                          ? `⏳ ${bulkOp.current}/${bulkOp.total}`
+                          : `⛓ Chunk${selected.size > 0 ? ` (${selected.size})` : ''}`}
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {bulkOp && (
+                  <div className="bulk-progress">
+                    <span className="bulk-progress-label">
+                      {bulkOp.type === 'convert' ? 'Converting' : 'Chunking'}{' '}
+                      {bulkOp.current}/{bulkOp.total}
+                    </span>
+                    {bulkOp.currentFile && (
+                      <span className="bulk-progress-file" title={bulkOp.currentFile}>
+                        {bulkOp.currentFile}
+                      </span>
+                    )}
+                    <div className="bulk-progress-results">
+                      {Array.from(bulkOp.results.entries()).map(([file, ok]) => (
+                        <span
+                          key={file}
+                          className={`bulk-result-dot ${ok ? 'ok' : 'fail'}`}
+                          title={`${file}: ${ok ? 'success' : 'failed'}`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </>
         )}

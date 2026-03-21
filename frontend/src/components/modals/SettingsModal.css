@@ -362,12 +362,40 @@
 /* ── Footer ── */
 .modal-footer {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
   gap: 10px;
   padding: 14px 24px;
   border-top: 2px solid #EDD9C0;
   background-color: #FDF6EC;
   flex-shrink: 0;
+}
+
+.modal-footer-actions {
+  display: flex;
+  gap: 10px;
+}
+
+/* ── Reset to defaults ── */
+.btn-reset {
+  background: transparent;
+  border: 1.5px solid rgba(139, 69, 19, 0.2);
+  border-radius: 8px;
+  color: #9A7050;
+  padding: 9px 16px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: inherit;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.btn-reset:hover {
+  border-color: #8B4513;
+  color: #5C2E0A;
+  background: rgba(139, 69, 19, 0.05);
 }
 
 /* ── Shared buttons (also used by ChunkEditModal) ── */
@@ -480,4 +508,174 @@
   background: rgba(139, 69, 19, 0.05);
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(139, 69, 19, 0.15);
+}
+
+/* ── Settings Tabs ── */
+.settings-tabs {
+  display: flex;
+  border-bottom: 2px solid #F0E6D6;
+  background: rgba(255, 248, 235, 0.6);
+  flex-shrink: 0;
+}
+
+.settings-tab {
+  flex: 1;
+  padding: 11px 16px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: inherit;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #9A7050;
+  transition: color 0.2s, background 0.2s;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+}
+
+.settings-tab:hover:not(.active) {
+  color: #5C2E0A;
+  background: rgba(139, 69, 19, 0.04);
+}
+
+.settings-tab.active {
+  color: #8B4513;
+  border-bottom-color: #8B4513;
+  background: transparent;
+}
+
+/* ── Enrichment settings block ── */
+.enrichment-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 10px;
+  border: 1.5px solid transparent;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Colored left accent bar */
+.enrichment-settings::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  border-radius: 10px 0 0 10px;
+}
+
+/* Section (Markdown) Enrichment — blue */
+.enrichment-settings--section {
+  background: linear-gradient(135deg, rgba(30, 90, 140, 0.05) 0%, rgba(30, 90, 140, 0.02) 100%);
+  border-color: rgba(30, 90, 140, 0.2);
+  box-shadow: 0 2px 8px rgba(30, 90, 140, 0.06);
+}
+.enrichment-settings--section::before {
+  background: linear-gradient(180deg, #1E5A8C, #3B8ED4);
+}
+
+/* Chunk Enrichment — green */
+.enrichment-settings--chunk {
+  background: linear-gradient(135deg, rgba(34, 110, 60, 0.05) 0%, rgba(34, 110, 60, 0.02) 100%);
+  border-color: rgba(34, 110, 60, 0.2);
+  box-shadow: 0 2px 8px rgba(34, 110, 60, 0.06);
+}
+.enrichment-settings--chunk::before {
+  background: linear-gradient(180deg, #226E3C, #3DAF6A);
+}
+
+.enrichment-settings-title {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin-bottom: 2px;
+  padding-left: 2px;
+}
+
+.enrichment-settings--section .enrichment-settings-title {
+  color: #1E5A8C;
+}
+.enrichment-settings--chunk .enrichment-settings-title {
+  color: #226E3C;
+}
+
+/* Inputs inside enrichment blocks inherit base styles but get a tinted focus ring */
+.enrichment-settings--section .form-group select:focus,
+.enrichment-settings--section .form-group input:focus,
+.enrichment-settings--section .enrichment-textarea:focus {
+  border-color: #1E5A8C;
+  box-shadow: 0 0 0 3px rgba(30, 90, 140, 0.1);
+}
+
+.enrichment-settings--chunk .form-group select:focus,
+.enrichment-settings--chunk .form-group input:focus,
+.enrichment-settings--chunk .enrichment-textarea:focus {
+  border-color: #226E3C;
+  box-shadow: 0 0 0 3px rgba(34, 110, 60, 0.1);
+}
+
+/* Slider accent colours */
+.enrichment-settings--section .temperature-control input[type="range"] {
+  accent-color: #1E5A8C;
+}
+.enrichment-settings--chunk .temperature-control input[type="range"] {
+  accent-color: #226E3C;
+}
+
+/* ── Temperature slider ── */
+.temperature-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.temperature-control input[type="range"] {
+  flex: 1;
+  height: 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  accent-color: #8B4513;
+}
+
+.temperature-value {
+  font-size: 12px;
+  font-weight: 700;
+  color: #5C2E0A;
+  min-width: 32px;
+  text-align: right;
+}
+
+/* ── Enrichment textarea ── */
+.enrichment-textarea {
+  background: white;
+  border: 2px solid #E8D5C0;
+  border-radius: 8px;
+  color: #3B1A05;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  outline: none;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: inherit;
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 70px;
+}
+
+.enrichment-textarea:focus {
+  border-color: #8B4513;
+  box-shadow: 0 0 0 3px rgba(139, 69, 19, 0.1);
+}
+
+.enrichment-textarea::placeholder {
+  color: #B08060;
 }

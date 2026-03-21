@@ -10,9 +10,10 @@ interface Props {
   scale?: number
   onScaleChange: (s: number) => void
   scrollSyncEnabled?: boolean
+  onHide?: () => void
 }
 
-export default function PDFViewer({ filename, scale = 1.0, onScaleChange, scrollSyncEnabled = true }: Props) {
+export default function PDFViewer({ filename, scale = 1.0, onScaleChange, scrollSyncEnabled = true, onHide }: Props) {
   const [pdf, setPdf] = useState<pdfjsLib.PDFDocumentProxy | null>(null)
   const [numPages, setNumPages] = useState(0)
   const [toast, setToast] = useState<string | null>(null)
@@ -24,37 +25,84 @@ export default function PDFViewer({ filename, scale = 1.0, onScaleChange, scroll
   const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout>>()
   const rafRef = useRef<number>()
 
-  useEffect(() => { loadPDF() }, [filename])
-  useEffect(() => { if (pdf) renderAllPages() }, [pdf, scale])
+  useEffect(() => {
+    let cancelled = false
+    pdfjsLib.getDocument(`/api/pdf/${filename}`).promise
+      .then(doc => {
+        if (cancelled) return
+        setPdf(doc)
+        setNumPages(doc.numPages)
+      })
+      .catch(e => console.error('PDF load error:', e))
+    return () => { cancelled = true }
+  }, [filename])
 
-  const loadPDF = async () => {
-    try {
-      const doc = await pdfjsLib.getDocument(`/api/pdf/${filename}`).promise
-      setPdf(doc)
-      setNumPages(doc.numPages)
-    } catch (e) { console.error(e) }
-  }
+  // Render all pages whenever pdf or scale changes.
+  // Cancels any in-flight render tasks from a previous run.
+  useEffect(() => {
+    if (!pdf || numPages === 0) return
 
-  const renderAllPages = async () => {
-    if (!pdf) return
-    for (let p = 1; p <= numPages; p++) {
-      const page = await pdf.getPage(p)
-      const viewport = page.getViewport({ scale })
-      const canvas = canvasRefs.current[p - 1]
-      if (!canvas) continue
-      canvas.height = viewport.height
-      canvas.width = viewport.width
-      await page.render({ canvasContext: canvas.getContext('2d')!, viewport }).promise
+    let cancelled = false
+    const renderTasks: pdfjsLib.RenderTask[] = []
+    const dpr = window.devicePixelRatio || 1
 
-      const tl = textLayerRefs.current[p - 1]
-      if (tl) {
-        tl.innerHTML = ''
-        const tc = await page.getTextContent()
-        pdfjsLib.renderTextLayer({ textContentSource: tc, container: tl, viewport, textDivs: [] })
+    const renderAll = async () => {
+      for (let i = 0; i < numPages; i++) {
+        if (cancelled) break
+
+        const page = await pdf.getPage(i + 1)
+        if (cancelled) break
+
+        // getViewport respects the page's embedded rotation automatically.
+        const viewport = page.getViewport({ scale })
+
+        const canvas = canvasRefs.current[i]
+        if (!canvas || cancelled) break
+
+        // Physical pixels — sharp on HiDPI screens.
+        canvas.width = Math.floor(viewport.width * dpr)
+        canvas.height = Math.floor(viewport.height * dpr)
+        // CSS pixels — drives layout and matches text-layer coordinates.
+        canvas.style.width = `${viewport.width}px`
+        canvas.style.height = `${viewport.height}px`
+
+        const ctx = canvas.getContext('2d')!
+        // Scale the context up by DPR so pdf.js renders at full resolution
+        // without needing an extra transform parameter.
+        ctx.scale(dpr, dpr)
+
+        const task = page.render({ canvasContext: ctx, viewport })
+        renderTasks.push(task)
+        // Swallow AbortError thrown when a task is cancelled mid-render.
+        await task.promise.catch(() => {})
+        if (cancelled) break
+
+        const tl = textLayerRefs.current[i]
+        if (tl) {
+          tl.innerHTML = ''
+          // Match the CSS pixel dimensions of the canvas exactly so
+          // pdf.js-computed span positions are correct.
+          tl.style.width = `${viewport.width}px`
+          tl.style.height = `${viewport.height}px`
+          const tc = await page.getTextContent()
+          if (!cancelled) {
+            pdfjsLib.renderTextLayer({ textContentSource: tc, container: tl, viewport, textDivs: [] })
+          }
+        }
       }
     }
-  }
 
+    renderAll()
+
+    return () => {
+      cancelled = true
+      for (const task of renderTasks) {
+        try { task.cancel() } catch { /* already finished */ }
+      }
+    }
+  }, [pdf, scale, numPages])
+
+  // ── Scroll sync ──────────────────────────────────────────────
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     if (isScrollingRef.current || !scrollSyncEnabled) return
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
@@ -68,7 +116,6 @@ export default function PDFViewer({ filename, scale = 1.0, onScaleChange, scroll
     })
   }
 
-  // Fixed: was `if (scrollSyncEnabled || ...)` which inverted the condition
   const handleMouseUp = () => {
     if (!scrollSyncEnabled || !containerRef.current) return
     const sel = window.getSelection()
@@ -102,11 +149,21 @@ export default function PDFViewer({ filename, scale = 1.0, onScaleChange, scroll
   return (
     <div className="pdf-viewer">
       {toast && <Toast message={toast} onClose={() => setToast(null)} />}
+
       <div className="pdf-controls">
-        <button onClick={() => onScaleChange(Math.max(0.5, scale - 0.1))} disabled={scale <= 0.5}>−</button>
-        <span>{(scale * 100).toFixed(0)}%</span>
-        <button onClick={() => onScaleChange(Math.min(3, scale + 0.1))} disabled={scale >= 3}>+</button>
+        <div className="pdf-zoom">
+          <button onClick={() => onScaleChange(Math.max(0.5, scale - 0.1))} disabled={scale <= 0.5}>−</button>
+          <span>{(scale * 100).toFixed(0)}%</span>
+          <button onClick={() => onScaleChange(Math.min(3, scale + 0.1))} disabled={scale >= 3}>+</button>
+        </div>
+
+        {onHide && (
+          <button className="pdf-hide-btn" onClick={onHide} title="Hide PDF panel">
+            ← Hide
+          </button>
+        )}
       </div>
+
       <div className="pdf-container" ref={containerRef} onScroll={handleScroll} onMouseUp={handleMouseUp}>
         {Array.from({ length: numPages }, (_, i) => (
           <div key={i} className="pdf-page">

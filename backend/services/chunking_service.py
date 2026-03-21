@@ -9,7 +9,11 @@ the actual splitting to the chosen implementation.
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import HTTPException
+
+logger = logging.getLogger(__name__)
 
 from backend.models.schemas import ChunkRequest, ChunkResponse, SplitterLibrary
 from backend.splitters import ChonkieSplitter, LangChainSplitter, TextSplitter
@@ -51,6 +55,15 @@ class ChunkingService:
 
         splitter = splitter_cls()
         chunks = splitter.split(request)
+
+        avg_chars = int(sum(len(c.content) for c in chunks) / len(chunks)) if chunks else 0
+        logger.info(
+            "Chunking complete: library=%s strategy=%s chunk_size=%d chunk_overlap=%d "
+            "chunks=%d avg_chunk_chars=%d",
+            request.splitter_library, request.splitter_type,
+            request.chunk_size, request.chunk_overlap,
+            len(chunks), avg_chars,
+        )
 
         return ChunkResponse(
             chunks=chunks,

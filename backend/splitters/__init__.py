@@ -1,5 +1,5 @@
 """
-Text splitters for Chunky.
+Text splitters for .
 
 Available splitter libraries
 -----------------------------

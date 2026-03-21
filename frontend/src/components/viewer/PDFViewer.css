@@ -8,46 +8,80 @@
 .pdf-controls {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
   padding: 12px 20px;
   background: linear-gradient(135deg, rgba(139, 69, 19, 0.06) 0%, rgba(210, 105, 30, 0.06) 100%);
   border-bottom: 2px solid #F0E6D6;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  flex-shrink: 0;
 }
 
-.pdf-controls button {
-  padding: 8px 16px;
+/* ── Zoom group ── */
+.pdf-zoom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pdf-zoom button {
+  padding: 6px 14px;
   background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
   color: #fff;
   border: none;
   border-radius: 8px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
+  line-height: 1;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.3);
 }
 
-.pdf-controls button:hover:not(:disabled) {
+.pdf-zoom button:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0px 1px 10px 0px rgba(139, 69, 19, 0.45);
+  box-shadow: 0px 4px 12px rgba(139, 69, 19, 0.45);
 }
 
-.pdf-controls button:disabled {
+.pdf-zoom button:disabled {
   background: linear-gradient(135deg, #718096 0%, #4a5568 100%);
   cursor: not-allowed;
   opacity: 0.5;
   box-shadow: none;
 }
 
-.pdf-controls span {
-  font-size: 14px;
+.pdf-zoom span {
+  font-size: 13px;
   font-weight: 700;
-  color: #ffffff;
-  letter-spacing: 0.5px;
-  min-width: 44px;
+  color: #5C2E0A;
+  letter-spacing: 0.3px;
+  min-width: 42px;
   text-align: center;
-  text-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+
+/* ── Hide button ── */
+.pdf-hide-btn {
+  padding: 6px 14px;
+  background: white;
+  color: #5C2E0A;
+  border: 1.5px solid rgba(139, 69, 19, 0.25);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: inherit;
+  box-shadow: 0 1px 4px rgba(139, 69, 19, 0.1);
+}
+
+.pdf-hide-btn:hover {
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  border-color: transparent;
+  color: white;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(139, 69, 19, 0.3);
 }
 
 .pdf-container {
@@ -104,8 +138,7 @@
   position: absolute;
   left: 0;
   top: 0;
-  right: 0;
-  bottom: 40px;
+  /* width and height are set dynamically in JS to match the canvas CSS dimensions exactly */
   overflow: hidden;
   opacity: 1;
   line-height: 1.0;

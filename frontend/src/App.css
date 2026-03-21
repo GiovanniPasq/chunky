@@ -85,7 +85,9 @@
 .viewers {
   display: flex;
   flex: 1;
-  overflow: hidden;
+  /* overflow: visible lets the divider preset popup float outside the bar */
+  overflow: visible;
+  min-height: 0;
 }
 
 .viewer-panel {
@@ -97,6 +99,9 @@
 }
 
 .panel-label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   padding: 14px 20px;
   background: linear-gradient(135deg, rgba(139, 69, 19, 0.06) 0%, rgba(210, 105, 30, 0.06) 100%);
   border-bottom: 2px solid #F0E6D6;
@@ -107,21 +112,125 @@
   letter-spacing: 0.5px;
   text-transform: uppercase;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  flex-shrink: 0;
+}
+
+/* "PDF →" restore button shown in the Markdown panel-label when PDF is hidden */
+.show-pdf-btn {
+  padding: 4px 12px;
+  background: white;
+  border: 1.5px solid rgba(139, 69, 19, 0.25);
+  border-radius: 6px;
+  color: #8B4513;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: inherit;
+  box-shadow: 0 1px 4px rgba(139, 69, 19, 0.1);
+  flex-shrink: 0;
+}
+
+.show-pdf-btn:hover {
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  border-color: transparent;
+  color: white;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(139, 69, 19, 0.3);
 }
 
 .viewer-divider {
-  width: 6px;
+  width: 8px;
   background: linear-gradient(180deg, #8B4513 0%, #D2691E 100%);
   cursor: col-resize;
   flex-shrink: 0;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: width 0.2s ease, box-shadow 0.2s ease;
   position: relative;
-  box-shadow: 0 0 20px rgba(139, 69, 19, 0.3);
+  box-shadow: 0 0 16px rgba(139, 69, 19, 0.3);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+  z-index: 10;
+  user-select: none;
 }
 
 .viewer-divider:hover {
-  width: 8px;
-  box-shadow: 0 0 30px rgba(139, 69, 19, 0.6);
+  width: 10px;
+  box-shadow: 0 0 28px rgba(139, 69, 19, 0.6);
+}
+
+/* ── Grip dots ── */
+.viewer-divider-grip {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  padding: 5px 3px;
+  pointer-events: none;
+}
+
+.viewer-divider-grip span {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.55);
+  transition: background 0.2s;
+}
+
+.viewer-divider:hover .viewer-divider-grip span {
+  background: rgba(255, 255, 255, 0.95);
+}
+
+/* ── Preset ratio popup — floats to the right of the divider ── */
+.viewer-divider-presets {
+  position: absolute;
+  top: 50%;
+  left: calc(100% + 10px);
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 6px;
+  background: rgba(30, 10, 0, 0.88);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(8px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  transform: translateY(-50%) translateX(-4px);
+}
+
+.viewer-divider:hover .viewer-divider-presets {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(-50%) translateX(0);
+}
+
+.viewer-divider-presets button {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.75);
+  border-radius: 5px;
+  padding: 5px 10px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.viewer-divider-presets button:hover {
+  background: rgba(210, 105, 30, 0.5);
+  border-color: rgba(210, 105, 30, 0.7);
+  color: white;
+  transform: translateX(2px);
 }
 
 /* ── Markdown not found ── */

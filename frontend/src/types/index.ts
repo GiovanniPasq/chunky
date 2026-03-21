@@ -39,6 +39,16 @@ export interface VLMSettings {
   model?: string
   base_url?: string
   api_key?: string
+  temperature?: number
+  user_prompt?: string
+}
+
+export interface EnrichmentSettings {
+  model?: string
+  base_url?: string
+  api_key?: string
+  temperature?: number
+  user_prompt?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -56,6 +66,8 @@ export interface ChunkSettings {
   enableMarkdownSizing: boolean
   converter: ConverterType
   vlm?: VLMSettings
+  sectionEnrichment?: EnrichmentSettings
+  chunkEnrichment?: EnrichmentSettings
 }
 
 // ---------------------------------------------------------------------------

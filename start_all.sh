@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "========================================="
-echo "       Chunky - Starting All Services    "
+echo "       - Starting All Services    "
 echo "========================================="
 echo ""
 
@@ -17,7 +17,7 @@ trap cleanup EXIT INT TERM
 # Start backend
 echo "Starting FastAPI backend..."
 source venv/bin/activate
-python main.py &
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 &
 BACKEND_PID=$!
 echo "Backend started (PID: $BACKEND_PID) at http://localhost:8000"
 echo ""

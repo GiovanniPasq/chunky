@@ -11,8 +11,11 @@ Dependencies:
 
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 import markdown
 from weasyprint import CSS, HTML
@@ -165,39 +168,35 @@ def _convert_file(md_path: Path, pdf_path: Path) -> bool:
         )
         return True
     except Exception as exc:
-        print(f"  ERROR: {exc}")
+        logger.error("MD→PDF conversion failed for '%s': %s", md_path.name, exc)
         return False
 
 
 def main() -> int:
     if not MDS_DIR.exists():
-        print(f"Error: source directory '{MDS_DIR}' does not exist.")
+        logger.error("Source directory '%s' does not exist.", MDS_DIR)
         return 1
 
     PDFS_DIR.mkdir(parents=True, exist_ok=True)
 
     md_files = sorted(MDS_DIR.glob("*.md"))
     if not md_files:
-        print(f"No Markdown files found in '{MDS_DIR}'.")
+        logger.info("No Markdown files found in '%s'.", MDS_DIR)
         return 0
 
-    print(f"Converting {len(md_files)} file(s)…")
-    print("─" * 60)
+    logger.info("Converting %d file(s)…", len(md_files))
 
     converted = failed = 0
     for md_file in md_files:
         pdf_path = PDFS_DIR / f"{md_file.stem}.pdf"
-        print(f"  {md_file.name}  →  {pdf_path.name} … ", end="", flush=True)
+        logger.info("  %s  →  %s", md_file.name, pdf_path.name)
         if _convert_file(md_file, pdf_path):
-            print("✓")
             converted += 1
         else:
-            print("✗")
             failed += 1
 
-    print("─" * 60)
-    print(f"Done — converted: {converted}, failed: {failed}")
-    print(f"PDFs saved in: {PDFS_DIR.resolve()}")
+    logger.info("Done — converted: %d, failed: %d", converted, failed)
+    logger.info("PDFs saved in: %s", PDFS_DIR.resolve())
     return 0 if failed == 0 else 1
 
 

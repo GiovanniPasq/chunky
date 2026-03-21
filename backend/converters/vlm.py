@@ -1,83 +1,50 @@
 """
 PDF-to-Markdown converter using any OpenAI-compatible Vision-Language Model.
 
-Defaults to Ollama running locally (llama3.2-vision), but can be pointed at
+Defaults to Ollama running locally (qwen3-vl), but can be pointed at
 any provider that exposes an OpenAI-compatible chat completions endpoint.
 """
 
 from __future__ import annotations
 
+import base64
+import logging
 import os
 import re
-import base64
+import time
 from pathlib import Path
 from typing import Callable, Optional
+
+import httpx
+
 from backend.registry import register_converter
 from .base import PDFConverter
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # System prompt
 # ---------------------------------------------------------------------------
 
-_SYSTEM_PROMPT = """You are an expert document parser specializing in converting PDF pages to markdown format.
+_PROMPT = """Convert the PDF page image to clean markdown.
 
-**Your task:** Extract ALL content from the provided page image and return it as clean, well-structured markdown.
+**Text:** Preserve exact content, reading order, and hierarchy (#, ##, ###). Use standard markdown for bold, italic, code, lists, blockquotes, footnotes.
+**Tables:** Full markdown table syntax with alignment.
+**Math:** LaTeX inline $...$ or display $$...$$.
+**Visuals:** Replace with `![<type>: <description of content, labels, trends>](image)`.
+**Code:** Triple backticks with language tag.
 
-**Text Extraction Rules:**
-1. Preserve the EXACT text as written (including typos, formatting, special characters)
-2. Maintain the logical reading order (top-to-bottom, left-to-right)
-3. Preserve hierarchical structure using appropriate markdown headers (#, ##, ###)
-4. Keep paragraph breaks and line spacing as they appear
-5. Use markdown lists (-, *, 1.) for bullet points and numbered lists
-6. Preserve text emphasis: **bold**, *italic*, `code`
-7. For multi-column layouts, extract left column first, then right column
-
-**Tables:**
-- Convert all tables to markdown table format
-- Preserve column alignment and structure
-- Use | for columns and - for headers
-
-**Mathematical Formulas:**
-- Convert to LaTeX format: inline `$...$`, display `$$...$$`
-- If LaTeX conversion is uncertain, describe the formula clearly
-
-**Images, Diagrams, Charts:**
-- Insert markdown image placeholder: `![Description](image)`
-- Provide a detailed, informative description including:
-  * Type of visual (photo, diagram, chart, graph, illustration)
-  * Main subject or purpose
-  * Key elements, labels, or data points
-  * Colors, patterns, or notable visual features
-  * Context or relationship to surrounding text
-- For charts/graphs: mention axes, data trends, and key values
-- For diagrams: describe components and their relationships
-
-**Special Elements:**
-- Footnotes: Use markdown footnote syntax `[^1]`
-- Citations: Preserve as written
-- Code blocks: Use triple backticks with language specification
-- Quotes: Use `>` for blockquotes
-- Links: Preserve as `[text](url)` if visible
-
-**Quality Guidelines:**
-- DO NOT add explanations, comments, or meta-information
-- DO NOT skip or summarize content
-- DO NOT invent or hallucinate text not present in the image
-- DO NOT include "Here is the markdown..." or similar preambles
-- Output ONLY the markdown content, nothing else
-
-**Output Format:**
-Return raw markdown with no wrapper, no code blocks, no explanations. Start immediately with the page content."""
+Output raw markdown only. No preamble, no commentary, no wrapping code block."""
 
 # DPI used when rasterising each PDF page before sending it to the VLM.
-# 300 DPI gives a good balance between quality and token / bandwidth cost.
 _RENDER_DPI = 300
 _DPI_SCALE = _RENDER_DPI / 72  # fitz uses 72 DPI as its baseline
 
-# Default base URL: reads from env var if set, otherwise falls back to localhost
-# (localhost works when running outside Docker; inside Docker the compose file
-# sets OLLAMA_BASE_URL=http://host.docker.internal:11434/v1)
 _DEFAULT_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+
+# Retry settings for timed-out VLM calls.
+_MAX_RETRY_ATTEMPTS = 3
+_RETRY_BASE_DELAY_S = 1.0  # seconds; doubles each attempt (1 s, 2 s, 4 s)
 
 
 @register_converter(
@@ -94,34 +61,22 @@ class VLMConverter(PDFConverter):
     Each page is rasterised at :data:`_RENDER_DPI` DPI and sent to the model
     as a base64-encoded PNG embedded in a ``data:`` URI.
 
-    The default configuration targets a locally running Ollama server, which
-    requires **no API key** and **no internet access**.
+    The ``http_client`` parameter accepts a shared ``httpx.Client`` so all
+    conversions reuse the same connection pool instead of creating a new one
+    per request.  Pass ``app.state.http_client_sync`` from the router.
 
     Provider examples::
 
         # Ollama (default) — no API key required
-        converter = VLMConverter()
-
-        # Different local model
-        converter = VLMConverter(model="minicpm-v")
+        converter = VLMConverter(http_client=shared_client)
 
         # OpenAI
         converter = VLMConverter(
             model="gpt-4o",
             base_url="https://api.openai.com/v1",
             api_key="sk-...",
+            http_client=shared_client,
         )
-
-        # Google Gemini via its OpenAI-compatible endpoint
-        converter = VLMConverter(
-            model="gemini-2.5-flash",
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-            api_key="AIza...",
-        )
-
-    Install:
-        pip install openai pymupdf
-        ollama pull qwen3-vl:4b-instruct-q4_K_M  # for the default local setup
     """
 
     def __init__(
@@ -129,22 +84,29 @@ class VLMConverter(PDFConverter):
         model: str = "qwen3-vl:4b-instruct-q4_K_M",
         base_url: str = _DEFAULT_BASE_URL,
         api_key: str = "ollama",
+        temperature: float = 0.1,
+        user_prompt: Optional[str] = None,
         on_progress: Optional[Callable[[int, int], None]] = None,
+        http_client: Optional[httpx.Client] = None,
     ) -> None:
-        """Initialise the converter and create the OpenAI client.
-
-        Args:
-            model:       Model identifier passed to the completions endpoint.
-            base_url:    Root URL of the OpenAI-compatible API.
-            api_key:     Authentication key. Any non-empty string works for Ollama.
-            on_progress: Optional callback called after each page with
-                         ``(current_page, total_pages)`` (1-based).
-        """
         from openai import OpenAI
 
         self._model = model
-        self._client = OpenAI(base_url=base_url, api_key=api_key)
+        self._temperature = temperature
+        self._user_prompt = user_prompt
         self._on_progress = on_progress
+
+        # If a shared client is supplied its timeout settings apply.
+        # Otherwise use a conservative per-request timeout.
+        client_kwargs: dict = dict(base_url=base_url, api_key=api_key)
+        if http_client is not None:
+            client_kwargs["http_client"] = http_client
+        else:
+            client_kwargs["timeout"] = httpx.Timeout(
+                connect=10.0, read=120.0, write=10.0, pool=5.0
+            )
+
+        self._client = OpenAI(**client_kwargs)
 
     # ------------------------------------------------------------------
     # PDFConverter interface
@@ -153,8 +115,10 @@ class VLMConverter(PDFConverter):
     def convert(self, pdf_path: Path) -> str:
         """Render every page and send each one to the VLM for transcription.
 
-        Args:
-            pdf_path: Path to the PDF file.
+        Cancellation is signalled via the ``on_progress`` callback passed at
+        construction time (see :meth:`document_service._progress_handler`):
+        it raises ``InterruptedError`` when the caller's stop_event is set,
+        which bubbles out of this method naturally.
 
         Returns:
             Full document as Markdown, pages separated by ``\\n\\n---\\n\\n``.
@@ -170,9 +134,12 @@ class VLMConverter(PDFConverter):
             for page_num in range(total):
                 page = pdf_document[page_num]
                 img_b64 = self._render_page_as_b64(page)
-                markdown = self._transcribe_page(img_b64)
+                markdown = self._transcribe_page_with_retry(img_b64)
                 pages.append(markdown)
+
                 if self._on_progress:
+                    # The progress handler checks stop_event and raises
+                    # InterruptedError when a cancellation is requested.
                     self._on_progress(page_num + 1, total)
 
         return "\n\n---\n\n".join(pages)
@@ -190,28 +157,54 @@ class VLMConverter(PDFConverter):
 
     def _transcribe_page(self, img_b64: str) -> str:
         """Send a base64 page image to the VLM and return the Markdown text."""
+        prompt_text = self._user_prompt if self._user_prompt else _PROMPT
         response = self._client.chat.completions.create(
             model=self._model,
-            temperature=0.1,
+            temperature=self._temperature,
             messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
                 {
                     "role": "user",
                     "content": [
                         {
                             "type": "image_url",
-                            "image_url": {"url": f"data:image/png;base64,{img_b64}"},
+                            "image_url": f"data:image/png;base64,{img_b64}",
                         },
-                        {
-                            "type": "text",
-                            "text": "Convert this PDF page to markdown following the instructions.",
-                        },
+                        {"type": "text", "text": prompt_text},
                     ],
                 },
             ],
         )
-        content = response.choices[0].message.content or ""
-        content = content.strip()
+        content = (response.choices[0].message.content or "").strip()
         content = re.sub(r"^```(?:markdown)?\n?", "", content)
         content = re.sub(r"\n?```$", "", content)
         return content.strip()
+
+    def _transcribe_page_with_retry(self, img_b64: str) -> str:
+        """Call ``_transcribe_page`` with exponential back-off on timeout.
+
+        On final timeout the exception is re-raised so the caller can decide
+        whether to mark the page as failed or abort the entire conversion.
+        """
+        from openai import APITimeoutError
+
+        last_exc: Exception | None = None
+        for attempt in range(_MAX_RETRY_ATTEMPTS):
+            try:
+                return self._transcribe_page(img_b64)
+            except APITimeoutError as exc:
+                last_exc = exc
+                if attempt < _MAX_RETRY_ATTEMPTS - 1:
+                    delay = _RETRY_BASE_DELAY_S * (2 ** attempt)
+                    logger.warning(
+                        "VLM page call timed out (attempt %d/%d), retrying in %.0fs",
+                        attempt + 1,
+                        _MAX_RETRY_ATTEMPTS,
+                        delay,
+                    )
+                    time.sleep(delay)
+                else:
+                    logger.error(
+                        "VLM page call timed out after %d attempts — aborting conversion",
+                        _MAX_RETRY_ATTEMPTS,
+                    )
+        raise last_exc  # type: ignore[misc]

@@ -75,7 +75,13 @@ class ChonkieSplitter(TextSplitter):
     def _split_token(self, request: ChunkRequest) -> List[ChunkItem]:
         from chonkie import TokenChunker
 
+        # tokenizer='gpt2' uses tiktoken's GPT-2 BPE encoding, making
+        # chunk_size and chunk_overlap consistent with LangChain's
+        # TokenTextSplitter (which also defaults to gpt2 via tiktoken).
+        # The default tokenizer='character' would count characters instead,
+        # producing ~4× smaller chunks than the label "tokens" implies.
         chunker = TokenChunker(
+            tokenizer="gpt2",
             chunk_size=request.chunk_size,
             chunk_overlap=request.chunk_overlap,
         )
@@ -142,9 +148,11 @@ class ChonkieSplitter(TextSplitter):
     def _split_table(self, request: ChunkRequest) -> List[ChunkItem]:
         from chonkie import TableChunker
 
-        chunker = TableChunker(
-            chunk_size=request.chunk_size,
-        )
+        # TableChunker.chunk_size is in *rows* (default=3), not characters or
+        # tokens.  Passing request.chunk_size (e.g. 512) would mean 512 rows
+        # per chunk — effectively never splitting any real table.  Use the
+        # library default so tables are split at sensible row boundaries.
+        chunker = TableChunker()
         return self._chunks_from_chonkie(chunker, request.content)
 
     @register_splitter(
