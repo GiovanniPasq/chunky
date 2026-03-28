@@ -10,15 +10,40 @@ strings / empty lists and will be filled in by the enrichment pipeline later.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
 
+from backend.config import get_settings
 from backend.models.schemas import LoadChunksResponse, SaveChunksRequest, SaveChunksResponse
 
-CHUNKS_DIR = Path("chunks")
+def _sanitise(value: str) -> str:
+    """Replace non-alphanumeric characters with hyphens and collapse runs."""
+    return re.sub(r"-{2,}", "-", re.sub(r"[^a-zA-Z0-9]", "-", value)).strip("-")
+
+
+def _to_api_schema(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert a stored chunk (PascalCase keys) to the API / frontend schema (snake_case).
+
+    Accepts both PascalCase (stored format) and snake_case (already-normalised)
+    so the function is safe to call on any chunk dict regardless of its origin.
+    """
+    return {
+        "index": raw.get("index", 0),
+        "content": raw.get("Chunk", raw.get("content", "")),
+        "cleaned_chunk": raw.get("CleanedChunk", raw.get("cleaned_chunk", "")),
+        "title": raw.get("Title", raw.get("title", "")),
+        "context": raw.get("Context", raw.get("context", "")),
+        "summary": raw.get("Summary", raw.get("summary", "")),
+        "keywords": raw.get("Keywords", raw.get("keywords", [])),
+        "questions": raw.get("Questions", raw.get("questions", [])),
+        "metadata": raw.get("metadata", {}),
+        "start": raw.get("start", 0),
+        "end": raw.get("end", 0),
+    }
 
 
 def _normalise_chunk(raw: Dict[str, Any]) -> Dict[str, Any]:
@@ -47,30 +72,45 @@ def _normalise_chunk(raw: Dict[str, Any]) -> Dict[str, Any]:
 class ChunkStorageService:
     """Saves enriched chunk sets as timestamped JSON files and retrieves the latest."""
 
+    def __init__(self) -> None:
+        self._chunks_dir = Path(get_settings().CHUNKS_DIR)
+
     def save_chunks(self, request: SaveChunksRequest) -> SaveChunksResponse:
         """Persist chunks to a new timestamped JSON file.
 
         Storage path::
 
-            chunks/<stem>/<stem>_<UTC-ISO8601>.json
+            chunks/<stem>/<documentName>_<chunkType>_<HH-MM-SS>.json
 
-        The timestamp format (``YYYY-MM-DDTHH-MM-SSZ``) is filesystem-safe on
-        all operating systems and sorts lexicographically in chronological order.
+        The ``<chunkType>`` is ``<library>-<splitter_type>`` when provided,
+        otherwise ``chunks``.  The timestamp is ``HH-MM-SS`` in UTC.
+        All components are sanitised (spaces and special characters replaced
+        with hyphens) so the filename is safe on all operating systems.
 
-        Example::
+        Examples::
 
-            chunks/report/report_2024-05-10T14-32-07Z.json
+            chunks/report/report_langchain-token_14-32-07.json
+            chunks/report/report_chunks_09-05-41.json
 
         Each chunk is normalised to the full enriched schema before writing,
         so the file is ready for the enrichment pipeline even if the chunks
         were produced before enrichment ran.
         """
         stem = Path(request.filename).stem
-        dest_dir = CHUNKS_DIR / stem
+        doc_name = _sanitise(stem) or "doc"
+        dest_dir = self._chunks_dir / stem
         dest_dir.mkdir(parents=True, exist_ok=True)
 
-        ts = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
-        dest_path = dest_dir / f"{stem}_{ts}.json"
+        # Build the chunk-type segment from splitter info when available.
+        if request.splitter_library and request.splitter_type:
+            chunk_type = _sanitise(f"{request.splitter_library}-{request.splitter_type}")
+        elif request.splitter_type:
+            chunk_type = _sanitise(request.splitter_type)
+        else:
+            chunk_type = "chunks"
+
+        ts = datetime.now(tz=timezone.utc).strftime("%H-%M-%S")
+        dest_path = dest_dir / f"{doc_name}_{chunk_type}_{ts}.json"
 
         normalised_chunks = [_normalise_chunk(c) for c in request.chunks]
 
@@ -103,7 +143,7 @@ class ChunkStorageService:
             HTTPException 404: If no saved chunks exist for this document.
         """
         stem = Path(filename).stem
-        dest_dir = CHUNKS_DIR / stem
+        dest_dir = self._chunks_dir / stem
 
         json_files = sorted(dest_dir.glob("*.json")) if dest_dir.exists() else []
 
@@ -113,10 +153,14 @@ class ChunkStorageService:
                 detail=f"No saved chunks found for '{filename}'",
             )
 
-        payload = json.loads(json_files[-1].read_text(encoding="utf-8"))
+        try:
+            payload = json.loads(json_files[-1].read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            raise HTTPException(status_code=500, detail=f"Saved chunk file is corrupt: {exc}")
+        normalised = [_to_api_schema(c) for c in payload["chunks"]]
 
         return LoadChunksResponse(
-            chunks=payload["chunks"],
+            chunks=normalised,
             total_chunks=payload["total_chunks"],
             filename=payload["filename"],
         )

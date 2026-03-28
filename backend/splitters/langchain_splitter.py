@@ -5,6 +5,16 @@ Supports four strategies: ``token``, ``recursive``, ``character``, ``markdown``.
 
 Install:
     pip install langchain-text-splitters tiktoken
+
+# TODO (PERF): All LangChain split_text() strategies are pure-Python string
+# processing that holds the GIL for their entire duration.  The current
+# ThreadPoolExecutor (via asyncio.to_thread()) therefore provides no
+# parallelism when 2+ chunking requests run simultaneously — the threads
+# serialise on the GIL and effective throughput is no better than serial.
+# If profiling under real load confirms GIL contention, replace
+# asyncio.to_thread() in chunks_router.py with a ProcessPoolExecutor worker
+# for this splitter.  The trade-off is pickling overhead (~few ms) vs. true
+# CPU parallelism.  Only worth doing if concurrent chunking is a bottleneck.
 """
 
 from __future__ import annotations
@@ -161,16 +171,20 @@ class LangChainSplitter(TextSplitter):
             )
             docs = secondary.split_documents(docs)
 
-        return [
-            ChunkItem(
-                index=i,
-                content=doc.page_content,
-                metadata=doc.metadata,
-                start=0,
-                end=0,
-            )
-            for i, doc in enumerate(docs)
-        ]
+        # MarkdownHeaderTextSplitter preserves header text in page_content
+        # (strip_headers=False), so each page_content is a verbatim substring
+        # of the original — build_chunks can locate real character offsets.
+        # Phase-1 splits have no overlap; phase-2 inherits request.chunk_overlap.
+        char_overlap = request.chunk_overlap if request.enable_markdown_sizing else 0
+        chunks = self.build_chunks(
+            request.content,
+            [doc.page_content for doc in docs],
+            char_overlap,
+        )
+        # Preserve header metadata produced by MarkdownHeaderTextSplitter.
+        for chunk, doc in zip(chunks, docs):
+            chunk.metadata = doc.metadata
+        return chunks
 
     # ------------------------------------------------------------------
     # Dispatch table

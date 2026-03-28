@@ -26,8 +26,6 @@ export interface DocumentData {
   has_pdf: boolean
 }
 
-export type DocumentInfo = DocumentData
-
 // ---------------------------------------------------------------------------
 // Converter types — kept in sync with backend ConverterType enum.
 // The canonical list now comes from GET /api/capabilities; this union type
@@ -94,4 +92,15 @@ export interface CapabilityConverter {
 export interface Capabilities {
   splitters: CapabilityLibrary[]
   converters: CapabilityConverter[]
+}
+
+// ---------------------------------------------------------------------------
+// Enrichment progress — used by MarkdownViewer and enrichment hooks
+// ---------------------------------------------------------------------------
+export interface EnrichOp {
+  title: string
+  detail: string
+  current: number
+  total: number
+  errorMessage?: string
 }

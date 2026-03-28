@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { ChunkSettings, Chunk, DocumentData, ConverterType, VLMSettings } from '../types'
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from './useSettings'
+import { parseSse, CONNECTION_LOST_MSG } from '../utils/parseSse'
+import { API_BASE } from '../services/apiService'
 
 export type BulkProgressFn = (current: number, total: number, filename: string) => void
 export type BulkResultFn = (filename: string, success: boolean) => void
 
-const API = '/api'
+const API = API_BASE
 
 export interface ToastCallbacks {
   onSuccess: (msg: string) => void
@@ -17,70 +19,6 @@ export interface ConversionProgress {
   current: number
   total: number
 }
-
-// ─────────────────────────────────────────────────────────────
-// Shared SSE stream parser
-// ─────────────────────────────────────────────────────────────
-
-const SSE_SILENT_MS = 60_000
-const CONNECTION_LOST_MSG =
-  'Connection lost — the operation may have been interrupted. You can safely start a new conversion.'
-
-/**
- * Async generator that yields parsed JSON events from an SSE ReadableStream.
- * Handles chunked delivery and multi-frame buffers correctly.
- * The underlying reader is always cancelled on return/throw.
- *
- * @param onSilent  Called when no bytes have been received for ``silentMs``
- *                  milliseconds.  Use this to show a "connection lost" warning.
- *                  The callback fires at most once per invocation.
- */
-async function* parseSse(
-  body: ReadableStream<Uint8Array>,
-  onSilent?: () => void,
-  silentMs = SSE_SILENT_MS,
-): AsyncGenerator<Record<string, unknown>> {
-  const reader = body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  let silentTimer: ReturnType<typeof setTimeout> | null = null
-  let silentFired = false
-
-  const armTimer = () => {
-    if (!onSilent || silentFired) return
-    if (silentTimer !== null) clearTimeout(silentTimer)
-    silentTimer = setTimeout(() => {
-      silentFired = true
-      onSilent()
-    }, silentMs)
-  }
-
-  try {
-    armTimer()
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      armTimer() // reset on every chunk received (data frames and keepalives alike)
-      buffer += decoder.decode(value, { stream: true })
-      const parts = buffer.split('\n\n')
-      buffer = parts.pop() ?? ''
-
-      for (const part of parts) {
-        if (!part.startsWith('data: ')) continue
-        try {
-          yield JSON.parse(part.slice(6)) as Record<string, unknown>
-        } catch {
-          // Skip malformed frames
-        }
-      }
-    }
-  } finally {
-    if (silentTimer !== null) clearTimeout(silentTimer)
-    reader.cancel()
-  }
-}
-
 
 // ─────────────────────────────────────────────────────────────
 // SSE stream consumer for chunking
@@ -149,27 +87,58 @@ export function useDocument(toast: ToastCallbacks) {
   const [conversionProgress, setConversionProgress] = useState<ConversionProgress | null>(null)
   const [conversionErrorMessage, setConversionErrorMessage] = useState<string | null>(null)
 
-  // Track the currently selected filename in a ref so callbacks always see
-  // the latest value without needing it in their dependency arrays.
+  // Keep latest toast in a ref so all stable useCallback closures always
+  // call the current toast functions without needing them as dependencies.
+  const toastRef = useRef<ToastCallbacks>(toast)
+  toastRef.current = toast
+
+  // Track the currently selected filename and document data in refs so callbacks
+  // always see the latest values without needing them in their dependency arrays.
   const selectedDocRef = useRef<string | null>(null)
   selectedDocRef.current = selectedDoc
+  const documentDataRef = useRef<DocumentData | null>(null)
+  documentDataRef.current = documentData
 
   // AbortControllers for in-flight requests
   const fetchDocAbortRef = useRef<AbortController | null>(null)
   const convertAbortRef = useRef<AbortController | null>(null)
   const convertToPdfAbortRef = useRef<AbortController | null>(null)
 
-  useEffect(() => { fetchDocuments() }, [])
-
-  const fetchDocuments = async () => {
+  const fetchDocuments = useCallback(async () => {
     try {
       const res = await fetch(`${API}/documents`)
       const data: string[] = await res.json()
       setDocuments(data)
     } catch {
-      toast.onError('Failed to fetch document list')
+      toastRef.current.onError('Failed to fetch document list')
     }
-  }
+  }, [])
+
+  useEffect(() => { fetchDocuments() }, [fetchDocuments])
+
+  /** Re-fetch document data for the currently selected document (e.g. after batch conversion). */
+  const refreshDocument = useCallback(async () => {
+    const filename = selectedDocRef.current
+    if (!filename) return
+
+    fetchDocAbortRef.current?.abort()
+    fetchDocAbortRef.current = new AbortController()
+
+    setLoading(true)
+    try {
+      const res = await fetch(
+        `${API}/document/${encodeURIComponent(filename)}`,
+        { signal: fetchDocAbortRef.current.signal },
+      )
+      if (!res.ok) throw new Error()
+      const data: DocumentData = await res.json()
+      setDocumentData(data)
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
   const selectDocument = useCallback(async (filename: string) => {
     if (filename === selectedDocRef.current) return
@@ -193,7 +162,7 @@ export function useDocument(toast: ToastCallbacks) {
       setDocumentData(data)
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return
-      toast.onError(`Failed to load "${filename}"`)
+      toastRef.current.onError(`Failed to load "${filename}"`)
     } finally {
       setLoading(false)
     }
@@ -211,13 +180,13 @@ export function useDocument(toast: ToastCallbacks) {
         throw new Error(data?.detail ?? 'Upload failed')
       }
       await fetchDocuments()
-      toast.onSuccess(`Uploaded ${files.length} file${files.length > 1 ? 's' : ''}`)
+      toastRef.current.onSuccess(`Uploaded ${files.length} file${files.length > 1 ? 's' : ''}`)
     } catch (err) {
-      toast.onError(err instanceof Error ? err.message : 'Upload failed')
+      toastRef.current.onError(err instanceof Error ? err.message : 'Upload failed')
     } finally {
       setUploading(false)
     }
-  }, [])
+  }, [fetchDocuments])
 
   const deleteDocuments = useCallback(async (filenames: string[]) => {
     if (filenames.length === 0) return
@@ -233,11 +202,11 @@ export function useDocument(toast: ToastCallbacks) {
         setDocumentData(null)
       }
       await fetchDocuments()
-      toast.onSuccess(`Deleted ${filenames.length} document${filenames.length > 1 ? 's' : ''}`)
+      toastRef.current.onSuccess(`Deleted ${filenames.length} document${filenames.length > 1 ? 's' : ''}`)
     } catch {
-      toast.onError('Delete failed')
+      toastRef.current.onError('Delete failed')
     }
-  }, [])
+  }, [fetchDocuments])
 
   /**
    * Convert the currently selected document to Markdown.
@@ -275,11 +244,12 @@ export function useDocument(toast: ToastCallbacks) {
       }
 
       let mdContent: string | undefined
+      let fileError: string | undefined
       for await (const event of parseSse(res.body!, () => setConversionErrorMessage(CONNECTION_LOST_MSG))) {
         if (event.type === 'progress') {
           setConversionProgress({ active: true, current: event.current as number, total: event.total as number })
         } else if (event.type === 'file_done') {
-          if (!event.success) throw new Error(String(event.error ?? 'Conversion failed'))
+          if (!event.success) { fileError = String(event.error ?? 'Conversion failed'); break }
           mdContent = event.md_content as string
         } else if (event.type === 'error') {
           throw new Error(String(event.message ?? 'Conversion error'))
@@ -288,12 +258,13 @@ export function useDocument(toast: ToastCallbacks) {
         }
       }
 
+      if (fileError) throw new Error(fileError)
       if (mdContent === undefined) throw new Error('Stream ended without a result')
       setDocumentData(prev => prev ? { ...prev, has_markdown: true, md_content: mdContent! } : prev)
-      toast.onSuccess('Conversion complete ✓')
+      toastRef.current.onSuccess('Conversion complete ✓')
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return
-      toast.onError(err instanceof Error ? err.message : 'Conversion failed')
+      toastRef.current.onError(err instanceof Error ? err.message : 'Conversion failed')
     } finally {
       // Only reset state if this invocation is still the active one.
       // Guards against a new conversion starting before our async cleanup ran.
@@ -330,16 +301,16 @@ export function useDocument(toast: ToastCallbacks) {
       setSelectedDoc(data.pdf_filename)
       setDocumentData(prev => prev ? { ...prev, has_pdf: true, pdf_filename: data.pdf_filename } : prev)
       await fetchDocuments()
-      toast.onSuccess('Converted to PDF ✓')
+      toastRef.current.onSuccess('Converted to PDF ✓')
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return
-      toast.onError('MD to PDF conversion failed')
+      toastRef.current.onError('MD to PDF conversion failed')
     } finally {
       if (convertToPdfAbortRef.current === abortCtrl) {
         setConvertingToPdf(false)
       }
     }
-  }, [])
+  }, [fetchDocuments])
 
   const cancelMdToPdfConversion = useCallback(() => {
     convertToPdfAbortRef.current?.abort()
@@ -350,16 +321,21 @@ export function useDocument(toast: ToastCallbacks) {
     if (!selectedDocRef.current) return
     setSavingMd(true)
     try {
-      const mdFilename = selectedDocRef.current.replace('.pdf', '.md')
+      // Prefer the authoritative md_filename from the server; fall back to a
+      // suffix swap only when documentData isn't loaded yet (shouldn't happen
+      // in practice since the save button is only shown when md_content exists).
+      const mdFilename =
+        documentDataRef.current?.md_filename ??
+        selectedDocRef.current.replace(/\.pdf$/i, '.md')
       const file = new File([new Blob([content], { type: 'text/markdown' })], mdFilename, { type: 'text/markdown' })
       const formData = new FormData()
       formData.append('files', file)
       const res = await fetch(`${API}/upload`, { method: 'POST', body: formData })
       if (!res.ok) throw new Error()
       setDocumentData(prev => prev ? { ...prev, md_content: content } : prev)
-      toast.onSuccess('Markdown saved ✓')
+      toastRef.current.onSuccess('Markdown saved ✓')
     } catch {
-      toast.onError('Failed to save Markdown')
+      toastRef.current.onError('Failed to save Markdown')
     } finally {
       setSavingMd(false)
     }
@@ -367,11 +343,20 @@ export function useDocument(toast: ToastCallbacks) {
 
   const deleteMarkdown = useCallback(async () => {
     if (!selectedDocRef.current) return
+    const mdFilename =
+      documentDataRef.current?.md_filename ??
+      selectedDocRef.current.replace(/\.pdf$/i, '.md')
     try {
+      const res = await fetch(`${API}/documents`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([mdFilename]),
+      })
+      if (!res.ok) throw new Error()
       setDocumentData(prev => prev ? { ...prev, has_markdown: false, md_content: '' } : prev)
-      toast.onSuccess('Markdown removed — ready to reconvert')
+      toastRef.current.onSuccess('Markdown removed — ready to reconvert')
     } catch {
-      toast.onError('Failed to remove Markdown')
+      toastRef.current.onError('Failed to remove Markdown')
     }
   }, [])
 
@@ -453,18 +438,25 @@ export function useDocument(toast: ToastCallbacks) {
   const chunkAndSaveFile = useCallback(async (
     filename: string,
     s: ChunkSettings,
+    signal?: AbortSignal,
   ): Promise<void> => {
-    const docRes = await fetch(`${API}/document/${encodeURIComponent(filename)}`)
+    const docRes = await fetch(`${API}/document/${encodeURIComponent(filename)}`, { signal })
     if (!docRes.ok) throw new Error('Failed to load document')
     const docData: DocumentData = await docRes.json()
     if (!docData.has_markdown) throw new Error('No markdown available')
 
-    const chunks = await consumeChunkSse(docData.md_content, s)
+    const chunks = await consumeChunkSse(docData.md_content, s, signal)
 
     const saveRes = await fetch(`${API}/chunks/save`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filename, chunks }),
+      signal,
+      body: JSON.stringify({
+        filename,
+        splitter_type: s.splitterType,
+        splitter_library: s.splitterLibrary,
+        chunks,
+      }),
     })
     if (!saveRes.ok) throw new Error('Save failed')
   }, [])
@@ -472,7 +464,7 @@ export function useDocument(toast: ToastCallbacks) {
   return {
     documents, selectedDoc, documentData, loading, uploading, converting, convertingToPdf, savingMd,
     conversionProgress, conversionErrorMessage,
-    selectDocument, uploadFiles, deleteDocuments,
+    selectDocument, refreshDocument, uploadFiles, deleteDocuments,
     convertToMarkdown, cancelConversion,
     convertMdToPdf, cancelMdToPdfConversion,
     saveMarkdown, deleteMarkdown,
@@ -494,19 +486,15 @@ export function useChunks(
   const [saving, setSaving] = useState(false)
   const [chunking, setChunking] = useState(false)
 
+  // Keep latest toast in a ref so stable useCallback closures see the current functions.
+  const toastRef = useRef<ToastCallbacks>(toast)
+  toastRef.current = toast
+
   const chunkAbortRef = useRef<AbortController | null>(null)
 
-  useEffect(() => {
-    if (!chunkingEnabled || !documentData?.md_content) {
-      chunkAbortRef.current?.abort()
-      setChunks(null)
-      setChunking(false)
-      return
-    }
-    chunkContent(documentData.md_content, settings)
-  }, [documentData, settings, chunkingEnabled])
-
-  const chunkContent = async (content: string, s: ChunkSettings) => {
+  // chunkContent is stable (refs + state setters only) so it can be a
+  // useCallback with [] deps and safely listed in the useEffect below.
+  const chunkContent = useCallback(async (content: string, s: ChunkSettings) => {
     chunkAbortRef.current?.abort()
     const abortCtrl = new AbortController()
     chunkAbortRef.current = abortCtrl
@@ -518,13 +506,23 @@ export function useChunks(
       setChunks(normalised)
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return
-      toast.onError('Chunking failed')
+      toastRef.current.onError('Chunking failed')
     } finally {
       if (chunkAbortRef.current === abortCtrl) {
         setChunking(false)
       }
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    if (!chunkingEnabled || !documentData?.md_content) {
+      chunkAbortRef.current?.abort()
+      setChunks(null)
+      setChunking(false)
+      return
+    }
+    chunkContent(documentData.md_content, settings)
+  }, [documentData, settings, chunkingEnabled, chunkContent])
 
   const cancelChunking = useCallback(() => {
     chunkAbortRef.current?.abort()
@@ -611,6 +609,8 @@ export function useChunks(
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           filename: selectedDoc,
+          splitter_type: settings.splitterType,
+          splitter_library: settings.splitterLibrary,
           chunks: chunks.map(c => ({
             index: c.index,
             content: c.content,
@@ -627,13 +627,13 @@ export function useChunks(
         }),
       })
       if (!res.ok) throw new Error()
-      toast.onSuccess(`Saved ${chunks.length} chunks ✓`)
+      toastRef.current.onSuccess(`Saved ${chunks.length} chunks ✓`)
     } catch {
-      toast.onError('Failed to save chunks')
+      toastRef.current.onError('Failed to save chunks')
     } finally {
       setSaving(false)
     }
-  }, [chunks, selectedDoc])
+  }, [chunks, selectedDoc, settings.splitterType, settings.splitterLibrary])
 
   const enrichChunk = useCallback((index: number, updates: Partial<Chunk>) => {
     setChunks(prev => {

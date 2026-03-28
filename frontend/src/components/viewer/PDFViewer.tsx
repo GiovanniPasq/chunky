@@ -10,10 +10,11 @@ interface Props {
   scale?: number
   onScaleChange: (s: number) => void
   scrollSyncEnabled?: boolean
+  onToggleScrollSync?: () => void
   onHide?: () => void
 }
 
-export default function PDFViewer({ filename, scale = 1.0, onScaleChange, scrollSyncEnabled = true, onHide }: Props) {
+export default function PDFViewer({ filename, scale = 1.0, onScaleChange, scrollSyncEnabled = true, onToggleScrollSync, onHide }: Props) {
   const [pdf, setPdf] = useState<pdfjsLib.PDFDocumentProxy | null>(null)
   const [numPages, setNumPages] = useState(0)
   const [toast, setToast] = useState<string | null>(null)
@@ -33,7 +34,11 @@ export default function PDFViewer({ filename, scale = 1.0, onScaleChange, scroll
         setPdf(doc)
         setNumPages(doc.numPages)
       })
-      .catch(e => console.error('PDF load error:', e))
+      .catch(e => {
+        if (cancelled) return
+        console.error('PDF load error:', e)
+        setToast(`Failed to load "${filename}"`)
+      })
     return () => { cancelled = true }
   }, [filename])
 
@@ -157,11 +162,27 @@ export default function PDFViewer({ filename, scale = 1.0, onScaleChange, scroll
           <button onClick={() => onScaleChange(Math.min(3, scale + 0.1))} disabled={scale >= 3}>+</button>
         </div>
 
-        {onHide && (
-          <button className="pdf-hide-btn" onClick={onHide} title="Hide PDF panel">
-            ← Hide
-          </button>
-        )}
+        <div className="pdf-controls-right">
+          {onToggleScrollSync && (
+            <button
+              className={`pdf-sync-btn${scrollSyncEnabled ? ' active' : ''}`}
+              onClick={onToggleScrollSync}
+              title="Toggle scroll synchronization"
+            >
+              <span className="pdf-sync-icon">{scrollSyncEnabled ? '🔗' : '⛓️‍💥'}</span>
+              <span className="pdf-sync-label">Sync</span>
+              <span className={`pdf-sync-status${scrollSyncEnabled ? ' on' : ' off'}`}>
+                {scrollSyncEnabled ? 'ON' : 'OFF'}
+              </span>
+            </button>
+          )}
+
+          {onHide && (
+            <button className="pdf-hide-btn" onClick={onHide} title="Hide PDF panel">
+              ← Hide
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="pdf-container" ref={containerRef} onScroll={handleScroll} onMouseUp={handleMouseUp}>

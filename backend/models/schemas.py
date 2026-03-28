@@ -106,12 +106,6 @@ class MdToPdfResponse(BaseModel):
     message: str
 
 
-class UploadResponse(BaseModel):
-    success: bool
-    filename: str
-    message: str
-
-
 class UploadFileResult(BaseModel):
     filename: str
     success: bool
@@ -207,6 +201,8 @@ class ChunkResponse(BaseModel):
 class SaveChunksRequest(BaseModel):
     filename: str = Field(..., min_length=1)
     chunks: List[Dict[str, Any]]
+    splitter_type: Optional[str] = Field(default=None)
+    splitter_library: Optional[str] = Field(default=None)
 
 
 class SaveChunksResponse(BaseModel):
@@ -241,10 +237,6 @@ class EnrichMarkdownRequest(BaseModel):
     settings: EnrichmentRequest
 
 
-class EnrichMarkdownResponse(BaseModel):
-    enriched_content: str
-
-
 class ChunkToEnrich(BaseModel):
     index: int
     content: str
@@ -256,24 +248,3 @@ class ChunkToEnrich(BaseModel):
 class EnrichChunksRequest(BaseModel):
     chunks: List[ChunkToEnrich] = Field(..., min_length=1)
     settings: EnrichmentRequest
-
-
-class EnrichedChunk(BaseModel):
-    index: int
-    content: str
-    cleaned_chunk: str = ""
-    title: str = ""
-    context: str = ""
-    summary: str = ""
-    keywords: List[str] = Field(default_factory=list)
-    questions: List[str] = Field(default_factory=list)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    start: int = 0
-    end: int = 0
-
-
-class EnrichChunksResponse(BaseModel):
-    chunks: List[EnrichedChunk]
-    total_chunks: int
-
-

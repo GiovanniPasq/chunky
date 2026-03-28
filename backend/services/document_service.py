@@ -37,12 +37,14 @@ from backend.models.schemas import (
 )
 
 # ---------------------------------------------------------------------------
-# Storage paths
+# Storage paths — resolved once from settings so env-var overrides are honoured.
 # ---------------------------------------------------------------------------
 
-PDFS_DIR = Path("docs/pdfs")
-MDS_DIR = Path("docs/mds")
-CHUNKS_DIR = Path("chunks")
+_s = get_settings()
+PDFS_DIR = Path(_s.PDFS_DIR)
+MDS_DIR = Path(_s.MDS_DIR)
+CHUNKS_DIR = Path(_s.CHUNKS_DIR)
+del _s
 
 _ALLOWED_EXTENSIONS = {".pdf", ".md"}
 
@@ -50,6 +52,27 @@ _ALLOWED_EXTENSIONS = {".pdf", ".md"}
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _safe_filename(filename: str, description: str = "filename") -> str:
+    """Reject any filename that contains path separators or traversal sequences.
+
+    Accepts only a bare filename (no directory components). Raises HTTP 400
+    if the value would escape the intended storage directory.
+    """
+    try:
+        name = Path(filename).name
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid {description} '{filename}'.",
+        )
+    if not name or name != filename or name in (".", ".."):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid {description} '{filename}': path traversal is not allowed.",
+        )
+    return name
 
 
 def _stem(filename: str) -> str:
@@ -74,6 +97,7 @@ def _build_converter(
     vlm_settings: Optional[VLMSettings],
     on_progress: Optional[Callable[[int, int], None]] = None,
     http_client: Optional["httpx.Client"] = None,
+    stop_event: Optional[threading.Event] = None,
 ) -> PDFConverter:
     """Instantiate the requested converter, forwarding VLM settings when relevant."""
     if converter_type == ConverterType.vlm:
@@ -93,6 +117,8 @@ def _build_converter(
             kwargs["on_progress"] = on_progress
         if http_client is not None:
             kwargs["http_client"] = http_client
+        if stop_event is not None:
+            kwargs["stop_event"] = stop_event
         return VLMConverter(**kwargs)
 
     return _CONVERTER_MAP[converter_type]()
@@ -136,8 +162,30 @@ class DocumentService:
 
         return sorted(results)
 
+    def list_documents_metadata(self) -> list[dict]:
+        """Return a list of ``{filename, has_markdown}`` dicts for every document.
+
+        This is a cheap stat-only scan — it does NOT read file contents.
+        """
+        results = []
+        pdf_stems: set[str] = set()
+
+        if PDFS_DIR.exists():
+            for f in sorted(PDFS_DIR.glob("*.pdf")):
+                md_path = MDS_DIR / f"{f.stem}.md"
+                results.append({"filename": f.name, "has_markdown": md_path.exists()})
+                pdf_stems.add(f.stem)
+
+        if MDS_DIR.exists():
+            for f in sorted(MDS_DIR.glob("*.md")):
+                if f.stem not in pdf_stems:
+                    results.append({"filename": f.name, "has_markdown": True})
+
+        return results
+
     def get_document(self, filename: str) -> DocumentInfo:
         """Return metadata and existing Markdown content for a PDF or MD-only file."""
+        filename = _safe_filename(filename, "document name")
         ext = Path(filename).suffix.lower()
 
         if ext == ".md":
@@ -173,6 +221,7 @@ class DocumentService:
 
     def get_pdf_path(self, filename: str) -> Path:
         """Resolve a PDF filename to its absolute path, raising 404 if missing."""
+        filename = _safe_filename(filename, "PDF filename")
         pdf_path = PDFS_DIR / filename
         if not pdf_path.exists():
             raise HTTPException(status_code=404, detail=f"PDF '{filename}' not found")
@@ -195,7 +244,7 @@ class DocumentService:
         """
         import filetype
 
-        name = file.filename or ""
+        name = _safe_filename(file.filename or "", "upload filename")
         dest_dir = _dest_dir(name)  # raises 400 for unsupported extensions
         dest_dir.mkdir(parents=True, exist_ok=True)
 
@@ -251,7 +300,7 @@ class DocumentService:
             extra={"operation": "upload", "file_name": name},
         )
 
-    def upload_multiple_files(self, files: List[UploadFile]) -> MultiUploadResponse:
+    def upload_files(self, files: List[UploadFile]) -> MultiUploadResponse:
         """Upload multiple files, collecting per-file results without raising on failure."""
         results: List[UploadFileResult] = []
 
@@ -299,30 +348,33 @@ class DocumentService:
                             (current_page, total_pages).  Only fired for VLM
                             conversions; other converters have no page-level steps.
         """
+        filename = _safe_filename(filename, "PDF filename")
         pdf_path = PDFS_DIR / filename
         if not pdf_path.exists():
             raise HTTPException(status_code=404, detail=f"PDF '{filename}' not found")
 
         settings = get_settings()
 
-        # Page count guard — requires opening the PDF briefly before conversion.
-        if settings.MAX_PAGE_COUNT > 0:
-            try:
-                import fitz  # PyMuPDF
-                with fitz.open(str(pdf_path)) as doc:
-                    page_count = doc.page_count
-                if page_count > settings.MAX_PAGE_COUNT:
-                    raise HTTPException(
-                        status_code=422,
-                        detail=(
-                            f"'{filename}' has {page_count} pages, which exceeds the "
-                            f"configured limit of {settings.MAX_PAGE_COUNT}."
-                        ),
-                    )
-            except HTTPException:
-                raise
-            except Exception as exc:
-                logger.warning("Could not read page count for '%s': %s", filename, exc)
+        # Page count guard — open the PDF once to read page count, then reuse
+        # the value so the converter (especially VLMConverter) does not need to
+        # open the file a second time.
+        page_count: Optional[int] = None
+        try:
+            import fitz  # PyMuPDF
+            with fitz.open(str(pdf_path)) as doc:
+                page_count = doc.page_count
+            if settings.MAX_PAGE_COUNT > 0 and page_count > settings.MAX_PAGE_COUNT:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"'{filename}' has {page_count} pages, which exceeds the "
+                        f"configured limit of {settings.MAX_PAGE_COUNT}."
+                    ),
+                )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("Could not read page count for '%s': %s", filename, exc)
 
         def _progress_handler(current: int, total: int) -> None:
             if on_progress:
@@ -343,8 +395,9 @@ class DocumentService:
                 vlm_settings,
                 on_progress=_progress_handler if converter_type == ConverterType.vlm else None,
                 http_client=http_client,
+                stop_event=stop_event if converter_type == ConverterType.vlm else None,
             )
-            md_content = converter.convert(pdf_path)
+            md_content = converter.convert(pdf_path, total_pages=page_count)
         except InterruptedError:
             logger.info(
                 "Conversion of '%s' was cancelled after %.0f ms",
@@ -374,13 +427,14 @@ class DocumentService:
         )
 
     # ------------------------------------------------------------------
-    # Delete
+    # Convert MD → PDF
     # ------------------------------------------------------------------
 
     def convert_md_to_pdf(self, md_filename: str) -> MdToPdfResponse:
         """Convert a stored Markdown file to PDF using weasyprint."""
         from backend.utils.md_to_pdf import _convert_file
 
+        md_filename = _safe_filename(md_filename, "Markdown filename")
         md_path = MDS_DIR / md_filename
         if not md_path.exists():
             raise HTTPException(status_code=404, detail=f"MD '{md_filename}' not found")
@@ -404,6 +458,7 @@ class DocumentService:
 
         Handles both PDF files and MD-only files. Raises 404 if not found.
         """
+        filename = _safe_filename(filename, "document name")
         ext = Path(filename).suffix.lower()
         deleted: List[str] = []
         stem = _stem(filename)
@@ -453,7 +508,7 @@ class DocumentService:
             message=f"Deleted '{filename}' and {associated} associated file(s)",
         )
 
-    def delete_multiple_documents(self, filenames: List[str]) -> DeleteResponse:
+    def delete_documents(self, filenames: List[str]) -> DeleteResponse:
         """Delete multiple documents, collecting errors without short-circuiting.
 
         Raises 404 only when *every* requested file is missing.
@@ -467,6 +522,8 @@ class DocumentService:
                 all_deleted.extend(result.deleted)
             except HTTPException as exc:
                 errors.append(f"{filename}: {exc.detail}")
+            except OSError as exc:
+                errors.append(f"{filename}: {exc}")
 
         if errors and not all_deleted:
             raise HTTPException(status_code=404, detail="; ".join(errors))

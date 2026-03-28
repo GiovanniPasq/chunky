@@ -10,9 +10,7 @@ build/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-docs/pdfs/
-docs/mds/
-/chunks/
+chunks/
 node_modules/
 dist/
 .env
@@ -25,3 +23,4 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+docs/

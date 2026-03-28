@@ -11,6 +11,16 @@ Install
     pip install chonkie[neural]      # + NeuralChunker
     pip install "chonkie[code]"      # + CodeChunker (tree-sitter; requires Rust toolchain for installation)
 
+# TODO (PERF): Token-based chunkers (TokenChunker, FastChunker, etc.) are
+# pure-Python and hold the GIL, so concurrent requests via ThreadPoolExecutor
+# serialise on the GIL.  SemanticChunker / NeuralChunker use PyTorch — the
+# C/CUDA kernels release the GIL but Python orchestration does not, so
+# parallelism is partial.  If profiling under 3+ simultaneous chunking
+# requests confirms GIL contention as a bottleneck, switch the pure-Python
+# strategies to a ProcessPoolExecutor in chunks_router.py.  ML-backed
+# strategies may benefit from a dedicated worker process with the model
+# pre-loaded to amortise initialisation cost.
+
 Supported strategies (SplitterType enum values)
 ------------------------------------------------
     token     → TokenChunker
@@ -166,6 +176,8 @@ class ChonkieSplitter(TextSplitter):
     def _split_code(self, request: ChunkRequest) -> List[ChunkItem]:
         from chonkie import CodeChunker
 
+        # CodeChunker splits on AST node boundaries; chunk_overlap is not
+        # a supported parameter (structural splits don't allow arbitrary overlap).
         chunker = CodeChunker(
             chunk_size=request.chunk_size,
         )
@@ -191,7 +203,6 @@ class ChonkieSplitter(TextSplitter):
         )
         return self._chunks_from_chonkie(chunker, request.content)
 
-    
     @register_splitter(
         library=_LIB, library_label=_LIB_LABEL,
         strategy="neural", label="Neural",
@@ -203,12 +214,15 @@ class ChonkieSplitter(TextSplitter):
     def _split_neural(self, request: ChunkRequest) -> List[ChunkItem]:
         from chonkie import NeuralChunker
 
+        # NeuralChunker uses a fine-tuned BERT model to detect semantic shift
+        # points; chunk boundaries are model-driven, so chunk_size and
+        # chunk_overlap are not supported parameters.
         chunker = NeuralChunker(
             model="mirth/chonky_modernbert_base_1",
             device_map="cpu",
         )
         return self._chunks_from_chonkie(chunker, request.content)
-    
+
     # ------------------------------------------------------------------
     # Shared helper
     # ------------------------------------------------------------------

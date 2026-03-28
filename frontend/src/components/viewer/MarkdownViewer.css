@@ -97,6 +97,90 @@
   cursor: pointer;
 }
 
+/* ── Chunk visualization toggle button ── */
+.md-chunk-viz-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  background: white;
+  border: 1.5px solid rgba(139, 69, 19, 0.25);
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 4px rgba(139, 69, 19, 0.1);
+}
+
+.md-chunk-viz-btn.active {
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  border-color: transparent;
+  box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.3);
+}
+
+.md-chunk-viz-btn:hover:not(.active) {
+  background: rgba(139, 69, 19, 0.06);
+  border-color: rgba(139, 69, 19, 0.4);
+  transform: translateY(-1px);
+}
+
+.md-chunk-viz-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #5C2E0A;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.md-chunk-viz-btn.active .md-chunk-viz-label {
+  color: #FDF6EC;
+}
+
+.md-chunk-viz-status {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.md-chunk-viz-status.on {
+  background: rgba(255, 255, 255, 0.25);
+  color: #FDF6EC;
+}
+
+.md-chunk-viz-status.off {
+  background: rgba(139, 69, 19, 0.08);
+  color: #9A7050;
+}
+
+/* ── Chunk action row (selection-dependent second row) ── */
+.md-chunk-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 16px;
+  background: linear-gradient(135deg, rgba(30, 90, 140, 0.06) 0%, rgba(42, 122, 196, 0.06) 100%);
+  border-bottom: 1.5px solid rgba(30, 90, 140, 0.15);
+  flex-shrink: 0;
+  animation: slideDown 0.15s ease-out;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.md-chunk-actions-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #1E5A8C;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+
 /* ── Edit actions wrapper (right side legacy) ── */
 .md-edit-actions {
   display: flex;

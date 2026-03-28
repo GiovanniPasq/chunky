@@ -551,3 +551,79 @@
   background: rgba(255,255,255,0.2);
   opacity: 1;
 }
+
+/* ── Markdown badge ── */
+.doc-md-badge {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  background: linear-gradient(135deg, #3D6B27 0%, #5A8C3E 100%);
+  color: white;
+  border-radius: 4px;
+  padding: 2px 5px;
+  box-shadow: 0 1px 3px rgba(61, 107, 39, 0.3);
+  user-select: none;
+}
+
+.doc-list li.active .doc-md-badge {
+  background: rgba(255, 255, 255, 0.25);
+  color: white;
+  box-shadow: none;
+}
+
+/* ── Settings footer ── */
+.sidebar-settings-footer {
+  flex-shrink: 0;
+  padding: 10px 14px;
+  border-top: 2px solid rgba(139, 69, 19, 0.1);
+}
+
+.sidebar-settings-footer.collapsed {
+  padding: 10px 0;
+  display: flex;
+  justify-content: center;
+}
+
+.sidebar-settings-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  background: white;
+  border: 1.5px solid rgba(139, 69, 19, 0.2);
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 4px rgba(139, 69, 19, 0.1);
+}
+
+.sidebar-settings-footer.collapsed .sidebar-settings-btn {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 8px;
+}
+
+.sidebar-settings-btn:hover {
+  background: linear-gradient(135deg, rgba(139, 69, 19, 0.06) 0%, rgba(210, 105, 30, 0.06) 100%);
+  border-color: rgba(139, 69, 19, 0.35);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(139, 69, 19, 0.15);
+}
+
+.sidebar-settings-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.sidebar-settings-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #5C2E0A;
+  letter-spacing: 0.3px;
+}

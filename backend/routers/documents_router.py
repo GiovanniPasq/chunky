@@ -26,7 +26,6 @@ Conversion streams progress via Server-Sent Events (SSE):
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import threading
 import time
@@ -44,6 +43,7 @@ from backend.models.schemas import (
     MultiUploadResponse,
 )
 from backend.services.document_service import DocumentService
+from backend.utils.sse import sse_event as _sse
 
 router = APIRouter(prefix="/api", tags=["documents"])
 _svc = DocumentService()
@@ -61,25 +61,24 @@ def _get_semaphore() -> asyncio.Semaphore:
     return _semaphore
 
 
-# ── SSE helpers ───────────────────────────────────────────────────────────────
-
-def _sse(data: dict) -> str:
-    """Format a dict as a single SSE data frame (JSON-encoded, newline-terminated)."""
-    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
-
-
 # ── Read endpoints ────────────────────────────────────────────────────────────
 
 @router.get("/documents", response_model=List[str])
 async def list_documents():
     """Return a sorted list of all available document filenames."""
-    return _svc.list_documents()
+    return await asyncio.to_thread(_svc.list_documents)
+
+
+@router.get("/documents/metadata")
+async def list_documents_metadata():
+    """Return metadata (including has_markdown) for every document."""
+    return await asyncio.to_thread(_svc.list_documents_metadata)
 
 
 @router.get("/document/{filename}", response_model=DocumentInfo)
 async def get_document(filename: str):
     """Return metadata and existing Markdown content for a document."""
-    return _svc.get_document(filename)
+    return await asyncio.to_thread(_svc.get_document, filename)
 
 
 @router.get("/pdf/{filename}")
@@ -101,7 +100,7 @@ async def upload_files(files: List[UploadFile] = File(...)):
     Returns a per-file success / failure summary. Individual failures do not
     abort the batch.
     """
-    return _svc.upload_multiple_files(files)
+    return await asyncio.to_thread(_svc.upload_files, files)
 
 
 # ── Unified conversion endpoint (SSE) ────────────────────────────────────────
@@ -174,6 +173,7 @@ async def convert_pdfs(
                     )
 
                 t0 = time.monotonic()
+                _done = 0
                 try:
                     result = await asyncio.to_thread(
                         _svc.convert_to_markdown,
@@ -186,6 +186,7 @@ async def convert_pdfs(
                     )
                     async with _lock:
                         succeeded += 1
+                        _done = succeeded + failed
                     await queue.put({
                         "type": "file_done",
                         "filename": fn,
@@ -197,6 +198,7 @@ async def convert_pdfs(
                 except Exception as exc:
                     async with _lock:
                         failed += 1
+                        _done = succeeded + failed
                     await queue.put({"type": "file_done", "filename": fn, "success": False, "error": str(exc)})
                     logger.warning(
                         "Convert failed for '%s': %s",
@@ -208,9 +210,9 @@ async def convert_pdfs(
                 await queue.put({
                     "type": "file_progress",
                     "filename": fn,
-                    "current": succeeded + failed,
+                    "current": _done,
                     "total": total,
-                    "percentage": round((succeeded + failed) / total * 100),
+                    "percentage": round(_done / total * 100),
                 })
 
         async def run_all() -> None:
@@ -313,4 +315,4 @@ async def delete_documents(filenames: List[str]):
     Accepts a JSON array of filenames. Partial success is allowed — the
     response reports which files were not found.
     """
-    return _svc.delete_multiple_documents(filenames)
+    return await asyncio.to_thread(_svc.delete_documents, filenames)

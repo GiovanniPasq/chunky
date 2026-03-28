@@ -1,6 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import Sidebar from './components/layout/Sidebar'
-import Toolbar from './components/layout/Toolbar'
 import MarkdownViewer from './components/viewer/MarkdownViewer'
 import SettingsModal from './components/modals/SettingsModal'
 import ProgressModal from './components/modals/ProgressModal'
@@ -33,16 +32,16 @@ export default function App() {
     setToast({ message, type, id: Date.now() })
   }, [])
 
-  const toastCallbacks = {
+  const toastCallbacks = useMemo(() => ({
     onSuccess: (msg: string) => showToast(msg, 'success'),
     onError: (msg: string) => showToast(msg, 'error'),
-  }
+  }), [showToast])
 
   // ── Hooks ────────────────────────────────────────────────────
   const {
     documents, selectedDoc, documentData, loading, uploading, converting, convertingToPdf, savingMd,
     conversionProgress, conversionErrorMessage,
-    selectDocument, uploadFiles, deleteDocuments,
+    selectDocument, refreshDocument, uploadFiles, deleteDocuments,
     convertToMarkdown, cancelConversion,
     convertMdToPdf, cancelMdToPdfConversion,
     saveMarkdown, deleteMarkdown,
@@ -54,6 +53,10 @@ export default function App() {
   const [scrollSync, setScrollSync] = useState(true)
   const [chunkViz, setChunkViz] = useState(false)
   const [pdfHidden, setPdfHidden] = useState(false)
+
+  // Set of PDF filenames that have a corresponding markdown file.
+  // Updated whenever documents list changes or a conversion completes.
+  const [docsWithMarkdown, setDocsWithMarkdown] = useState<Set<string>>(new Set())
 
   const {
     chunks, settings, saving: savingChunks, chunking,
@@ -73,6 +76,29 @@ export default function App() {
   const [bulkOp, setBulkOp] = useState<BulkOp | null>(null)
   const bulkAbortRef = useRef<AbortController | null>(null)
   const [bulkConnectionLost, setBulkConnectionLost] = useState(false)
+
+  // ── Track which docs have markdown — fetch metadata whenever documents list changes ──
+  useEffect(() => {
+    if (documents.length === 0) { setDocsWithMarkdown(new Set()); return }
+    fetch('/api/documents/metadata')
+      .then(r => r.ok ? r.json() : [])
+      .then((meta: Array<{ filename: string; has_markdown: boolean }>) => {
+        setDocsWithMarkdown(new Set(meta.filter(m => m.has_markdown).map(m => m.filename)))
+      })
+      .catch(() => {})
+  }, [documents])
+
+  // Keep docsWithMarkdown in sync when the selected document's markdown status changes
+  // (e.g. after a single-file conversion or markdown deletion).
+  useEffect(() => {
+    if (!selectedDoc) return
+    setDocsWithMarkdown(prev => {
+      const next = new Set(prev)
+      if (documentData?.has_markdown) next.add(selectedDoc)
+      else next.delete(selectedDoc)
+      return next
+    })
+  }, [selectedDoc, documentData?.has_markdown])
 
   // ── Persist split ratio ───────────────────────────────────────
   const splitPctRef = useRef(splitPct)
@@ -154,6 +180,8 @@ export default function App() {
 
     let succeeded = 0
     let failed = 0
+    // Track which files succeeded so we can refresh the markdown panel.
+    const succeededFiles = new Set<string>()
 
     try {
       await batchConvert(
@@ -169,7 +197,7 @@ export default function App() {
         },
         (filename, success) => {
           onResult(filename, success)
-          if (success) succeeded++
+          if (success) { succeeded++; succeededFiles.add(filename) }
           else failed++
         },
         (current, total, filename, _percentage) => {
@@ -203,7 +231,24 @@ export default function App() {
     setBulkConnectionLost(false)
     if (succeeded > 0) showToast(`Converted ${succeeded} file${succeeded > 1 ? 's' : ''} ✓`, 'success')
     if (failed > 0) showToast(`${failed} file${failed > 1 ? 's' : ''} failed to convert`, 'error')
-  }, [batchConvert, settings.converter, settings.vlm, showToast])
+
+    if (succeeded > 0) {
+      // Re-fetch metadata to update the "MD" badge for all newly converted files.
+      // We fetch metadata directly instead of relying on the documents-list effect
+      // because the PDF list doesn't change when a markdown file is created.
+      fetch('/api/documents/metadata')
+        .then(r => r.ok ? r.json() : [])
+        .then((meta: Array<{ filename: string; has_markdown: boolean }>) => {
+          setDocsWithMarkdown(new Set(meta.filter(m => m.has_markdown).map(m => m.filename)))
+        })
+        .catch(() => {})
+
+      // Also refresh the markdown panel if the selected doc was converted.
+      if (selectedDoc && succeededFiles.has(selectedDoc)) {
+        await refreshDocument()
+      }
+    }
+  }, [batchConvert, settings.converter, settings.vlm, showToast, selectedDoc, refreshDocument])
 
   // ── Bulk chunk (sequential, interruptible via AbortController) ─
   const handleBulkChunk = useCallback(async (
@@ -231,7 +276,7 @@ export default function App() {
       )
 
       try {
-        await chunkAndSaveFile(filename, settings)
+        await chunkAndSaveFile(filename, settings, signal)
         onResult(filename, true)
         succeeded++
       } catch {
@@ -315,6 +360,8 @@ export default function App() {
         onDelete={deleteDocuments}
         onBulkConvert={handleBulkConvert}
         onBulkChunk={handleBulkChunk}
+        onOpenSettings={() => setSettingsOpen(true)}
+        docsWithMarkdown={docsWithMarkdown}
       />
 
       <div className="main-content">
@@ -329,14 +376,6 @@ export default function App() {
 
         {!loading && selectedDoc && documentData && (
           <>
-            <Toolbar
-              scrollSync={scrollSync}
-              chunkViz={chunkViz}
-              onToggleScrollSync={() => setScrollSync(v => !v)}
-              onToggleChunkViz={() => setChunkViz(v => !v)}
-              onOpenSettings={() => setSettingsOpen(true)}
-            />
-
             <div className="viewers">
               {!pdfHidden && (
                 <div className="viewer-panel" style={{ width: `${splitPct}%` }}>
@@ -347,6 +386,7 @@ export default function App() {
                       scale={pdfScale}
                       onScaleChange={setPdfScale}
                       scrollSyncEnabled={scrollSync}
+                      onToggleScrollSync={() => setScrollSync(v => !v)}
                       onHide={() => setPdfHidden(true)}
                     />
                   ) : (
@@ -418,6 +458,7 @@ export default function App() {
                     scrollSyncEnabled={scrollSync}
                     chunks={chunks}
                     chunkVisualizationEnabled={chunkViz}
+                    onToggleChunkViz={() => setChunkViz(v => !v)}
                     onChunkEdit={editChunk}
                     onEnrichChunk={enrichChunk}
                     onDeleteChunk={deleteChunk}
@@ -430,7 +471,6 @@ export default function App() {
                     savingChunks={savingChunks}
                     chunksReady={!!chunks}
                     chunking={chunking}
-                    onCancelChunking={cancelChunking}
                     sectionEnrichment={settings.sectionEnrichment}
                     chunkEnrichment={settings.chunkEnrichment}
                   />

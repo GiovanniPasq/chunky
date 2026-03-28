@@ -27,7 +27,6 @@ Both endpoints stream progress via Server-Sent Events (SSE):
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from typing import AsyncGenerator
 
@@ -42,12 +41,9 @@ from backend.models.schemas import (
     EnrichMarkdownRequest,
 )
 from backend.services.enrichment_service import EnrichmentService
+from backend.utils.sse import sse_event as _sse
 
 router = APIRouter(prefix="/api/enrich", tags=["enrichment"])
-
-
-def _sse(data: dict) -> str:
-    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 def _build_service(request_settings, http_client) -> EnrichmentService:
@@ -123,9 +119,9 @@ async def enrich_markdown(http_request: Request, body: EnrichMarkdownRequest):
 async def enrich_chunks(http_request: Request, body: EnrichChunksRequest):
     """Enrich an array of chunks with LLM-generated metadata, streaming per-chunk events.
 
-    Each chunk is processed sequentially. A ``chunk_done`` event is emitted after
-    each chunk so the frontend can update the UI incrementally without waiting for
-    the entire batch.
+    Chunks are processed concurrently (up to MAX_CONCURRENT_ENRICHMENTS in flight
+    at once). A ``chunk_done`` event is emitted after each chunk completes so the
+    frontend can update the UI incrementally.
 
     Per-chunk errors are reported as ``chunk_error`` events and do not abort the
     remaining chunks.  A timed-out chunk (after retries) is reported as
@@ -148,20 +144,17 @@ async def enrich_chunks(http_request: Request, body: EnrichChunksRequest):
 
         watchdog_s = get_settings().SSE_WATCHDOG_TIMEOUT_S
         timeout = float(watchdog_s) if watchdog_s > 0 else None
+        max_concurrent = get_settings().MAX_CONCURRENT_ENRICHMENTS
 
         yield _sse({"type": "start", "operation": "enrich_chunks", "total": total})
 
-        completed = 0
-        try:
-            for chunk in chunks:
-                if await http_request.is_disconnected():
-                    yield _sse({"type": "cancelled"})
-                    return
+        queue: asyncio.Queue[dict | None] = asyncio.Queue()
+        semaphore = asyncio.Semaphore(max_concurrent)
 
-                chunk_index = chunk["index"]
-                content = chunk.get("content", "")
-                current = completed + 1
-
+        async def enrich_one(chunk: dict) -> None:
+            chunk_index = chunk["index"]
+            content = chunk.get("content", "")
+            async with semaphore:
                 try:
                     enriched = await asyncio.wait_for(svc.enrich_chunk(content), timeout=timeout)
                     result = {
@@ -179,52 +172,73 @@ async def enrich_chunks(http_request: Request, body: EnrichChunksRequest):
                         "start": chunk.get("start", 0),
                         "end": chunk.get("end", 0),
                     }
-                    completed += 1
-                    yield _sse({
-                        "type": "chunk_done",
-                        "operation": "enrich_chunks",
-                        "current": current,
-                        "total": total,
-                        "percentage": round(current / total * 100),
-                        "chunk": result,
-                    })
-                except asyncio.CancelledError:
-                    yield _sse({"type": "cancelled"})
-                    return
+                    await queue.put({"type": "chunk_done", "chunk": result, "chunk_index": chunk_index})
                 except asyncio.TimeoutError:
-                    completed += 1
                     logger.error(
                         "Chunk enrichment watchdog fired at index %s: no response for %.0fs"
                         " — skipping chunk and continuing",
                         chunk_index,
                         watchdog_s,
                     )
-                    yield _sse({
-                        "type": "chunk_error",
-                        "operation": "enrich_chunks",
-                        "current": current,
-                        "total": total,
-                        "chunk_index": chunk_index,
-                        "message": f"Timed out after {watchdog_s}s (watchdog)",
-                    })
+                    await queue.put({"type": "chunk_error", "chunk_index": chunk_index,
+                                     "message": f"Timed out after {watchdog_s}s (watchdog)"})
                 except Exception as exc:
-                    # Any other per-chunk failure: log, emit chunk_error, continue.
-                    completed += 1
                     logger.error(
                         "Chunk enrichment failed at index %s (will continue): %s",
                         chunk_index,
                         exc,
                     )
+                    await queue.put({"type": "chunk_error", "chunk_index": chunk_index,
+                                     "message": str(exc)})
+
+        async def run_all() -> None:
+            tasks = [asyncio.create_task(enrich_one(c)) for c in chunks]
+            await asyncio.gather(*tasks, return_exceptions=True)
+            await queue.put(None)  # sentinel
+
+        runner = asyncio.create_task(run_all())
+
+        completed = 0
+        try:
+            while True:
+                if await http_request.is_disconnected():
+                    runner.cancel()
+                    await asyncio.gather(runner, return_exceptions=True)
+                    yield _sse({"type": "cancelled"})
+                    return
+
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=0.5)
+                except asyncio.TimeoutError:
+                    continue
+
+                if event is None:
+                    break
+
+                completed += 1
+                current = completed
+                if event["type"] == "chunk_done":
+                    yield _sse({
+                        "type": "chunk_done",
+                        "operation": "enrich_chunks",
+                        "current": current,
+                        "total": total,
+                        "percentage": round(current / total * 100),
+                        "chunk": event["chunk"],
+                    })
+                else:
                     yield _sse({
                         "type": "chunk_error",
                         "operation": "enrich_chunks",
                         "current": current,
                         "total": total,
-                        "chunk_index": chunk_index,
-                        "message": str(exc),
+                        "chunk_index": event["chunk_index"],
+                        "message": event["message"],
                     })
 
         except asyncio.CancelledError:
+            runner.cancel()
+            await asyncio.gather(runner, return_exceptions=True)
             yield _sse({"type": "cancelled"})
             return
 

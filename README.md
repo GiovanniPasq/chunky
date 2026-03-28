@@ -13,7 +13,7 @@
 <img src="https://img.shields.io/badge/License-MIT-D2691E?style=for-the-badge"/>
 </p>
 <p align="center">
-  <img src="assets/demo.gif" width="650">
+  <img src="assets/demo.gif" width="600">
 </p>
 <p align="center">
 <strong>If you like this project, a star ⭐️ would mean a lot and keep you updated on new features :)</strong>
@@ -116,6 +116,8 @@ VLMConverter(model="gemini-2.5-flash", base_url="https://generativelanguage.goog
 VLM conversions report per-page progress, which the frontend polls via `GET /api/convert-progress/{filename}`.
 
 > **Note:** Conversion speed with Docling or a locally running Ollama instance depends heavily on available hardware. On CPU-only machines, both can be significantly slower than on systems with a dedicated GPU.
+
+> **Ollama configuration:** when using a local Ollama instance, the most relevant environment variables are `OLLAMA_NUM_PARALLEL`, `OLLAMA_MAX_LOADED_MODELS`, `OLLAMA_KEEP_ALIVE`, and `OLLAMA_MAX_QUEUE`. See the [Ollama FAQ](https://docs.ollama.com/faq#how-does-ollama-handle-concurrent-requests) for setup instructions.
 
 ---
 

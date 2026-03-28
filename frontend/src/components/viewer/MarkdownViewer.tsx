@@ -1,7 +1,9 @@
-import { useRef, useEffect, useState, useCallback } from 'react'
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Chunk, EnrichmentSettings } from '../../types'
+import { useMarkdownEnrichment } from '../../hooks/useMarkdownEnrichment'
+import { useChunkEnrichment } from '../../hooks/useChunkEnrichment'
 import ChunkEditModal from '../chunks/ChunkEditModal'
 import ProgressModal from '../modals/ProgressModal'
 import './MarkdownViewer.css'
@@ -15,36 +17,21 @@ interface Props {
   scrollSyncEnabled?: boolean
   chunks?: Chunk[] | null
   chunkVisualizationEnabled?: boolean
+  onToggleChunkViz?: () => void
   onChunkEdit: (index: number, content: string) => void
   onEnrichChunk: (index: number, updates: Partial<Chunk>) => void
   onDeleteChunk: (index: number) => void
   onDeleteChunks: (indices: Set<number>) => void
   onMergeChunks: (indices: number[]) => void
-  onSaveMarkdown: (content: string) => void
+  onSaveMarkdown: (content: string) => Promise<void>
   onSaveChunks: () => void
   onDeleteMarkdown: () => void
   savingMd: boolean
   savingChunks: boolean
   chunksReady: boolean
   chunking?: boolean
-  onCancelChunking?: () => void
   sectionEnrichment?: EnrichmentSettings
   chunkEnrichment?: EnrichmentSettings
-}
-
-interface MdBlock {
-  heading: string
-  content: string
-  startLine: number
-  endLine: number
-}
-
-interface EnrichOp {
-  title: string
-  detail: string
-  current: number
-  total: number
-  errorMessage?: string
 }
 
 const CHUNK_COLORS = [
@@ -59,132 +46,6 @@ const CHUNK_BORDER_COLORS = [
   '#D2691E', '#5A3278', '#146E64', '#A03C1E', '#3C783C',
 ]
 
-const API = '/api'
-
-// ── SSE stream parser ──────────────────────────────────────────────────────
-
-const SSE_SILENT_MS = 60_000
-const CONNECTION_LOST_MSG =
-  'Connection lost — the operation may have been interrupted. You can safely start a new conversion.'
-
-/**
- * Async generator that yields parsed JSON events from an SSE ReadableStream.
- *
- * @param onSilent  Called when no bytes have been received for silentMs ms.
- */
-async function* parseSse(
-  body: ReadableStream<Uint8Array>,
-  onSilent?: () => void,
-  silentMs = SSE_SILENT_MS,
-): AsyncGenerator<Record<string, unknown>> {
-  const reader = body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  let silentTimer: ReturnType<typeof setTimeout> | null = null
-  let silentFired = false
-
-  const armTimer = () => {
-    if (!onSilent || silentFired) return
-    if (silentTimer !== null) clearTimeout(silentTimer)
-    silentTimer = setTimeout(() => { silentFired = true; onSilent() }, silentMs)
-  }
-
-  try {
-    armTimer()
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      armTimer()
-      buffer += decoder.decode(value, { stream: true })
-      const parts = buffer.split('\n\n')
-      buffer = parts.pop() ?? ''
-      for (const part of parts) {
-        if (!part.startsWith('data: ')) continue
-        try { yield JSON.parse(part.slice(6)) } catch { /* skip malformed frames */ }
-      }
-    }
-  } finally {
-    if (silentTimer !== null) clearTimeout(silentTimer)
-    reader.cancel()
-  }
-}
-
-// ── Enrichment helpers (domain) ────────────────────────────────────────────
-
-function buildEnrichmentBody(settings: EnrichmentSettings, extra: Record<string, unknown>) {
-  return {
-    ...extra,
-    settings: {
-      model: settings.model,
-      base_url: settings.base_url ?? 'http://localhost:11434/v1',
-      api_key: settings.api_key ?? 'ollama',
-      temperature: settings.temperature ?? 0.3,
-      user_prompt: settings.user_prompt,
-    },
-  }
-}
-
-/**
- * Enrich a single markdown section. Returns the enriched content string.
- * Throws on error; throws DOMException(AbortError) if cancelled/aborted.
- */
-async function apiEnrichMarkdown(
-  settings: EnrichmentSettings,
-  content: string,
-  signal?: AbortSignal,
-  onConnectionLost?: () => void,
-): Promise<string> {
-  const res = await fetch(`${API}/enrich/markdown`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    signal,
-    body: JSON.stringify(buildEnrichmentBody(settings, { content })),
-  })
-  if (!res.ok) {
-    const errText = await res.text().catch(() => res.statusText)
-    throw new Error(`Enrichment failed ${res.status}: ${errText}`)
-  }
-  for await (const event of parseSse(res.body!, onConnectionLost)) {
-    if (event.type === 'done') return event.enriched_content as string
-    if (event.type === 'error') throw new Error(String(event.message ?? 'Enrichment error'))
-    if (event.type === 'cancelled') throw new DOMException('Enrichment cancelled', 'AbortError')
-  }
-  throw new Error('Stream ended without a done event')
-}
-
-/**
- * Enrich a single chunk. Returns the enriched chunk fields.
- * Throws on error; throws DOMException(AbortError) if cancelled/aborted.
- */
-async function apiEnrichChunk(
-  settings: EnrichmentSettings,
-  index: number,
-  content: string,
-  start: number,
-  end: number,
-  metadata: Record<string, unknown>,
-  signal?: AbortSignal,
-): Promise<Record<string, unknown>> {
-  const res = await fetch(`${API}/enrich/chunks`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    signal,
-    body: JSON.stringify(buildEnrichmentBody(settings, {
-      chunks: [{ index, content, start, end, metadata }],
-    })),
-  })
-  if (!res.ok) {
-    const errText = await res.text().catch(() => res.statusText)
-    throw new Error(`Chunk enrichment failed ${res.status}: ${errText}`)
-  }
-  for await (const event of parseSse(res.body!)) {
-    if (event.type === 'chunk_done') return event.chunk as Record<string, unknown>
-    if (event.type === 'error') throw new Error(String(event.message ?? 'Chunk enrichment error'))
-    if (event.type === 'cancelled') throw new DOMException('Chunk enrichment cancelled', 'AbortError')
-  }
-  throw new Error('Stream ended without a done event')
-}
-
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function isEnriched(chunk: Chunk): boolean {
@@ -198,34 +59,30 @@ function isEnriched(chunk: Chunk): boolean {
   )
 }
 
-function splitIntoBlocks(markdown: string): MdBlock[] {
-  const lines = markdown.split('\n')
-  const headingPositions: number[] = []
+// ── Page-marker helpers ─────────────────────────────────────────────────────
 
-  for (let i = 0; i < lines.length; i++) {
-    if (/^#{1,6}\s/.test(lines[i])) headingPositions.push(i)
+// Return a fresh RegExp instance each time to avoid shared lastIndex state.
+const pageMarkerRe = () => /<!--\s*page-marker:(\d+)\s*-->/g
+
+function extractPageMarkers(md: string): Array<{ page: number; offset: number }> {
+  const markers: Array<{ page: number; offset: number }> = []
+  let m: RegExpExecArray | null
+  const re = pageMarkerRe()
+  while ((m = re.exec(md)) !== null) {
+    markers.push({ page: parseInt(m[1], 10), offset: m.index })
   }
+  return markers
+}
 
-  if (headingPositions.length === 0) {
-    return [{ heading: '', content: markdown, startLine: 0, endLine: lines.length - 1 }]
-  }
-
-  // If there's content before the first heading, include it as block 0
-  const starts = headingPositions[0] > 0 ? [0, ...headingPositions] : headingPositions
-
-  return starts.map((startLine, i) => {
-    const endLine = i + 1 < starts.length ? starts[i + 1] - 1 : lines.length - 1
-    const content = lines.slice(startLine, endLine + 1).join('\n')
-    const heading = /^#{1,6}\s/.test(lines[startLine]) ? lines[startLine] : ''
-    return { heading, content, startLine, endLine }
-  })
+function stripPageMarkers(md: string): string {
+  return md.replace(pageMarkerRe(), '')
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
 
 export default function MarkdownViewer({
   content, scale = 1.0, onScaleChange, padding = 20, onPaddingChange,
-  scrollSyncEnabled = true, chunks, chunkVisualizationEnabled = false,
+  scrollSyncEnabled = true, chunks, chunkVisualizationEnabled = false, onToggleChunkViz,
   onChunkEdit, onEnrichChunk, onDeleteChunk, onDeleteChunks, onMergeChunks,
   onSaveMarkdown, onSaveChunks, onDeleteMarkdown,
   savingMd, savingChunks, chunksReady,
@@ -234,40 +91,102 @@ export default function MarkdownViewer({
 }: Props) {
   const [editMode, setEditMode] = useState(false)
   const [editContent, setEditContent] = useState(content)
-  const [preEnrichContent, setPreEnrichContent] = useState<string | null>(null)
   const [enrichError, setEnrichError] = useState<string | null>(null)
   const [editingChunkIndex, setEditingChunkIndex] = useState<number | null>(null)
   const [showReconvertConfirm, setShowReconvertConfirm] = useState(false)
   const [selectedChunks, setSelectedChunks] = useState<Set<number>>(new Set())
-  const [enrichingChunks, setEnrichingChunks] = useState<Set<number>>(new Set())
-  const [chunkEnrichErrors, setChunkEnrichErrors] = useState<Map<number, string>>(new Map())
 
-  // Section picker
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const [pickerBlocks, setPickerBlocks] = useState<MdBlock[]>([])
-  const [pickerSelected, setPickerSelected] = useState<Set<number>>(new Set())
+  // ── Section (Markdown) enrichment ─────────────────────────────────────────
+  const {
+    mdEnrichOp,
+    preEnrichContent,
+    pickerOpen,
+    pickerBlocks,
+    pickerSelected,
+    setPickerOpen,
+    setPickerSelected,
+    handleInterruptMdEnrich,
+    handleEnrichSection,
+    handleUndoEnrich,
+    clearPreEnrich,
+    confirmPicker,
+  } = useMarkdownEnrichment({
+    sectionEnrichment,
+    editMode,
+    editContent,
+    content,
+    setEditContent,
+    setEditMode,
+    setEnrichError,
+  })
 
-  // Markdown enrichment modal
-  const [mdEnrichOp, setMdEnrichOp] = useState<EnrichOp | null>(null)
-  const mdEnrichAbortRef = useRef<AbortController | null>(null)
+  // ── Chunk enrichment ───────────────────────────────────────────────────────
+  const {
+    chunkEnrichOp,
+    enrichingChunks,
+    chunkEnrichErrors,
+    handleInterruptChunkEnrich,
+    handleEnrichChunk,
+    handleEnrichSelected,
+  } = useChunkEnrichment({
+    chunkEnrichment,
+    chunks: chunks ?? null,
+    content,
+    selectedChunks,
+    onEnrichChunk,
+    setEnrichError,
+    setSelectedChunks,
+  })
 
-  // Chunk enrichment modal
-  const [chunkEnrichOp, setChunkEnrichOp] = useState<EnrichOp | null>(null)
-  const chunkEnrichAbortRef = useRef<AbortController | null>(null)
-
-  // Clear selection when chunks change (e.g. re-chunked)
-  useEffect(() => { setSelectedChunks(new Set()) }, [chunks])
+  // Clear chunk selection whenever the chunk array changes (edit, delete, merge,
+  // rechunk, or document switch).
+  useEffect(() => {
+    setSelectedChunks(new Set())
+  }, [chunks])
 
   const containerRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
   const isScrollingRef = useRef(false)
   const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout>>()
   const rafRef = useRef<number>()
   const savedScrollRatioRef = useRef<number>(0)
 
+  // Counter used by the custom <hr> renderer to assign page numbers.
+  // Reset to 0 before each render pass so page numbers stay consistent.
+  const hrCounterRef = useRef(0)
+
+  // Whether the current content has VLM page markers.
+  const pageMarkers = useMemo(() => extractPageMarkers(content), [content])
+  const hasPageSync = pageMarkers.length > 0
+
+  // Clean content (markers stripped) for rendering.
+  const renderContent = useMemo(() => hasPageSync ? stripPageMarkers(content) : content, [content, hasPageSync])
+
+  // Scroll MarkdownViewer to the anchor element for a given page number.
+  const scrollToPage = useCallback((pageNum: number) => {
+    const anchor = document.getElementById(`md-page-anchor-${pageNum}`)
+    if (!anchor || !containerRef.current) return
+    const containerRect = containerRef.current.getBoundingClientRect()
+    const anchorRect = anchor.getBoundingClientRect()
+    const scrollTop = containerRef.current.scrollTop + (anchorRect.top - containerRect.top) - 8
+    containerRef.current.scrollTo({ top: Math.max(0, scrollTop), behavior: 'smooth' })
+  }, [])
+
+  // Listen for page-sync events from the PDF viewer.
+  useEffect(() => {
+    if (!hasPageSync) return
+    const handler = (e: Event) => {
+      const ev = e as CustomEvent
+      if (ev.detail.source !== 'pdf') return
+      scrollToPage(ev.detail.page as number)
+    }
+    window.addEventListener('viewer-page-sync', handler)
+    return () => window.removeEventListener('viewer-page-sync', handler)
+  }, [hasPageSync, scrollToPage])
+
   useEffect(() => {
     setEditContent(content)
     setEditMode(false)
-    setPreEnrichContent(null)
     setEnrichError(null)
   }, [content])
 
@@ -278,42 +197,58 @@ export default function MarkdownViewer({
     }
   }, [chunkVisualizationEnabled])
 
-  const saveScrollRatio = () => {
-    if (!containerRef.current) return
-    const el = containerRef.current
-    const max = el.scrollHeight - el.clientHeight
-    savedScrollRatioRef.current = max > 0 ? el.scrollTop / max : 0
-  }
+  // ── Scroll ratio save/restore ──────────────────────────────────────────────
 
-  const restoreScrollRatio = () => {
+  const restoreScrollRatio = (toEditMode: boolean) => {
     requestAnimationFrame(() => {
-      if (!containerRef.current) return
-      const el = containerRef.current
+      const el: HTMLElement | null = toEditMode
+        ? (textareaRef.current ?? containerRef.current)
+        : containerRef.current
+      if (!el) return
       const max = el.scrollHeight - el.clientHeight
       if (max > 0) el.scrollTop = savedScrollRatioRef.current * max
     })
   }
 
   const handleEnterEdit = () => {
-    saveScrollRatio()
+    const el = containerRef.current
+    if (el) {
+      const max = el.scrollHeight - el.clientHeight
+      savedScrollRatioRef.current = max > 0 ? el.scrollTop / max : 0
+    }
     setEditMode(true)
   }
 
-  useEffect(() => { if (editMode) restoreScrollRatio() }, [editMode])
-  useEffect(() => { if (!editMode) restoreScrollRatio() }, [editMode])
+  useEffect(() => {
+    if (!editMode) return
+    restoreScrollRatio(true)
+  }, [editMode])
+
+  useEffect(() => {
+    if (editMode) return
+    restoreScrollRatio(false)
+  }, [editMode])
 
   const handleSaveMd = async () => {
-    saveScrollRatio()
+    const ta = textareaRef.current
+    if (ta) {
+      const max = ta.scrollHeight - ta.clientHeight
+      savedScrollRatioRef.current = max > 0 ? ta.scrollTop / max : 0
+    }
     await onSaveMarkdown(editContent)
     setEditMode(false)
-    setPreEnrichContent(null)
+    clearPreEnrich()
   }
 
   const handleCancelEdit = () => {
-    saveScrollRatio()
+    const ta = textareaRef.current
+    if (ta) {
+      const max = ta.scrollHeight - ta.clientHeight
+      savedScrollRatioRef.current = max > 0 ? ta.scrollTop / max : 0
+    }
     setEditContent(content)
     setEditMode(false)
-    setPreEnrichContent(null)
+    clearPreEnrich()
     setEnrichError(null)
   }
 
@@ -322,243 +257,16 @@ export default function MarkdownViewer({
     onDeleteMarkdown()
   }
 
-  // ── Markdown Enrichment ──────────────────────────────────────────────────
-
-  const startMdEnrichment = useCallback(async (
-    currentContent: string,
-    blocks: MdBlock[],
-    selectedIndices: number[],
-  ) => {
-    if (!sectionEnrichment) return
-
-    const abortCtrl = new AbortController()
-    mdEnrichAbortRef.current = abortCtrl
-
-    setPreEnrichContent(currentContent)
-    setMdEnrichOp({ title: 'Markdown Enrichment', detail: '', current: 0, total: selectedIndices.length })
-
-    // Switch to edit mode so changes are visible as they arrive
-    setEditMode(true)
-
-    const enrichedBlocks = blocks.map(b => b.content)
-
-    try {
-      for (let i = 0; i < selectedIndices.length; i++) {
-        if (abortCtrl.signal.aborted) break
-
-        const blockIdx = selectedIndices[i]
-        const block = blocks[blockIdx]
-        const displayName = block.heading.replace(/^#{1,6}\s+/, '') || 'Introduction'
-
-        setMdEnrichOp(prev => prev
-          ? { ...prev, detail: `Block ${i + 1} of ${selectedIndices.length} — ${displayName}`, current: i + 1, errorMessage: undefined }
-          : null
-        )
-
-        try {
-          enrichedBlocks[blockIdx] = await apiEnrichMarkdown(
-            sectionEnrichment,
-            block.content,
-            abortCtrl.signal,
-            () => setMdEnrichOp(prev => prev ? { ...prev, errorMessage: CONNECTION_LOST_MSG } : null),
-          )
-          setEditContent(enrichedBlocks.join('\n'))
-        } catch (err) {
-          if ((err as DOMException).name === 'AbortError') break
-          // Per-block error: keep original content, continue to next block
-        }
-      }
-    } catch (err) {
-      if ((err as DOMException).name !== 'AbortError') {
-        setMdEnrichOp(prev => prev
-          ? { ...prev, errorMessage: err instanceof Error ? err.message : 'Stream error' }
-          : null
-        )
-        return
-      }
-    }
-
-    setMdEnrichOp(null)
-    mdEnrichAbortRef.current = null
-  }, [sectionEnrichment])
-
-  const handleInterruptMdEnrich = useCallback(() => {
-    mdEnrichAbortRef.current?.abort()
-    setMdEnrichOp(null)
-  }, [])
-
-  const handleEnrichSection = useCallback(() => {
-    if (!sectionEnrichment?.model) {
-      setEnrichError('Configure Section Enrichment (model) in Settings → Enrichment tab.')
-      return
-    }
-    setEnrichError(null)
-    const currentContent = editMode ? editContent : content
-    const blocks = splitIntoBlocks(currentContent)
-
-    if (blocks.length <= 1) {
-      startMdEnrichment(currentContent, blocks, [0])
-    } else {
-      setPickerBlocks(blocks)
-      setPickerSelected(new Set(blocks.map((_, i) => i)))
-      setPickerOpen(true)
-    }
-  }, [sectionEnrichment, editMode, editContent, content, startMdEnrichment])
-
   const handleChunkSave = (index: number, content: string, metadataUpdates?: Partial<Chunk>) => {
     onChunkEdit(index, content)
     if (metadataUpdates) onEnrichChunk(index, metadataUpdates)
   }
 
-  const handleUndoEnrich = () => {
-    if (preEnrichContent !== null) {
-      setEditContent(preEnrichContent)
-      setPreEnrichContent(null)
-    }
-  }
-
-  // ── Per-chunk Enrichment (single) ────────────────────────────────────────
-
-  const handleEnrichChunk = async (chunkIndex: number) => {
-    if (!chunkEnrichment?.model) {
-      setChunkEnrichErrors(prev => new Map(prev).set(chunkIndex, 'Configure Chunk Enrichment settings (model) in Settings → Enrichment tab.'))
-      return
-    }
-    setChunkEnrichErrors(prev => { const m = new Map(prev); m.delete(chunkIndex); return m })
-    setEnrichingChunks(prev => new Set([...prev, chunkIndex]))
-
-    const chunk = chunks![chunkIndex]
-    try {
-      const result = await apiEnrichChunk(
-        chunkEnrichment,
-        chunkIndex,
-        chunk.content,
-        chunk.start ?? 0,
-        chunk.end ?? 0,
-        (chunk.metadata ?? {}) as Record<string, unknown>,
-      )
-      onEnrichChunk(chunkIndex, {
-        cleaned_chunk: (result.cleaned_chunk as string) || chunk.cleaned_chunk,
-        title: (result.title as string) || chunk.title,
-        context: (result.context as string) || chunk.context,
-        summary: (result.summary as string) || chunk.summary,
-        keywords: Array.isArray(result.keywords) ? result.keywords as string[] : chunk.keywords,
-        questions: Array.isArray(result.questions) ? result.questions as string[] : chunk.questions,
-      })
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Enrichment failed'
-      setChunkEnrichErrors(prev => new Map(prev).set(chunkIndex, msg))
-    } finally {
-      setEnrichingChunks(prev => { const s = new Set(prev); s.delete(chunkIndex); return s })
-    }
-  }
-
-  // ── Bulk Chunk Enrichment ────────────────────────────────────────────────
-  // Sends all selected chunks in a single SSE call. The backend processes them
-  // sequentially and emits one chunk_done event per chunk, allowing the frontend
-  // to update results incrementally without managing per-chunk loops.
-
-  const handleInterruptChunkEnrich = useCallback(() => {
-    chunkEnrichAbortRef.current?.abort()
-    setChunkEnrichOp(null)
-  }, [])
-
-  const handleEnrichSelected = useCallback(async () => {
-    if (!chunkEnrichment?.model) {
-      setEnrichError('Configure Chunk Enrichment settings (model) in Settings → Enrichment tab.')
-      return
-    }
-    if (!chunks || selectedChunks.size === 0) return
-
-    const indices = Array.from(selectedChunks).sort((a, b) => a - b)
-    const chunksToEnrich = indices.map(i => ({
-      index: i,
-      content: chunks[i].content,
-      start: chunks[i].start ?? 0,
-      end: chunks[i].end ?? 0,
-      metadata: (chunks[i].metadata ?? {}) as Record<string, unknown>,
-    }))
-
-    const abortCtrl = new AbortController()
-    chunkEnrichAbortRef.current = abortCtrl
-
-    setChunkEnrichOp({ title: 'Chunk Enrichment', detail: '', current: 0, total: indices.length })
-
-    try {
-      const res = await fetch(`${API}/enrich/chunks`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: abortCtrl.signal,
-        body: JSON.stringify({
-          chunks: chunksToEnrich,
-          settings: {
-            model: chunkEnrichment.model,
-            base_url: chunkEnrichment.base_url ?? 'http://localhost:11434/v1',
-            api_key: chunkEnrichment.api_key ?? 'ollama',
-            temperature: chunkEnrichment.temperature ?? 0.3,
-            user_prompt: chunkEnrichment.user_prompt,
-          },
-        }),
-      })
-
-      if (!res.ok) {
-        const errText = await res.text().catch(() => res.statusText)
-        throw new Error(`HTTP ${res.status}: ${errText}`)
-      }
-
-      for await (const event of parseSse(
-        res.body!,
-        () => setChunkEnrichOp(prev => prev ? { ...prev, errorMessage: CONNECTION_LOST_MSG } : null),
-      )) {
-        if (event.type === 'chunk_done') {
-          const chunk = event.chunk as Record<string, unknown>
-          const chunkIndex = chunk.index as number
-          onEnrichChunk(chunkIndex, {
-            cleaned_chunk: (chunk.cleaned_chunk as string) || chunks[chunkIndex]?.cleaned_chunk,
-            title: (chunk.title as string) || chunks[chunkIndex]?.title,
-            context: (chunk.context as string) || chunks[chunkIndex]?.context,
-            summary: (chunk.summary as string) || chunks[chunkIndex]?.summary,
-            keywords: Array.isArray(chunk.keywords) ? chunk.keywords as string[] : chunks[chunkIndex]?.keywords,
-            questions: Array.isArray(chunk.questions) ? chunk.questions as string[] : chunks[chunkIndex]?.questions,
-          })
-          setChunkEnrichOp(prev => prev
-            ? { ...prev, current: event.current as number, detail: `Enriched chunk ${chunkIndex + 1} of ${chunks.length}` }
-            : null
-          )
-          // Yield to the event loop so React flushes state between events
-          await new Promise<void>(r => setTimeout(r, 0))
-        } else if (event.type === 'chunk_error') {
-          // Per-chunk error: continue to next chunk (backend already does this too)
-          setChunkEnrichOp(prev => prev
-            ? { ...prev, current: event.current as number }
-            : null
-          )
-        } else if (event.type === 'done' || event.type === 'cancelled') {
-          break
-        } else if (event.type === 'error') {
-          throw new Error(String(event.message ?? 'Enrichment error'))
-        }
-      }
-    } catch (err) {
-      if ((err as DOMException).name === 'AbortError') {
-        // User interrupted — no error message needed
-      } else {
-        const msg = err instanceof Error ? err.message : 'Stream error'
-        setChunkEnrichOp(prev => prev ? { ...prev, errorMessage: msg } : null)
-        // Keep modal open briefly so the user sees the error, then close
-        await new Promise(r => setTimeout(r, 2000))
-      }
-    } finally {
-      setChunkEnrichOp(null)
-      chunkEnrichAbortRef.current = null
-      setSelectedChunks(new Set())
-    }
-  }, [chunkEnrichment, chunks, selectedChunks, onEnrichChunk])
-
   const getColor = (i: number) => CHUNK_COLORS[i % CHUNK_COLORS.length]
   const getBorderColor = (i: number) => CHUNK_BORDER_COLORS[i % CHUNK_BORDER_COLORS.length]
 
-  // ── Scroll sync ──────────────────────────────────────────────────────────
+  // ── Scroll sync ────────────────────────────────────────────────────────────
+
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     if (isScrollingRef.current || !scrollSyncEnabled) return
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
@@ -605,6 +313,8 @@ export default function MarkdownViewer({
     return () => window.removeEventListener('viewer-scroll', onExtScroll)
   }, [scrollSyncEnabled])
 
+  // ── Chunk selection ────────────────────────────────────────────────────────
+
   const toggleChunkSelection = (index: number) => {
     setSelectedChunks(prev => {
       const next = new Set(prev)
@@ -624,10 +334,39 @@ export default function MarkdownViewer({
     setSelectedChunks(new Set())
   }
 
-  // ── Render ───────────────────────────────────────────────────────────────
+  // ── Custom <hr> renderer — adds "Page N" labels for VLM output ─────────────
+
+  const PageBreakHr = useCallback(() => {
+    hrCounterRef.current += 1
+    const nextPage = hrCounterRef.current + 1
+    return (
+      <div className="md-page-break" id={`md-page-anchor-${nextPage}`}>
+        <hr />
+        <button
+          className="md-page-label"
+          title={`Jump PDF to page ${nextPage}`}
+          onClick={() => window.dispatchEvent(new CustomEvent('viewer-page-sync', {
+            detail: { source: 'markdown', page: nextPage },
+          }))}
+        >
+          Page {nextPage}
+        </button>
+      </div>
+    )
+  }, [])
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
   const renderChunks = () => {
+    hrCounterRef.current = 0
+    const mdComponents = hasPageSync ? { hr: PageBreakHr } : undefined
+
     if (!chunks?.length || !chunkVisualizationEnabled) {
-      return <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      return (
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+          {renderContent}
+        </ReactMarkdown>
+      )
     }
     const allSelected = chunks.length > 0 && selectedChunks.size === chunks.length
 
@@ -764,11 +503,9 @@ export default function MarkdownViewer({
                       type="checkbox"
                       checked={pickerSelected.has(i)}
                       onChange={() => {
-                        setPickerSelected(prev => {
-                          const next = new Set(prev)
-                          next.has(i) ? next.delete(i) : next.add(i)
-                          return next
-                        })
+                        const next = new Set(pickerSelected)
+                        next.has(i) ? next.delete(i) : next.add(i)
+                        setPickerSelected(next)
                       }}
                     />
                     <span className="section-picker-label">
@@ -783,12 +520,7 @@ export default function MarkdownViewer({
               <button
                 className="btn-primary"
                 disabled={pickerSelected.size === 0}
-                onClick={() => {
-                  const currentContent = editMode ? editContent : content
-                  const indices = Array.from(pickerSelected).sort((a, b) => a - b)
-                  setPickerOpen(false)
-                  startMdEnrichment(currentContent, pickerBlocks, indices)
-                }}
+                onClick={confirmPicker}
               >
                 Enrich {pickerSelected.size} block{pickerSelected.size !== 1 ? 's' : ''}
               </button>
@@ -821,7 +553,7 @@ export default function MarkdownViewer({
         />
       )}
 
-      {/* Controls bar */}
+      {/* Primary controls bar */}
       <div className="md-controls">
         <div className="md-controls-left">
           <div className="md-zoom">
@@ -837,46 +569,19 @@ export default function MarkdownViewer({
         </div>
 
         <div className="md-controls-right">
-          {/* Chunk visualization controls */}
-          {chunkVisualizationEnabled && (
-            <>
-              {selectedChunks.size >= 2 && (
-                <button
-                  className="md-action-btn merge-chunks"
-                  onClick={handleMergeSelected}
-                  title="Merge selected chunks removing overlap"
-                >
-                  ⛓ Merge ({selectedChunks.size})
-                </button>
-              )}
-              {selectedChunks.size >= 1 && (
-                <button
-                  className="md-action-btn enrich-chunks"
-                  onClick={handleEnrichSelected}
-                  title="Enrich selected chunks with LLM"
-                >
-                  ✨ Enrich ({selectedChunks.size})
-                </button>
-              )}
-              {selectedChunks.size >= 1 && (
-                <button
-                  className="md-action-btn delete-chunks"
-                  onClick={handleDeleteSelected}
-                  title="Delete selected chunks"
-                >
-                  🗑 Delete ({selectedChunks.size})
-                </button>
-              )}
-              <button
-                className="md-action-btn save-chunks"
-                onClick={onSaveChunks}
-                disabled={!chunksReady || savingChunks || chunking}
-                title="Save chunks to disk"
-              >
-                <span>{savingChunks ? '⏳' : '💾'}</span>
-                {savingChunks ? 'Saving…' : chunking ? 'Chunking…' : 'Save'}
-              </button>
-            </>
+          {/* Chunk Visualization toggle */}
+          {onToggleChunkViz && (
+            <button
+              className={`md-chunk-viz-btn${chunkVisualizationEnabled ? ' active' : ''}`}
+              onClick={onToggleChunkViz}
+              title="Toggle chunk visualization"
+            >
+              <span>{chunkVisualizationEnabled ? '🎨' : '📄'}</span>
+              <span className="md-chunk-viz-label">Chunks</span>
+              <span className={`md-chunk-viz-status${chunkVisualizationEnabled ? ' on' : ' off'}`}>
+                {chunkVisualizationEnabled ? 'ON' : 'OFF'}
+              </span>
+            </button>
           )}
 
           {/* Reconvert — hidden when chunk visualization is active */}
@@ -928,8 +633,53 @@ export default function MarkdownViewer({
               )}
             </div>
           )}
+
+          {/* Save Chunks — always visible when chunk viz is on */}
+          {chunkVisualizationEnabled && (
+            <button
+              className="md-action-btn save-chunks"
+              onClick={onSaveChunks}
+              disabled={!chunksReady || savingChunks || chunking}
+              title="Save chunks to disk"
+            >
+              <span>{savingChunks ? '⏳' : '💾'}</span>
+              {savingChunks ? 'Saving…' : chunking ? 'Chunking…' : 'Save Chunks'}
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Chunk action row — visible only when one or more chunks are selected */}
+      {chunkVisualizationEnabled && selectedChunks.size > 0 && (
+        <div className="md-chunk-actions-row">
+          <span className="md-chunk-actions-label">
+            {selectedChunks.size} chunk{selectedChunks.size !== 1 ? 's' : ''} selected
+          </span>
+          {selectedChunks.size >= 2 && (
+            <button
+              className="md-action-btn merge-chunks"
+              onClick={handleMergeSelected}
+              title="Merge selected chunks removing overlap"
+            >
+              ⛓ Merge
+            </button>
+          )}
+          <button
+            className="md-action-btn enrich-chunks"
+            onClick={handleEnrichSelected}
+            title="Enrich selected chunks with LLM"
+          >
+            ✨ Enrich
+          </button>
+          <button
+            className="md-action-btn delete-chunks"
+            onClick={handleDeleteSelected}
+            title="Delete selected chunks"
+          >
+            🗑 Delete
+          </button>
+        </div>
+      )}
 
       {/* Enrich error banner */}
       {enrichError && (
@@ -950,6 +700,7 @@ export default function MarkdownViewer({
         {content ? (
           editMode ? (
             <textarea
+              ref={textareaRef}
               className="md-raw-editor"
               value={editContent}
               onChange={e => setEditContent(e.target.value)}

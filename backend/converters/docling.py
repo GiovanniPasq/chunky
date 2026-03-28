@@ -32,7 +32,7 @@ class DoclingConverter(PDFConverter):
 
         self._converter = DocumentConverter()
 
-    def convert(self, pdf_path: Path) -> str:
+    def convert(self, pdf_path: Path, total_pages=None) -> str:
         from docling_core.types.doc import ImageRefMode
 
         self.validate_path(pdf_path)

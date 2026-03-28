@@ -23,6 +23,6 @@ class PyMuPDFConverter(PDFConverter):
         pip install pymupdf4llm
     """
 
-    def convert(self, pdf_path: Path) -> str:
+    def convert(self, pdf_path: Path, total_pages=None) -> str:
         self.validate_path(pdf_path)
         return pymupdf4llm.to_markdown(str(pdf_path))

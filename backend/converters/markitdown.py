@@ -30,7 +30,7 @@ class MarkItDownConverter(PDFConverter):
 
         self._converter = MarkItDown(enable_plugins=False)
 
-    def convert(self, pdf_path: Path) -> str:
+    def convert(self, pdf_path: Path, total_pages=None) -> str:
         self.validate_path(pdf_path)
         result = self._converter.convert(str(pdf_path))
         return result.text_content

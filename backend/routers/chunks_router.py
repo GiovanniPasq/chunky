@@ -17,7 +17,6 @@ Chunking streams progress via Server-Sent Events (SSE):
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from typing import AsyncGenerator
 
@@ -35,14 +34,11 @@ from backend.models.schemas import (
 )
 from backend.services.chunk_storage_service import ChunkStorageService
 from backend.services.chunking_service import ChunkingService
+from backend.utils.sse import sse_event as _sse
 
 router = APIRouter(prefix="/api", tags=["chunks"])
 _chunking = ChunkingService()
 _storage = ChunkStorageService()
-
-
-def _sse(data: dict) -> str:
-    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 @router.post("/chunk")
@@ -117,10 +113,10 @@ async def save_chunks(request: SaveChunksRequest):
     ``CleanedChunk``, ``Title``, ``Context``, ``Summary``, ``Keywords``,
     and ``Questions`` — ready for the enrichment pipeline.
     """
-    return _storage.save_chunks(request)
+    return await asyncio.to_thread(_storage.save_chunks, request)
 
 
 @router.get("/chunks/load/{filename}", response_model=LoadChunksResponse)
 async def load_chunks(filename: str):
     """Load the most recently saved chunk set for a document."""
-    return _storage.load_chunks(filename)
+    return await asyncio.to_thread(_storage.load_chunks, filename)

@@ -4,6 +4,7 @@ Abstract base class for PDF-to-Markdown converters.
 
 from abc import ABC, abstractmethod
 from pathlib import Path
+from typing import Optional
 
 
 class PDFConverter(ABC):
@@ -14,11 +15,15 @@ class PDFConverter(ABC):
     """
 
     @abstractmethod
-    def convert(self, pdf_path: Path) -> str:
+    def convert(self, pdf_path: Path, total_pages: Optional[int] = None) -> str:
         """Convert a PDF file to Markdown.
 
         Args:
-            pdf_path: Absolute or relative path to the PDF file.
+            pdf_path:    Absolute or relative path to the PDF file.
+            total_pages: Pre-computed page count. When provided, converters
+                         that would otherwise open the file solely to read
+                         page count (e.g. VLMConverter) can skip that open.
+                         Non-VLM converters may ignore this parameter.
 
         Returns:
             The full document as a Markdown string.

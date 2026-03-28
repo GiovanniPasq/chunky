@@ -53,10 +53,73 @@
 .pdf-zoom span {
   font-size: 13px;
   font-weight: 700;
-  color: #5C2E0A;
+  color: #FDF6EC;
   letter-spacing: 0.3px;
   min-width: 42px;
   text-align: center;
+}
+
+/* ── Right group ── */
+.pdf-controls-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── Scroll-sync toggle ── */
+.pdf-sync-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1.5px solid rgba(240, 230, 214, 0.3);
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.pdf-sync-btn.active {
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  border-color: transparent;
+  box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.35);
+}
+
+.pdf-sync-btn:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(240, 230, 214, 0.5);
+}
+
+.pdf-sync-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.pdf-sync-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #FDF6EC;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.pdf-sync-status {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.pdf-sync-status.on {
+  background: rgba(255, 255, 255, 0.25);
+  color: #FDF6EC;
+}
+
+.pdf-sync-status.off {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(253, 246, 236, 0.55);
 }
 
 /* ── Hide button ── */

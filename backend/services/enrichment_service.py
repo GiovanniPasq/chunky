@@ -112,7 +112,7 @@ class EnrichmentService:
         for attempt in range(_MAX_RETRY_ATTEMPTS):
             try:
                 return await coro_factory()
-            except (APITimeoutError, asyncio.TimeoutError) as exc:
+            except APITimeoutError as exc:
                 last_exc = exc
                 if attempt < _MAX_RETRY_ATTEMPTS - 1:
                     delay = _RETRY_BASE_DELAY_S * (2 ** attempt)
@@ -130,6 +130,16 @@ class EnrichmentService:
                     )
         raise last_exc  # type: ignore[misc]
 
+    async def _complete(self, messages: list) -> Any:
+        """Call chat.completions.create with retry, returning the raw response."""
+        def _factory():
+            return self._client.chat.completions.create(
+                model=self._model,
+                temperature=self._temperature,
+                messages=messages,
+            )
+        return await self._call_with_retry(_factory)
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -144,18 +154,10 @@ class EnrichmentService:
             Enriched markdown string.
         """
         system_content = self._user_prompt if self._user_prompt else _MARKDOWN_SYSTEM
-
-        def _factory():
-            return self._client.chat.completions.create(
-                model=self._model,
-                temperature=self._temperature,
-                messages=[
-                    {"role": "system", "content": system_content},
-                    {"role": "user", "content": content},
-                ],
-            )
-
-        response = await self._call_with_retry(_factory)
+        response = await self._complete([
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": content},
+        ])
         result = (response.choices[0].message.content or "").strip()
         result = re.sub(r"^```(?:markdown)?\n?", "", result)
         result = re.sub(r"\n?```$", "", result)
@@ -172,18 +174,10 @@ class EnrichmentService:
             keywords, questions.
         """
         system_content = self._user_prompt if self._user_prompt else _CHUNK_SYSTEM
-
-        def _factory():
-            return self._client.chat.completions.create(
-                model=self._model,
-                temperature=self._temperature,
-                messages=[
-                    {"role": "system", "content": system_content},
-                    {"role": "user", "content": content},
-                ],
-            )
-
-        response = await self._call_with_retry(_factory)
+        response = await self._complete([
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": content},
+        ])
         raw = (response.choices[0].message.content or "").strip()
         raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
         raw = re.sub(r"\s*```$", "", raw).strip()

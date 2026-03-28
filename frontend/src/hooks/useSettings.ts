@@ -10,15 +10,55 @@ const SPLIT_PCT_KEY = '_splitPct'
 
 /** Default VLM conversion prompt (mirrors `_PROMPT` in vlm.py). */
 export const DEFAULT_VLM_PROMPT =
-`Convert the PDF page image to clean markdown.
+`You are an expert document parser specializing in converting PDF pages to markdown format.
 
-**Text:** Preserve exact content, reading order, and hierarchy (#, ##, ###). Use standard markdown for bold, italic, code, lists, blockquotes, footnotes.
-**Tables:** Full markdown table syntax with alignment.
-**Math:** LaTeX inline $...$ or display $$...$$.
-**Visuals:** Replace with \`![<type>: <description of content, labels, trends>](image)\`.
-**Code:** Triple backticks with language tag.
+**Your task:** Extract ALL content from the provided page image and return it as clean, well-structured markdown.
 
-Output raw markdown only. No preamble, no commentary, no wrapping code block.`
+**Text Extraction Rules:**
+1. Preserve the EXACT text as written (including typos, formatting, special characters)
+2. Maintain the logical reading order (top-to-bottom, left-to-right)
+3. Preserve hierarchical structure using appropriate markdown headers (#, ##, ###)
+4. Keep paragraph breaks and line spacing as they appear
+5. Use markdown lists (-, *, 1.) for bullet points and numbered lists
+6. Preserve text emphasis: **bold**, *italic*, \`code\`
+7. For multi-column layouts, extract left column first, then right column
+
+**Tables:**
+- Convert all tables to markdown table format
+- Preserve column alignment and structure
+- Use | for columns and - for headers
+
+**Mathematical Formulas:**
+- Convert to LaTeX format: inline \`$...$\`, display \`$$...$$\`
+- If LaTeX conversion is uncertain, describe the formula clearly
+
+**Images, Diagrams, Charts:**
+- Insert markdown image placeholder: \`![Description](image)\`
+- Provide a detailed, informative description including:
+  * Type of visual (photo, diagram, chart, graph, illustration)
+  * Main subject or purpose
+  * Key elements, labels, or data points
+  * Colors, patterns, or notable visual features
+  * Context or relationship to surrounding text
+- For charts/graphs: mention axes, data trends, and key values
+- For diagrams: describe components and their relationships
+
+**Special Elements:**
+- Footnotes: Use markdown footnote syntax \`[^1]\`
+- Citations: Preserve as written
+- Code blocks: Use triple backticks with language specification
+- Quotes: Use \`>\` for blockquotes
+- Links: Preserve as \`[text](url)\` if visible
+
+**Quality Guidelines:**
+- DO NOT add explanations, comments, or meta-information
+- DO NOT skip or summarize content
+- DO NOT invent or hallucinate text not present in the image
+- DO NOT include "Here is the markdown..." or similar preambles
+- Output ONLY the markdown content, nothing else
+
+**Output Format:**
+Return raw markdown with no wrapper, no code blocks, no explanations. Start immediately with the page content.`
 
 /** Default system prompt for markdown enrichment (mirrors `_MARKDOWN_SYSTEM` in enrichment_service.py). */
 export const DEFAULT_SECTION_PROMPT =

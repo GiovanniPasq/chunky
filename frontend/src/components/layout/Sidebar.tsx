@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react'
 import type { BulkProgressFn, BulkResultFn } from '../../hooks/useDocument'
+import logoSrc from '../../assets/logo.png'
 import './Sidebar.css'
 
 interface Props {
@@ -13,6 +14,8 @@ interface Props {
   onDelete: (filenames: string[]) => Promise<void>
   onBulkConvert?: (filenames: string[], onProgress: BulkProgressFn, onResult: BulkResultFn) => Promise<void>
   onBulkChunk?: (filenames: string[], onProgress: BulkProgressFn, onResult: BulkResultFn) => Promise<void>
+  onOpenSettings?: () => void
+  docsWithMarkdown?: Set<string>
 }
 
 interface BulkOpState {
@@ -27,6 +30,7 @@ export default function Sidebar({
   documents, selectedDoc, onSelect, onUpload, uploading,
   collapsed, onToggleCollapse, onDelete,
   onBulkConvert, onBulkChunk,
+  onOpenSettings, docsWithMarkdown,
 }: Props) {
   const [search, setSearch] = useState('')
   const [selectMode, setSelectMode] = useState(false)
@@ -80,7 +84,11 @@ export default function Sidebar({
 
   const runBulkOp = async (type: 'convert' | 'chunk', handler: typeof onBulkConvert) => {
     if (!handler || selected.size === 0) return
-    const filenames = Array.from(selected)
+    // For chunking, skip files that have no markdown yet.
+    const filenames = type === 'chunk'
+      ? Array.from(selected).filter(f => docsWithMarkdown?.has(f))
+      : Array.from(selected)
+    if (filenames.length === 0) return
     const results = new Map<string, boolean>()
 
     setBulkOp({ type, current: 0, total: filenames.length, currentFile: '', results })
@@ -111,8 +119,8 @@ export default function Sidebar({
       <div className="sidebar-fixed">
 
         <div className="sidebar-brand">
-          <img src="./src/assets/logo.png" alt=" logo" className="sidebar-logo" />
-          {!collapsed && <span className="sidebar-app-name"></span>}
+          <img src={logoSrc} alt="logo" className="sidebar-logo" />
+          {!collapsed && <span className="sidebar-app-name">placeholder</span>}
         </div>
 
         {collapsed ? (
@@ -206,17 +214,21 @@ export default function Sidebar({
                           : `✨ Convert${selected.size > 0 ? ` (${selected.size})` : ''}`}
                       </button>
                     )}
-                    {onBulkChunk && (
-                      <button
-                        className="bulk-btn chunk-selected"
-                        onClick={() => runBulkOp('chunk', onBulkChunk)}
-                        disabled={selected.size === 0 || isBusy}
-                      >
-                        {bulkOp?.type === 'chunk'
-                          ? `⏳ ${bulkOp.current}/${bulkOp.total}`
-                          : `⛓ Chunk${selected.size > 0 ? ` (${selected.size})` : ''}`}
-                      </button>
-                    )}
+                    {onBulkChunk && (() => {
+                      const chunkable = Array.from(selected).filter(f => docsWithMarkdown?.has(f)).length
+                      return (
+                        <button
+                          className="bulk-btn chunk-selected"
+                          onClick={() => runBulkOp('chunk', onBulkChunk)}
+                          disabled={chunkable === 0 || isBusy}
+                          title={selected.size > chunkable ? `${selected.size - chunkable} selected file(s) have no markdown and will be skipped` : undefined}
+                        >
+                          {bulkOp?.type === 'chunk'
+                            ? `⏳ ${bulkOp.current}/${bulkOp.total}`
+                            : `⛓ Chunk${chunkable > 0 ? ` (${chunkable})` : ''}`}
+                        </button>
+                      )
+                    })()}
                   </div>
                 )}
 
@@ -272,6 +284,9 @@ export default function Sidebar({
                       )}
                       <span className="doc-icon">📄</span>
                       <span className="doc-name">{doc}</span>
+                      {docsWithMarkdown?.has(doc) && (
+                        <span className="doc-md-badge" title="Markdown available">MD</span>
+                      )}
                       {!selectMode && (
                         <button
                           className="doc-delete-btn"
@@ -287,6 +302,20 @@ export default function Sidebar({
                 })
             }
           </ul>
+        </div>
+      )}
+
+      {/* ── Settings button at bottom ── */}
+      {onOpenSettings && (
+        <div className={`sidebar-settings-footer ${collapsed ? 'collapsed' : ''}`}>
+          <button
+            className="sidebar-settings-btn"
+            onClick={onOpenSettings}
+            title="Settings"
+          >
+            <span className="sidebar-settings-icon">⚙️</span>
+            {!collapsed && <span className="sidebar-settings-label">Settings</span>}
+          </button>
         </div>
       )}
     </div>

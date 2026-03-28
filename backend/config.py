@@ -19,8 +19,11 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # ── Concurrency ────────────────────────────────────────────
-    MAX_CONCURRENT_CONVERSIONS: int = 3
+    MAX_CONCURRENT_CONVERSIONS: int = 2
     """Max PDF→Markdown conversions that may run concurrently (single + batch)."""
+
+    MAX_CONCURRENT_ENRICHMENTS: int = 3
+    """Max chunk enrichment LLM calls that may run concurrently."""
 
     # ── Upload / validation ────────────────────────────────────
     MAX_FILE_SIZE_MB: int = 100
@@ -42,12 +45,12 @@ class Settings(BaseSettings):
     """Output format: 'text' (human-readable) or 'json' (structured, for production)."""
 
     # ── SSE watchdog ───────────────────────────────────────────
-    SSE_WATCHDOG_TIMEOUT_S: int = 60
+    SSE_WATCHDOG_TIMEOUT_S: int = 120
     """Seconds of SSE silence before an operation is automatically cancelled.
     Increase for very slow models (e.g. large VLMs on CPU). Set to 0 to disable."""
 
     # ── App ────────────────────────────────────────────────────
-    APP_VERSION: str = "0.2.0"
+    APP_VERSION: str = "0.2.1"
 
 
 @lru_cache
