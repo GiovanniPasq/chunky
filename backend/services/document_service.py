@@ -1,5 +1,12 @@
 """
 Document service — orchestrates PDF upload, conversion, and deletion.
+
+# VERSION 2 — ProcessPoolExecutor for PyMuPDF
+#
+# Added the top-level function `convert_pymupdf_in_process` which is executed
+# by the ProcessPoolExecutor workers. It must be top-level (not a class method
+# or a lambda) because child processes serialise it via pickle, and pickle does
+# not support local/nested functions.
 """
 
 from __future__ import annotations
@@ -47,6 +54,49 @@ CHUNKS_DIR = Path(_s.CHUNKS_DIR)
 del _s
 
 _ALLOWED_EXTENSIONS = {".pdf", ".md"}
+
+
+# ---------------------------------------------------------------------------
+# Top-level worker function for ProcessPoolExecutor
+# ---------------------------------------------------------------------------
+
+def convert_pymupdf_in_process(filename: str) -> ConvertResponse:
+    """Run PyMuPDF conversion in a separate process.
+
+    This function MUST be top-level (not a method) because it is serialised
+    via pickle when submitted to the ProcessPoolExecutor.
+
+    Note: the child process does not inherit the logging configuration of the
+    parent process — a basic configuration is recreated here.
+    """
+    import logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(processName)s] %(levelname)s %(name)s — %(message)s",
+    )
+    logger = logging.getLogger(__name__)
+    logger.info(
+        "PyMuPDF worker process started for '%s'",
+        filename,
+        extra={"operation": "convert", "file_name": filename},
+    )
+
+    svc = DocumentService()
+    result = svc.convert_to_markdown(
+        filename,
+        converter_type=ConverterType.pymupdf,
+        stop_event=None,
+        on_progress=None,
+        http_client=None,
+    )
+
+    logger.info(
+        "PyMuPDF worker process completed for '%s' → '%s'",
+        filename,
+        result.md_filename,
+        extra={"operation": "convert", "file_name": filename},
+    )
+    return result
 
 
 # ---------------------------------------------------------------------------
