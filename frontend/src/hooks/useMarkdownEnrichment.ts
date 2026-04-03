@@ -48,6 +48,8 @@ interface Options {
   setEditMode: (mode: boolean) => void
   /** Callback to display a configuration / stream error in the viewer. */
   setEnrichError: (msg: string | null) => void
+  onSuccess?: (msg: string) => void
+  onError?: (msg: string) => void
 }
 
 export interface UseMarkdownEnrichmentReturn {
@@ -78,6 +80,8 @@ export function useMarkdownEnrichment({
   setEditContent,
   setEditMode,
   setEnrichError,
+  onSuccess,
+  onError,
 }: Options): UseMarkdownEnrichmentReturn {
   const [mdEnrichOp, setMdEnrichOp] = useState<EnrichOp | null>(null)
   const [preEnrichContent, setPreEnrichContent] = useState<string | null>(null)
@@ -123,6 +127,8 @@ export function useMarkdownEnrichment({
 
     const enrichedBlocks = blocks.map(b => b.content)
 
+    let enrichedCount = 0
+
     try {
       for (let i = 0; i < selectedIndices.length; i++) {
         if (abortCtrl.signal.aborted) break
@@ -144,13 +150,14 @@ export function useMarkdownEnrichment({
             () => setMdEnrichOp(prev => prev ? { ...prev, errorMessage: CONNECTION_LOST_MSG } : null),
           )
           setEditContent(enrichedBlocks.join('\n'))
+          enrichedCount++
         } catch (err) {
-          if ((err as DOMException).name === 'AbortError') break
+          if (err instanceof DOMException && err.name === 'AbortError') break
           // Per-block error: keep original content and continue with the next block.
         }
       }
     } catch (err) {
-      if ((err as DOMException).name !== 'AbortError') {
+      if (!(err instanceof DOMException && err.name === 'AbortError')) {
         setMdEnrichOp(prev => prev
           ? { ...prev, errorMessage: err instanceof Error ? err.message : 'Stream error' }
           : null
@@ -162,6 +169,11 @@ export function useMarkdownEnrichment({
 
     setMdEnrichOp(null)
     mdEnrichAbortRef.current = null
+
+    const wasAborted = abortCtrl.signal.aborted
+    const failedCount = selectedIndices.length - enrichedCount
+    if (enrichedCount > 0) onSuccess?.(`Enriched ${enrichedCount} section${enrichedCount !== 1 ? 's' : ''} ✓`)
+    if (failedCount > 0 && !wasAborted) onError?.(`${failedCount} section${failedCount !== 1 ? 's' : ''} failed to enrich`)
   }
 
   // ── Public handlers ──────────────────────────────────────────────────────

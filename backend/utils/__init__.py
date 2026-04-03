@@ -1,5 +1,5 @@
 """
-Standalone utility scripts for the Chunky backend.
+Standalone utility scripts for the  backend.
 
 Scripts
 -------

@@ -98,7 +98,7 @@ export default function Sidebar({
 
     const onResult: BulkResultFn = (filename, success) => {
       results.set(filename, success)
-      setBulkOp(prev => prev ? { ...prev, results: new Map(results) } : prev)
+      setBulkOp(prev => prev ? { ...prev, results } : prev)
     }
 
     try {
@@ -120,7 +120,7 @@ export default function Sidebar({
 
         <div className="sidebar-brand">
           <img src={logoSrc} alt="logo" className="sidebar-logo" />
-          {!collapsed && <span className="sidebar-app-name">placeholder</span>}
+          {!collapsed && <span className="sidebar-app-name">Chunky</span>}
         </div>
 
         {collapsed ? (

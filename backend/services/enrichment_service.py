@@ -128,7 +128,7 @@ class EnrichmentService:
                         "LLM call timed out after %d attempts — marking as failed",
                         _MAX_RETRY_ATTEMPTS,
                     )
-        raise last_exc  # type: ignore[misc]
+        raise last_exc or RuntimeError("All LLM retry attempts exhausted")
 
     async def _complete(self, messages: list) -> Any:
         """Call chat.completions.create with retry, returning the raw response."""
@@ -172,6 +172,11 @@ class EnrichmentService:
         Returns:
             Dict with keys: cleaned_chunk, title, context, summary,
             keywords, questions.
+
+        Notes:
+            If the LLM returns invalid JSON the original content is preserved
+            and all enrichment fields are returned as empty defaults rather
+            than raising, so the chunk is never silently dropped from the batch.
         """
         system_content = self._user_prompt if self._user_prompt else _CHUNK_SYSTEM
         response = await self._complete([
@@ -185,8 +190,16 @@ class EnrichmentService:
             return json.loads(raw)
         except json.JSONDecodeError as exc:
             logger.error(
-                "enrich_chunk: failed to parse LLM JSON response — %s. Raw: %.200s",
+                "enrich_chunk: failed to parse LLM JSON response — %s. Raw: %.200s. "
+                "Returning original content with empty enrichment fields.",
                 exc,
                 raw,
             )
-            raise
+            return {
+                "cleaned_chunk": content,
+                "title": "",
+                "context": "",
+                "summary": "",
+                "keywords": [],
+                "questions": [],
+            }

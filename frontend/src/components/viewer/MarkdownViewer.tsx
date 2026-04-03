@@ -1,10 +1,8 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { Chunk, EnrichmentSettings } from '../../types'
+import type { EnrichmentSettings } from '../../types'
 import { useMarkdownEnrichment } from '../../hooks/useMarkdownEnrichment'
-import { useChunkEnrichment } from '../../hooks/useChunkEnrichment'
-import ChunkEditModal from '../chunks/ChunkEditModal'
 import ProgressModal from '../modals/ProgressModal'
 import './MarkdownViewer.css'
 
@@ -15,88 +13,47 @@ interface Props {
   padding?: number
   onPaddingChange: (p: number) => void
   scrollSyncEnabled?: boolean
-  chunks?: Chunk[] | null
-  chunkVisualizationEnabled?: boolean
-  onToggleChunkViz?: () => void
-  onChunkEdit: (index: number, content: string) => void
-  onEnrichChunk: (index: number, updates: Partial<Chunk>) => void
-  onDeleteChunk: (index: number) => void
-  onDeleteChunks: (indices: Set<number>) => void
-  onMergeChunks: (indices: number[]) => void
   onSaveMarkdown: (content: string) => Promise<void>
-  onSaveChunks: () => void
   onDeleteMarkdown: () => void
   savingMd: boolean
-  savingChunks: boolean
-  chunksReady: boolean
-  chunking?: boolean
   sectionEnrichment?: EnrichmentSettings
-  chunkEnrichment?: EnrichmentSettings
-}
-
-const CHUNK_COLORS = [
-  'rgba(139, 69, 19, 0.12)', 'rgba(61, 107, 39, 0.12)', 'rgba(204, 34, 0, 0.09)',
-  'rgba(180, 140, 60, 0.15)', 'rgba(30, 90, 140, 0.10)', 'rgba(210, 105, 30, 0.13)',
-  'rgba(90, 50, 120, 0.09)', 'rgba(20, 110, 100, 0.11)', 'rgba(160, 60, 30, 0.12)',
-  'rgba(60, 120, 60, 0.12)',
-]
-
-const CHUNK_BORDER_COLORS = [
-  '#8B4513', '#3D6B27', '#CC2200', '#B48C3C', '#1E5A8C',
-  '#D2691E', '#5A3278', '#146E64', '#A03C1E', '#3C783C',
-]
-
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-function isEnriched(chunk: Chunk): boolean {
-  return !!(
-    chunk.title ||
-    chunk.summary ||
-    chunk.context ||
-    chunk.cleaned_chunk ||
-    chunk.keywords?.length ||
-    chunk.questions?.length
-  )
+  onEnrichSuccess?: (msg: string) => void
+  onEnrichError?: (msg: string) => void
 }
 
 // ── Page-marker helpers ─────────────────────────────────────────────────────
 
-// Return a fresh RegExp instance each time to avoid shared lastIndex state.
-const pageMarkerRe = () => /<!--\s*page-marker:(\d+)\s*-->/g
-
-function extractPageMarkers(md: string): Array<{ page: number; offset: number }> {
-  const markers: Array<{ page: number; offset: number }> = []
-  let m: RegExpExecArray | null
-  const re = pageMarkerRe()
-  while ((m = re.exec(md)) !== null) {
-    markers.push({ page: parseInt(m[1], 10), offset: m.index })
+// Split content at page-marker comments into per-page sections.
+// This avoids false positives from `---` horizontal rules inside page content.
+function splitAtPageMarkers(md: string): Array<{ page: number; content: string }> | null {
+  const parts = md.split(/<!--\s*page-marker:(\d+)\s*-->/)
+  // parts = [before_first_marker, '1', content1, '2', content2, ...]
+  if (parts.length < 3) return null
+  const sections: Array<{ page: number; content: string }> = []
+  for (let i = 1; i < parts.length; i += 2) {
+    const page = parseInt(parts[i], 10)
+    // Strip the trailing `\n\n---\n\n` page-separator (added by the backend between pages)
+    const content = (parts[i + 1] ?? '').replace(/\n\n---\n\n$/, '').trim()
+    sections.push({ page, content })
   }
-  return markers
-}
-
-function stripPageMarkers(md: string): string {
-  return md.replace(pageMarkerRe(), '')
+  return sections.length > 0 ? sections : null
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
 
 export default function MarkdownViewer({
   content, scale = 1.0, onScaleChange, padding = 20, onPaddingChange,
-  scrollSyncEnabled = true, chunks, chunkVisualizationEnabled = false, onToggleChunkViz,
-  onChunkEdit, onEnrichChunk, onDeleteChunk, onDeleteChunks, onMergeChunks,
-  onSaveMarkdown, onSaveChunks, onDeleteMarkdown,
-  savingMd, savingChunks, chunksReady,
-  chunking = false,
-  sectionEnrichment, chunkEnrichment,
+  scrollSyncEnabled = true,
+  onSaveMarkdown, onDeleteMarkdown,
+  savingMd,
+  sectionEnrichment,
+  onEnrichSuccess, onEnrichError,
 }: Props) {
   const [editMode, setEditMode] = useState(false)
   const [editContent, setEditContent] = useState(content)
   const [enrichError, setEnrichError] = useState<string | null>(null)
-  const [editingChunkIndex, setEditingChunkIndex] = useState<number | null>(null)
   const [showReconvertConfirm, setShowReconvertConfirm] = useState(false)
-  const [selectedChunks, setSelectedChunks] = useState<Set<number>>(new Set())
 
-  // ── Section (Markdown) enrichment ─────────────────────────────────────────
   const {
     mdEnrichOp,
     preEnrichContent,
@@ -118,31 +75,9 @@ export default function MarkdownViewer({
     setEditContent,
     setEditMode,
     setEnrichError,
+    onSuccess: onEnrichSuccess,
+    onError: onEnrichError,
   })
-
-  // ── Chunk enrichment ───────────────────────────────────────────────────────
-  const {
-    chunkEnrichOp,
-    enrichingChunks,
-    chunkEnrichErrors,
-    handleInterruptChunkEnrich,
-    handleEnrichChunk,
-    handleEnrichSelected,
-  } = useChunkEnrichment({
-    chunkEnrichment,
-    chunks: chunks ?? null,
-    content,
-    selectedChunks,
-    onEnrichChunk,
-    setEnrichError,
-    setSelectedChunks,
-  })
-
-  // Clear chunk selection whenever the chunk array changes (edit, delete, merge,
-  // rechunk, or document switch).
-  useEffect(() => {
-    setSelectedChunks(new Set())
-  }, [chunks])
 
   const containerRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -151,21 +86,18 @@ export default function MarkdownViewer({
   const rafRef = useRef<number>()
   const savedScrollRatioRef = useRef<number>(0)
 
-  // Counter used by the custom <hr> renderer to assign page numbers.
-  // Reset to 0 before each render pass so page numbers stay consistent.
-  const hrCounterRef = useRef(0)
-
-  // Whether the current content has VLM page markers.
-  const pageMarkers = useMemo(() => extractPageMarkers(content), [content])
-  const hasPageSync = pageMarkers.length > 0
-
-  // Clean content (markers stripped) for rendering.
-  const renderContent = useMemo(() => hasPageSync ? stripPageMarkers(content) : content, [content, hasPageSync])
+  // Split content at VLM page markers into per-page sections (null = no markers).
+  const pageSections = useMemo(() => splitAtPageMarkers(content), [content])
+  const hasPageSync = pageSections !== null && pageSections.length > 0
 
   // Scroll MarkdownViewer to the anchor element for a given page number.
   const scrollToPage = useCallback((pageNum: number) => {
+    if (!containerRef.current) return
     const anchor = document.getElementById(`md-page-anchor-${pageNum}`)
-    if (!anchor || !containerRef.current) return
+    if (!anchor) {
+      if (pageNum === 1) containerRef.current.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
     const containerRect = containerRef.current.getBoundingClientRect()
     const anchorRect = anchor.getBoundingClientRect()
     const scrollTop = containerRef.current.scrollTop + (anchorRect.top - containerRect.top) - 8
@@ -190,17 +122,12 @@ export default function MarkdownViewer({
     setEnrichError(null)
   }, [content])
 
-  useEffect(() => {
-    if (chunkVisualizationEnabled && editMode) {
-      setEditContent(content)
-      setEditMode(false)
-    }
-  }, [chunkVisualizationEnabled])
-
   // ── Scroll ratio save/restore ──────────────────────────────────────────────
 
   const restoreScrollRatio = (toEditMode: boolean) => {
-    requestAnimationFrame(() => {
+    if (rafRef.current !== undefined) cancelAnimationFrame(rafRef.current)
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = undefined
       const el: HTMLElement | null = toEditMode
         ? (textareaRef.current ?? containerRef.current)
         : containerRef.current
@@ -220,13 +147,8 @@ export default function MarkdownViewer({
   }
 
   useEffect(() => {
-    if (!editMode) return
-    restoreScrollRatio(true)
-  }, [editMode])
-
-  useEffect(() => {
-    if (editMode) return
-    restoreScrollRatio(false)
+    restoreScrollRatio(editMode)
+    return () => { if (rafRef.current !== undefined) cancelAnimationFrame(rafRef.current) }
   }, [editMode])
 
   const handleSaveMd = async () => {
@@ -257,13 +179,6 @@ export default function MarkdownViewer({
     onDeleteMarkdown()
   }
 
-  const handleChunkSave = (index: number, content: string, metadataUpdates?: Partial<Chunk>) => {
-    onChunkEdit(index, content)
-    if (metadataUpdates) onEnrichChunk(index, metadataUpdates)
-  }
-
-  const getColor = (i: number) => CHUNK_COLORS[i % CHUNK_COLORS.length]
-  const getBorderColor = (i: number) => CHUNK_BORDER_COLORS[i % CHUNK_BORDER_COLORS.length]
 
   // ── Scroll sync ────────────────────────────────────────────────────────────
 
@@ -286,8 +201,8 @@ export default function MarkdownViewer({
     if (!scrollSyncEnabled || !containerRef.current) return
     const sel = window.getSelection()
     const text = sel?.toString().trim()
-    if (!text) return
-    const range = sel!.getRangeAt(0)
+    if (!text || !sel || sel.rangeCount === 0) return
+    const range = sel.getRangeAt(0)
     const rect = range.getBoundingClientRect()
     const cRect = containerRef.current.getBoundingClientRect()
     const relY = (rect.top - cRect.top + containerRef.current.scrollTop) / containerRef.current.scrollHeight
@@ -313,153 +228,11 @@ export default function MarkdownViewer({
     return () => window.removeEventListener('viewer-scroll', onExtScroll)
   }, [scrollSyncEnabled])
 
-  // ── Chunk selection ────────────────────────────────────────────────────────
-
-  const toggleChunkSelection = (index: number) => {
-    setSelectedChunks(prev => {
-      const next = new Set(prev)
-      next.has(index) ? next.delete(index) : next.add(index)
-      return next
-    })
-  }
-
-  const handleMergeSelected = () => {
-    const indices = Array.from(selectedChunks).sort((a, b) => a - b)
-    onMergeChunks(indices)
-    setSelectedChunks(new Set())
-  }
-
-  const handleDeleteSelected = () => {
-    onDeleteChunks(selectedChunks)
-    setSelectedChunks(new Set())
-  }
-
-  // ── Custom <hr> renderer — adds "Page N" labels for VLM output ─────────────
-
-  const PageBreakHr = useCallback(() => {
-    hrCounterRef.current += 1
-    const nextPage = hrCounterRef.current + 1
-    return (
-      <div className="md-page-break" id={`md-page-anchor-${nextPage}`}>
-        <hr />
-        <button
-          className="md-page-label"
-          title={`Jump PDF to page ${nextPage}`}
-          onClick={() => window.dispatchEvent(new CustomEvent('viewer-page-sync', {
-            detail: { source: 'markdown', page: nextPage },
-          }))}
-        >
-          Page {nextPage}
-        </button>
-      </div>
-    )
-  }, [])
-
   // ── Render ─────────────────────────────────────────────────────────────────
-
-  const renderChunks = () => {
-    hrCounterRef.current = 0
-    const mdComponents = hasPageSync ? { hr: PageBreakHr } : undefined
-
-    if (!chunks?.length || !chunkVisualizationEnabled) {
-      return (
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-          {renderContent}
-        </ReactMarkdown>
-      )
-    }
-    const allSelected = chunks.length > 0 && selectedChunks.size === chunks.length
-
-    return (
-      <>
-        <div className="chunk-select-bar">
-          <button
-            className="chunk-select-btn"
-            onClick={() => setSelectedChunks(allSelected ? new Set() : new Set(chunks.map((_, i) => i)))}
-          >
-            {allSelected ? 'Deselect all' : 'Select all'}
-          </button>
-          {selectedChunks.size > 0 && (
-            <span className="chunk-select-count">{selectedChunks.size} / {chunks.length} selected</span>
-          )}
-        </div>
-
-        {chunks.map((chunk, i) => {
-          const isSelected = selectedChunks.has(i)
-          const isEnriching = enrichingChunks.has(i)
-          const enrichErrMsg = chunkEnrichErrors.get(i)
-          const enriched = isEnriched(chunk)
-          return (
-            <div
-              key={i}
-              className={`chunk-block${isSelected ? ' chunk-block--selected' : ''}${enriched ? ' chunk-block--enriched' : ''}`}
-              style={{
-                backgroundColor: getColor(i),
-                borderLeft: `4px solid ${getBorderColor(i)}`,
-              }}
-            >
-              <div className="chunk-meta">
-                <div className="chunk-meta-left">
-                  <input
-                    type="checkbox"
-                    className="chunk-checkbox"
-                    checked={isSelected}
-                    onChange={() => toggleChunkSelection(i)}
-                    title="Select chunk"
-                  />
-                  <span className="chunk-badge">
-                    <span className="chunk-label">Chunk</span>
-                    <span className="chunk-current">{i + 1}</span>
-                    <span className="chunk-sep">/</span>
-                    <span className="chunk-total">{chunks.length}</span>
-                  </span>
-                  {enriched && (
-                    <span className="chunk-enriched-badge" title="This chunk has been enriched">★ Enriched</span>
-                  )}
-                </div>
-                <div className="chunk-meta-actions">
-                  <button
-                    className="chunk-edit-btn"
-                    onClick={() => setEditingChunkIndex(i)}
-                    title="Edit chunk"
-                    disabled={isEnriching}
-                  >
-                    ✏️ Edit
-                  </button>
-                  <button
-                    className={`chunk-enrich-btn${isEnriching ? ' loading' : ''}`}
-                    onClick={() => handleEnrichChunk(i)}
-                    title="Enrich chunk with LLM"
-                    disabled={isEnriching}
-                  >
-                    {isEnriching ? '⏳ Enriching…' : '✨ Enrich'}
-                  </button>
-                  <button
-                    className="chunk-delete-btn"
-                    onClick={() => onDeleteChunk(i)}
-                    title="Delete chunk"
-                    disabled={isEnriching}
-                  >
-                    🗑 Delete
-                  </button>
-                </div>
-              </div>
-              {enrichErrMsg && (
-                <div className="chunk-enrich-error" title={enrichErrMsg}>
-                  ⚠️ {enrichErrMsg}
-                </div>
-              )}
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{chunk.content}</ReactMarkdown>
-            </div>
-          )
-        })}
-      </>
-    )
-  }
 
   return (
     <div className="md-viewer-wrapper">
-      {/* Blocking progress modals */}
+      {/* Section enrichment progress modal */}
       <ProgressModal
         isOpen={!!mdEnrichOp}
         title={mdEnrichOp?.title ?? ''}
@@ -468,15 +241,6 @@ export default function MarkdownViewer({
         total={mdEnrichOp?.total ?? 0}
         onInterrupt={handleInterruptMdEnrich}
         errorMessage={mdEnrichOp?.errorMessage}
-      />
-      <ProgressModal
-        isOpen={!!chunkEnrichOp}
-        title={chunkEnrichOp?.title ?? ''}
-        detail={chunkEnrichOp?.detail}
-        current={chunkEnrichOp?.current ?? 0}
-        total={chunkEnrichOp?.total ?? 0}
-        onInterrupt={handleInterruptChunkEnrich}
-        errorMessage={chunkEnrichOp?.errorMessage}
       />
 
       {/* Section picker */}
@@ -542,17 +306,6 @@ export default function MarkdownViewer({
         </div>
       )}
 
-      {editingChunkIndex !== null && chunks?.[editingChunkIndex] && (
-        <ChunkEditModal
-          isOpen
-          onClose={() => setEditingChunkIndex(null)}
-          chunkIndex={editingChunkIndex}
-          chunk={chunks[editingChunkIndex]}
-          onSave={handleChunkSave}
-          totalChunks={chunks.length}
-        />
-      )}
-
       {/* Primary controls bar */}
       <div className="md-controls">
         <div className="md-controls-left">
@@ -569,117 +322,51 @@ export default function MarkdownViewer({
         </div>
 
         <div className="md-controls-right">
-          {/* Chunk Visualization toggle */}
-          {onToggleChunkViz && (
-            <button
-              className={`md-chunk-viz-btn${chunkVisualizationEnabled ? ' active' : ''}`}
-              onClick={onToggleChunkViz}
-              title="Toggle chunk visualization"
-            >
-              <span>{chunkVisualizationEnabled ? '🎨' : '📄'}</span>
-              <span className="md-chunk-viz-label">Chunks</span>
-              <span className={`md-chunk-viz-status${chunkVisualizationEnabled ? ' on' : ' off'}`}>
-                {chunkVisualizationEnabled ? 'ON' : 'OFF'}
-              </span>
-            </button>
-          )}
+          <button
+            className="md-action-btn reconvert"
+            onClick={() => setShowReconvertConfirm(true)}
+            title="Delete Markdown and reconvert"
+          >
+            <span>🔄</span> Reconvert
+          </button>
 
-          {/* Reconvert — hidden when chunk visualization is active */}
-          {!chunkVisualizationEnabled && (
-            <button
-              className="md-action-btn reconvert"
-              onClick={() => setShowReconvertConfirm(true)}
-              title="Delete Markdown and reconvert"
-            >
-              <span>🔄</span> Reconvert
-            </button>
-          )}
-
-          {/* Edit / Enrich / Save / Cancel — hidden when chunk visualization is active */}
-          {!chunkVisualizationEnabled && (
-            <div className="md-edit-actions">
-              {!editMode ? (
-                <>
-                  <button className="md-action-btn edit" onClick={handleEnterEdit}>
-                    ✏️ Edit
+          <div className="md-edit-actions">
+            {!editMode ? (
+              <>
+                <button className="md-action-btn edit" onClick={handleEnterEdit}>
+                  ✏️ Edit
+                </button>
+                <button
+                  className="md-action-btn enrich"
+                  onClick={handleEnrichSection}
+                  title="Enrich markdown with LLM"
+                >
+                  ✨ Enrich
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  className="md-action-btn enrich"
+                  onClick={handleEnrichSection}
+                  title="Enrich markdown with LLM"
+                >
+                  ✨ Enrich
+                </button>
+                {preEnrichContent !== null && (
+                  <button className="md-action-btn undo-enrich" onClick={handleUndoEnrich} title="Undo enrichment">
+                    ↩ Undo
                   </button>
-                  <button
-                    className="md-action-btn enrich"
-                    onClick={handleEnrichSection}
-                    title="Enrich markdown with LLM"
-                  >
-                    ✨ Enrich
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    className="md-action-btn enrich"
-                    onClick={handleEnrichSection}
-                    title="Enrich markdown with LLM"
-                  >
-                    ✨ Enrich
-                  </button>
-                  {preEnrichContent !== null && (
-                    <button className="md-action-btn undo-enrich" onClick={handleUndoEnrich} title="Undo enrichment">
-                      ↩ Undo
-                    </button>
-                  )}
-                  <button className="md-action-btn save-md" onClick={handleSaveMd} disabled={savingMd}>
-                    {savingMd ? '⏳ Saving…' : '💾 Save'}
-                  </button>
-                  <button className="md-action-btn cancel" onClick={handleCancelEdit}>✕ Cancel</button>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* Save Chunks — always visible when chunk viz is on */}
-          {chunkVisualizationEnabled && (
-            <button
-              className="md-action-btn save-chunks"
-              onClick={onSaveChunks}
-              disabled={!chunksReady || savingChunks || chunking}
-              title="Save chunks to disk"
-            >
-              <span>{savingChunks ? '⏳' : '💾'}</span>
-              {savingChunks ? 'Saving…' : chunking ? 'Chunking…' : 'Save Chunks'}
-            </button>
-          )}
+                )}
+                <button className="md-action-btn save-md" onClick={handleSaveMd} disabled={savingMd}>
+                  {savingMd ? '⏳ Saving…' : '💾 Save'}
+                </button>
+                <button className="md-action-btn cancel" onClick={handleCancelEdit}>✕ Cancel</button>
+              </>
+            )}
+          </div>
         </div>
       </div>
-
-      {/* Chunk action row — visible only when one or more chunks are selected */}
-      {chunkVisualizationEnabled && selectedChunks.size > 0 && (
-        <div className="md-chunk-actions-row">
-          <span className="md-chunk-actions-label">
-            {selectedChunks.size} chunk{selectedChunks.size !== 1 ? 's' : ''} selected
-          </span>
-          {selectedChunks.size >= 2 && (
-            <button
-              className="md-action-btn merge-chunks"
-              onClick={handleMergeSelected}
-              title="Merge selected chunks removing overlap"
-            >
-              ⛓ Merge
-            </button>
-          )}
-          <button
-            className="md-action-btn enrich-chunks"
-            onClick={handleEnrichSelected}
-            title="Enrich selected chunks with LLM"
-          >
-            ✨ Enrich
-          </button>
-          <button
-            className="md-action-btn delete-chunks"
-            onClick={handleDeleteSelected}
-            title="Delete selected chunks"
-          >
-            🗑 Delete
-          </button>
-        </div>
-      )}
 
       {/* Enrich error banner */}
       {enrichError && (
@@ -709,7 +396,32 @@ export default function MarkdownViewer({
             />
           ) : (
             <div className="markdown-content" style={{ padding: `${padding}px` }}>
-              {renderChunks()}
+              {pageSections ? (
+                pageSections.map(({ page, content: pageContent }) => (
+                  <div key={page}>
+                    {page === 1
+                      ? <div id="md-page-anchor-1" style={{ height: 0 }} />
+                      : (
+                        <div className="md-page-break" id={`md-page-anchor-${page}`}>
+                          <hr />
+                          <button
+                            className="md-page-label"
+                            title={`Jump PDF to page ${page}`}
+                            onClick={() => window.dispatchEvent(new CustomEvent('viewer-page-sync', {
+                              detail: { source: 'markdown', page },
+                            }))}
+                          >
+                            Page {page}
+                          </button>
+                        </div>
+                      )
+                    }
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{pageContent}</ReactMarkdown>
+                  </div>
+                ))
+              ) : (
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+              )}
             </div>
           )
         ) : (

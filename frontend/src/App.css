@@ -96,6 +96,9 @@
   overflow: hidden;
   flex-shrink: 0;
   background: white;
+  height: 100%;          /* explicit height so flex-column children can scroll */
+  min-height: 0;
+  min-width: 0;          /* allow collapsing to 0 */
 }
 
 .panel-label {
@@ -107,12 +110,51 @@
   border-bottom: 2px solid #F0E6D6;
   margin: 0;
   font-size: 15px;
-  color: #3B1A05;
+  color: #8B4513;
   font-weight: 700;
   letter-spacing: 0.5px;
   text-transform: uppercase;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
   flex-shrink: 0;
+}
+
+/* Gradient text for plain-text panel labels (e.g. "PDF") */
+.panel-label-title {
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* View tabs (Markdown / Chunks) in the panel header */
+.panel-view-tab {
+  padding: 4px 14px;
+  background: transparent;
+  border: 1.5px solid rgba(139, 69, 19, 0.25);
+  border-radius: 6px;
+  color: #8B4513;
+  -webkit-text-fill-color: #8B4513;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: inherit;
+  flex-shrink: 0;
+}
+
+.panel-view-tab:hover {
+  background: rgba(139, 69, 19, 0.08);
+  border-color: rgba(139, 69, 19, 0.45);
+}
+
+.panel-view-tab.active {
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  border-color: transparent;
+  color: white;
+  -webkit-text-fill-color: white;
+  box-shadow: 0 2px 8px rgba(139, 69, 19, 0.3);
 }
 
 /* "PDF →" restore button shown in the Markdown panel-label when PDF is hidden */

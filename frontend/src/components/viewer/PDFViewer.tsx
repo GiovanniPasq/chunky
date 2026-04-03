@@ -11,10 +11,9 @@ interface Props {
   onScaleChange: (s: number) => void
   scrollSyncEnabled?: boolean
   onToggleScrollSync?: () => void
-  onHide?: () => void
 }
 
-export default function PDFViewer({ filename, scale = 1.0, onScaleChange, scrollSyncEnabled = true, onToggleScrollSync, onHide }: Props) {
+export default function PDFViewer({ filename, scale = 1.0, onScaleChange, scrollSyncEnabled = true, onToggleScrollSync }: Props) {
   const [pdf, setPdf] = useState<pdfjsLib.PDFDocumentProxy | null>(null)
   const [numPages, setNumPages] = useState(0)
   const [toast, setToast] = useState<string | null>(null)
@@ -71,7 +70,8 @@ export default function PDFViewer({ filename, scale = 1.0, onScaleChange, scroll
         canvas.style.width = `${viewport.width}px`
         canvas.style.height = `${viewport.height}px`
 
-        const ctx = canvas.getContext('2d')!
+        const ctx = canvas.getContext('2d')
+        if (!ctx || cancelled) break
         // Scale the context up by DPR so pdf.js renders at full resolution
         // without needing an extra transform parameter.
         ctx.scale(dpr, dpr)
@@ -125,8 +125,8 @@ export default function PDFViewer({ filename, scale = 1.0, onScaleChange, scroll
     if (!scrollSyncEnabled || !containerRef.current) return
     const sel = window.getSelection()
     const text = sel?.toString().trim()
-    if (!text) return
-    const range = sel!.getRangeAt(0)
+    if (!text || !sel || sel.rangeCount === 0) return
+    const range = sel.getRangeAt(0)
     const rect = range.getBoundingClientRect()
     const cRect = containerRef.current.getBoundingClientRect()
     const relY = (rect.top - cRect.top + containerRef.current.scrollTop) / containerRef.current.scrollHeight
@@ -177,11 +177,6 @@ export default function PDFViewer({ filename, scale = 1.0, onScaleChange, scroll
             </button>
           )}
 
-          {onHide && (
-            <button className="pdf-hide-btn" onClick={onHide} title="Hide PDF panel">
-              ← Hide
-            </button>
-          )}
         </div>
       </div>
 

@@ -9,7 +9,7 @@
 <img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white"/>
 <img src="https://img.shields.io/badge/Node.js-22+-339933?style=for-the-badge&logo=node.js&logoColor=white"/>
 <img src="https://img.shields.io/badge/FastAPI-0.135+-009688?style=for-the-badge&logo=fastapi&logoColor=white"/>
-<img src="https://img.shields.io/badge/React-18+-61DAFB?style=for-the-badge&logo=react&logoColor=black"/>
+<img src="https://img.shields.io/badge/React-18+-61DAFB?style=for-the-badge&logo=react&logoColor=white"/>
 <img src="https://img.shields.io/badge/License-MIT-D2691E?style=for-the-badge"/>
 </p>
 <p align="center">
@@ -66,6 +66,7 @@ cd chunky
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+npm install -g @llamaindex/liteparse  # optional — only needed for the LiteParse converter
 ./start_all.sh
 ```
 
@@ -90,10 +91,13 @@ No single converter wins on every document type. Chunky ships with four — swit
 
 | Converter | Library | Best for |
 |-----------|---------|----------|
-| **PyMuPDF** *(default)* | `pymupdf4llm` | Fast conversion of standard digital PDFs with selectable text |
+| **PyMuPDF** | `pymupdf4llm` | Fast conversion of standard digital PDFs with selectable text |
 | **Docling** | `docling` | Complex layouts: multi-column documents, tables, and figures |
 | **MarkItDown** | `markitdown[all]` | Broad-format documents, simple and deterministic output |
+| **LiteParse** | `liteparse` | Fast, lightweight parsing by LlamaIndex — good for standard documents |
 | **VLM** | `openai` + any vision model | Scanned PDFs, handwriting, diagrams — anything a human can read |
+
+> **Note:** The **LiteParse** converter requires Node.js and the CLI installed separately: `npm install -g @llamaindex/liteparse`
 
 ### VLM converter
 
@@ -262,7 +266,7 @@ docs/
   mds/           # converted / uploaded Markdown files
 chunks/
   <stem>/        # one directory per document
-    <stem>_<UTC-ISO8601>.json   # timestamped chunk exports
+    <stem>_<library>-<strategy>_<HH-MM-SS>.json
 ```
 
 ---

@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     MAX_CONCURRENT_CONVERSIONS: int = 2
     """Max PDF→Markdown conversions that may run concurrently (single + batch)."""
 
+    CPU_CONVERTER_MAX_TASKS_PER_CHILD: int = 50
+    """Number of jobs a CPU converter worker process handles before being recycled.
+    Recycling forces the OS to reclaim accumulated ML memory (e.g. PyTorch caches
+    from Docling). Set to 0 to disable recycling."""
+
     MAX_CONCURRENT_ENRICHMENTS: int = 3
     """Max chunk enrichment LLM calls that may run concurrently."""
 
@@ -50,7 +55,7 @@ class Settings(BaseSettings):
     Increase for very slow models (e.g. large VLMs on CPU). Set to 0 to disable."""
 
     # ── App ────────────────────────────────────────────────────
-    APP_VERSION: str = "0.2.1"
+    APP_VERSION: str = "0.3.0"
 
 
 @lru_cache

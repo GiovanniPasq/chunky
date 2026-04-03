@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, HTTPException, Request
@@ -41,9 +42,11 @@ from backend.models.schemas import (
     EnrichMarkdownRequest,
 )
 from backend.services.enrichment_service import EnrichmentService
-from backend.utils.sse import sse_event as _sse
+from backend.utils.sse import sse_error as _sse_error, sse_event as _sse, sse_watchdog_timeout as _watchdog_timeout
 
 router = APIRouter(prefix="/api/enrich", tags=["enrichment"])
+
+_HEARTBEAT_INTERVAL_S = 30.0
 
 
 def _build_service(request_settings, http_client) -> EnrichmentService:
@@ -66,6 +69,11 @@ async def enrich_markdown(http_request: Request, body: EnrichMarkdownRequest):
     readability while preserving all original information.
 
     SSE events: ``start`` → ``done`` (or ``error`` / ``cancelled``).
+
+    A keepalive heartbeat comment is emitted every 30 s while the LLM call is
+    in flight so the frontend's connection-lost watchdog does not fire during
+    slow model responses.  A backend watchdog cancels the operation if no
+    progress is made for SSE_WATCHDOG_TIMEOUT_S seconds.
     """
 
     async def event_stream() -> AsyncGenerator[str, None]:
@@ -75,42 +83,80 @@ async def enrich_markdown(http_request: Request, body: EnrichMarkdownRequest):
 
         yield _sse({"type": "start", "operation": "enrich_markdown"})
 
-        # Shared async client from lifespan — one connection pool for all requests.
         http_client = http_request.app.state.http_client_async
         svc = _build_service(body.settings, http_client)
 
         watchdog_s = get_settings().SSE_WATCHDOG_TIMEOUT_S
-        timeout = float(watchdog_s) if watchdog_s > 0 else None
+        queue: asyncio.Queue[dict | None] = asyncio.Queue()
+
+        async def run_enrich() -> None:
+            try:
+                enriched = await svc.enrich_markdown(body.content)
+                await queue.put({"type": "done", "enriched_content": enriched})
+            except asyncio.CancelledError:
+                await queue.put({"type": "cancelled"})
+            except HTTPException as exc:
+                await queue.put({"type": "error", "status": exc.status_code, "message": exc.detail})
+            except Exception as exc:
+                logger.exception("Unexpected error during markdown enrichment")
+                await queue.put({"type": "error", "status": 500, "message": str(exc)})
+            finally:
+                await queue.put(None)  # sentinel
+
+        runner = asyncio.create_task(run_enrich())
+
+        last_event = time.monotonic()
+        last_heartbeat = time.monotonic()
 
         try:
-            # Directly awaited — no asyncio.to_thread needed now that the service
-            # is async.  Cancellation propagates from the generator close to the
-            # underlying httpx request automatically.
-            # asyncio.wait_for acts as a watchdog: cancels if the LLM call stalls.
-            enriched = await asyncio.wait_for(svc.enrich_markdown(body.content), timeout=timeout)
-        except asyncio.TimeoutError:
-            logger.error(
-                "Markdown enrichment watchdog fired: no response for %.0fs — aborting",
-                watchdog_s,
-            )
-            yield _sse({
-                "type": "error",
-                "status": 504,
-                "message": f"No response for {watchdog_s}s — operation timed out",
-            })
-            return
-        except asyncio.CancelledError:
-            yield _sse({"type": "cancelled"})
-            return
-        except HTTPException as exc:
-            yield _sse({"type": "error", "status": exc.status_code, "message": exc.detail})
-            return
-        except Exception as exc:
-            logger.exception("Unexpected error during markdown enrichment")
-            yield _sse({"type": "error", "status": 500, "message": str(exc)})
-            return
+            while True:
+                if await http_request.is_disconnected():
+                    runner.cancel()
+                    await asyncio.gather(runner, return_exceptions=True)
+                    yield _sse({"type": "cancelled"})
+                    return
 
-        yield _sse({"type": "done", "operation": "enrich_markdown", "enriched_content": enriched})
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=0.5)
+                except asyncio.TimeoutError:
+                    # Emit a keepalive comment every 30 s so the frontend's
+                    # connection-lost timer doesn't fire during slow LLM responses.
+                    if time.monotonic() - last_heartbeat >= _HEARTBEAT_INTERVAL_S:
+                        yield ": heartbeat\n\n"
+                        last_heartbeat = time.monotonic()
+                        last_event = time.monotonic()
+
+                    # Watchdog: if no event has arrived for watchdog_s seconds,
+                    # something is stuck — cancel and report.
+                    if watchdog_s > 0 and time.monotonic() - last_event > watchdog_s:
+                        logger.error(
+                            "Markdown enrichment watchdog fired: no response for %.0fs — aborting",
+                            watchdog_s,
+                        )
+                        runner.cancel()
+                        await asyncio.gather(runner, return_exceptions=True)
+                        yield _sse_error(504, f"No response for {watchdog_s:.0f}s — operation timed out")
+                        return
+                    continue
+
+                if event is None:
+                    break
+
+                last_event = time.monotonic()
+                last_heartbeat = time.monotonic()
+
+                if event["type"] == "done":
+                    yield _sse({"type": "done", "operation": "enrich_markdown", "enriched_content": event["enriched_content"]})
+                elif event["type"] == "error":
+                    yield _sse_error(event["status"], event["message"])
+                elif event["type"] == "cancelled":
+                    yield _sse({"type": "cancelled"})
+                return
+
+        except asyncio.CancelledError:
+            runner.cancel()
+            await asyncio.gather(runner, return_exceptions=True)
+            yield _sse({"type": "cancelled"})
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -126,6 +172,11 @@ async def enrich_chunks(http_request: Request, body: EnrichChunksRequest):
     Per-chunk errors are reported as ``chunk_error`` events and do not abort the
     remaining chunks.  A timed-out chunk (after retries) is reported as
     ``chunk_error`` and processing continues with the next chunk.
+
+    A keepalive heartbeat comment is emitted every 30 s during idle periods so
+    the frontend's connection-lost watchdog does not fire between slow chunks.
+    A backend watchdog cancels all in-flight chunks if no event arrives for
+    SSE_WATCHDOG_TIMEOUT_S seconds.
 
     SSE events: ``start`` → ``chunk_done`` × N → ``done``
     (or ``chunk_error`` for individual failures, ``error`` for fatal errors,
@@ -143,7 +194,6 @@ async def enrich_chunks(http_request: Request, body: EnrichChunksRequest):
         total = len(chunks)
 
         watchdog_s = get_settings().SSE_WATCHDOG_TIMEOUT_S
-        timeout = float(watchdog_s) if watchdog_s > 0 else None
         max_concurrent = get_settings().MAX_CONCURRENT_ENRICHMENTS
 
         yield _sse({"type": "start", "operation": "enrich_chunks", "total": total})
@@ -156,7 +206,7 @@ async def enrich_chunks(http_request: Request, body: EnrichChunksRequest):
             content = chunk.get("content", "")
             async with semaphore:
                 try:
-                    enriched = await asyncio.wait_for(svc.enrich_chunk(content), timeout=timeout)
+                    enriched = await svc.enrich_chunk(content)
                     result = {
                         "index": chunk_index,
                         "content": content,
@@ -173,15 +223,8 @@ async def enrich_chunks(http_request: Request, body: EnrichChunksRequest):
                         "end": chunk.get("end", 0),
                     }
                     await queue.put({"type": "chunk_done", "chunk": result, "chunk_index": chunk_index})
-                except asyncio.TimeoutError:
-                    logger.error(
-                        "Chunk enrichment watchdog fired at index %s: no response for %.0fs"
-                        " — skipping chunk and continuing",
-                        chunk_index,
-                        watchdog_s,
-                    )
-                    await queue.put({"type": "chunk_error", "chunk_index": chunk_index,
-                                     "message": f"Timed out after {watchdog_s}s (watchdog)"})
+                except asyncio.CancelledError:
+                    raise
                 except Exception as exc:
                     logger.error(
                         "Chunk enrichment failed at index %s (will continue): %s",
@@ -199,6 +242,10 @@ async def enrich_chunks(http_request: Request, body: EnrichChunksRequest):
         runner = asyncio.create_task(run_all())
 
         completed = 0
+        succeeded = 0
+        last_event = time.monotonic()
+        last_heartbeat = time.monotonic()
+
         try:
             while True:
                 if await http_request.is_disconnected():
@@ -210,27 +257,48 @@ async def enrich_chunks(http_request: Request, body: EnrichChunksRequest):
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=0.5)
                 except asyncio.TimeoutError:
+                    # Emit a keepalive comment every 30 s so the frontend's
+                    # connection-lost timer doesn't fire between slow chunks.
+                    if time.monotonic() - last_heartbeat >= _HEARTBEAT_INTERVAL_S:
+                        yield ": heartbeat\n\n"
+                        last_heartbeat = time.monotonic()
+                        last_event = time.monotonic()
+
+                    # Watchdog: if no chunk event has arrived for watchdog_s seconds,
+                    # something is stuck — cancel all in-flight chunks.
+                    if watchdog_s > 0 and time.monotonic() - last_event > watchdog_s:
+                        logger.error(
+                            "Chunk enrichment watchdog fired: no event for %.0fs — cancelling all chunks",
+                            watchdog_s,
+                        )
+                        runner.cancel()
+                        await asyncio.gather(runner, return_exceptions=True)
+                        yield _sse_error(504, f"No progress for {watchdog_s:.0f}s — operation timed out")
+                        return
                     continue
 
                 if event is None:
                     break
 
                 completed += 1
-                current = completed
+                last_event = time.monotonic()
+                last_heartbeat = time.monotonic()
+
                 if event["type"] == "chunk_done":
+                    succeeded += 1
                     yield _sse({
                         "type": "chunk_done",
                         "operation": "enrich_chunks",
-                        "current": current,
+                        "current": completed,
                         "total": total,
-                        "percentage": round(current / total * 100),
+                        "percentage": round(completed / total * 100),
                         "chunk": event["chunk"],
                     })
                 else:
                     yield _sse({
                         "type": "chunk_error",
                         "operation": "enrich_chunks",
-                        "current": current,
+                        "current": completed,
                         "total": total,
                         "chunk_index": event["chunk_index"],
                         "message": event["message"],
@@ -245,7 +313,7 @@ async def enrich_chunks(http_request: Request, body: EnrichChunksRequest):
         yield _sse({
             "type": "done",
             "operation": "enrich_chunks",
-            "total_chunks": completed,
+            "total_chunks": succeeded,
         })
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

@@ -286,6 +286,7 @@ export function useDocument(toast: ToastCallbacks) {
   const convertMdToPdf = useCallback(async () => {
     if (!selectedDocRef.current) return
 
+    const docAtStart = selectedDocRef.current
     convertToPdfAbortRef.current?.abort()
     const abortCtrl = new AbortController()
     convertToPdfAbortRef.current = abortCtrl
@@ -293,12 +294,12 @@ export function useDocument(toast: ToastCallbacks) {
     setConvertingToPdf(true)
     try {
       const res = await fetch(
-        `${API}/md-to-pdf/${encodeURIComponent(selectedDocRef.current)}`,
+        `${API}/md-to-pdf/${encodeURIComponent(docAtStart)}`,
         { method: 'POST', signal: abortCtrl.signal },
       )
       if (!res.ok) throw new Error()
       const data = await res.json()
-      setSelectedDoc(data.pdf_filename)
+      if (selectedDocRef.current === docAtStart) setSelectedDoc(data.pdf_filename)
       setDocumentData(prev => prev ? { ...prev, has_pdf: true, pdf_filename: data.pdf_filename } : prev)
       await fetchDocuments()
       toastRef.current.onSuccess('Converted to PDF ✓')

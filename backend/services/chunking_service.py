@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 from backend.models.schemas import ChunkRequest, ChunkResponse, SplitterLibrary
 from backend.splitters import ChonkieSplitter, LangChainSplitter, TextSplitter
 
-# Registry mapping enum values to splitter classes (instantiated lazily per call).
+# Registry mapping enum values to splitter classes.
 _LIBRARY_MAP: dict[SplitterLibrary, type[TextSplitter]] = {
     SplitterLibrary.langchain: LangChainSplitter,
     SplitterLibrary.chonkie: ChonkieSplitter,
@@ -31,7 +31,16 @@ class ChunkingService:
     The splitting *strategy* (token, recursive, character, markdown) and
     *library* (langchain, chonkie) are both specified on the request, giving
     callers full control over the chunking pipeline.
+
+    Splitter instances are created once and reused across calls — both
+    LangChainSplitter and ChonkieSplitter are stateless (all splitting
+    parameters come from the request, not from instance state).
     """
+
+    def __init__(self) -> None:
+        self._splitters: dict[SplitterLibrary, TextSplitter] = {
+            lib: cls() for lib, cls in _LIBRARY_MAP.items()
+        }
 
     def chunk_text(self, request: ChunkRequest) -> ChunkResponse:
         """Split text and return a :class:`ChunkResponse`.
@@ -46,14 +55,12 @@ class ChunkingService:
         Raises:
             HTTPException 400: If the requested library is not registered.
         """
-        splitter_cls = _LIBRARY_MAP.get(request.splitter_library)
-        if splitter_cls is None:
+        splitter = self._splitters.get(request.splitter_library)
+        if splitter is None:
             raise HTTPException(
                 status_code=400,
                 detail=f"Unknown splitter library '{request.splitter_library}'",
             )
-
-        splitter = splitter_cls()
         chunks = splitter.split(request)
 
         avg_chars = int(sum(len(c.content) for c in chunks) / len(chunks)) if chunks else 0

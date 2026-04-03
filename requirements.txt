@@ -60,6 +60,7 @@ langgraph-prebuilt==1.0.8
 langgraph-sdk==0.3.10
 langsmith==0.7.16
 latex2mathml==3.78.1
+liteparse==1.2.1
 lxml==6.0.2
 magika==0.6.3
 mammoth==1.11.0

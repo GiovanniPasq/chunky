@@ -25,7 +25,6 @@ from fastapi.responses import StreamingResponse
 
 logger = logging.getLogger(__name__)
 
-from backend.config import get_settings
 from backend.models.schemas import (
     ChunkRequest,
     LoadChunksResponse,
@@ -34,7 +33,7 @@ from backend.models.schemas import (
 )
 from backend.services.chunk_storage_service import ChunkStorageService
 from backend.services.chunking_service import ChunkingService
-from backend.utils.sse import sse_event as _sse
+from backend.utils.sse import sse_error as _sse_error, sse_event as _sse, sse_watchdog_timeout as _watchdog_timeout
 
 router = APIRouter(prefix="/api", tags=["chunks"])
 _chunking = ChunkingService()
@@ -63,8 +62,7 @@ async def chunk_text(http_request: Request, request: ChunkRequest):
 
         yield _sse({"type": "start", "operation": "chunk"})
 
-        watchdog_s = get_settings().SSE_WATCHDOG_TIMEOUT_S
-        timeout = float(watchdog_s) if watchdog_s > 0 else None
+        timeout = _watchdog_timeout()
 
         try:
             result = await asyncio.wait_for(
@@ -72,25 +70,22 @@ async def chunk_text(http_request: Request, request: ChunkRequest):
                 timeout=timeout,
             )
         except asyncio.TimeoutError:
-            logger.error(
-                "Chunking watchdog fired: no result for %.0fs — aborting",
-                watchdog_s,
-            )
+            logger.error("Chunking watchdog fired: no result after %.0fs — aborting", timeout)
             yield _sse({
                 "type": "error",
                 "status": 504,
-                "message": f"No result for {watchdog_s}s — operation timed out",
+                "message": f"No result for {timeout:.0f}s — operation timed out",
             })
             return
         except asyncio.CancelledError:
             yield _sse({"type": "cancelled"})
             return
         except HTTPException as exc:
-            yield _sse({"type": "error", "status": exc.status_code, "message": exc.detail})
+            yield _sse_error(exc.status_code, exc.detail)
             return
         except Exception as exc:
             logger.exception("Unexpected error during chunking")
-            yield _sse({"type": "error", "status": 500, "message": str(exc)})
+            yield _sse_error(500, str(exc))
             return
 
         yield _sse({

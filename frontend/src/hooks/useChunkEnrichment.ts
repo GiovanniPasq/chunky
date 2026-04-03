@@ -14,6 +14,8 @@ interface Options {
   onEnrichChunk: (index: number, updates: Partial<Chunk>) => void
   setEnrichError: (msg: string | null) => void
   setSelectedChunks: (s: Set<number>) => void
+  onSuccess?: (msg: string) => void
+  onError?: (msg: string) => void
 }
 
 export interface UseChunkEnrichmentReturn {
@@ -37,6 +39,8 @@ export function useChunkEnrichment({
   onEnrichChunk,
   setEnrichError,
   setSelectedChunks,
+  onSuccess,
+  onError,
 }: Options): UseChunkEnrichmentReturn {
   const [chunkEnrichOp, setChunkEnrichOp] = useState<EnrichOp | null>(null)
   const [enrichingChunks, setEnrichingChunks] = useState<Set<number>>(new Set())
@@ -87,6 +91,9 @@ export function useChunkEnrichment({
     const chunk = currentChunks[chunkIndex]
     if (!chunk) return
 
+    const abortCtrl = new AbortController()
+    chunkEnrichAbortRef.current = abortCtrl
+
     setChunkEnrichErrors(prev => { const m = new Map(prev); m.delete(chunkIndex); return m })
     setEnrichingChunks(prev => new Set([...prev, chunkIndex]))
 
@@ -98,19 +105,23 @@ export function useChunkEnrichment({
         chunk.start ?? 0,
         chunk.end ?? 0,
         (chunk.metadata ?? {}) as Record<string, unknown>,
+        abortCtrl.signal,
+        () => setChunkEnrichErrors(prev => new Map(prev).set(chunkIndex, CONNECTION_LOST_MSG)),
       )
       onEnrichChunk(chunkIndex, {
-        cleaned_chunk: (result.cleaned_chunk as string) || chunk.cleaned_chunk,
-        title: (result.title as string) || chunk.title,
-        context: (result.context as string) || chunk.context,
-        summary: (result.summary as string) || chunk.summary,
+        cleaned_chunk: (result.cleaned_chunk as string) ?? chunk.cleaned_chunk,
+        title: (result.title as string) ?? chunk.title,
+        context: (result.context as string) ?? chunk.context,
+        summary: (result.summary as string) ?? chunk.summary,
         keywords: Array.isArray(result.keywords) ? result.keywords as string[] : chunk.keywords,
         questions: Array.isArray(result.questions) ? result.questions as string[] : chunk.questions,
       })
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
       const msg = err instanceof Error ? err.message : 'Enrichment failed'
       setChunkEnrichErrors(prev => new Map(prev).set(chunkIndex, msg))
     } finally {
+      if (chunkEnrichAbortRef.current === abortCtrl) chunkEnrichAbortRef.current = null
       setEnrichingChunks(prev => { const s = new Set(prev); s.delete(chunkIndex); return s })
     }
   }
@@ -153,6 +164,9 @@ export function useChunkEnrichment({
 
     setChunkEnrichOp({ title: 'Chunk Enrichment', detail: '', current: 0, total: indices.length })
 
+    let enrichedCount = 0
+    let wasAborted = false
+
     try {
       const res = await fetch(`${API_BASE}/enrich/chunks`, {
         method: 'POST',
@@ -170,6 +184,7 @@ export function useChunkEnrichment({
         () => setChunkEnrichOp(prev => prev ? { ...prev, errorMessage: CONNECTION_LOST_MSG } : null),
       )) {
         if (event.type === 'chunk_done') {
+          enrichedCount++
           const chunk = event.chunk as Record<string, unknown>
           // chunk.index = which chunk in the full array was enriched (may be out of order)
           const chunkIndex = chunk.index as number
@@ -179,16 +194,16 @@ export function useChunkEnrichment({
 
           const latestChunks = chunksRef.current
           onEnrichChunk(chunkIndex, {
-            cleaned_chunk: (chunk.cleaned_chunk as string) || latestChunks?.[chunkIndex]?.cleaned_chunk,
-            title: (chunk.title as string) || latestChunks?.[chunkIndex]?.title,
-            context: (chunk.context as string) || latestChunks?.[chunkIndex]?.context,
-            summary: (chunk.summary as string) || latestChunks?.[chunkIndex]?.summary,
+            cleaned_chunk: (chunk.cleaned_chunk as string) ?? latestChunks?.[chunkIndex]?.cleaned_chunk,
+            title: (chunk.title as string) ?? latestChunks?.[chunkIndex]?.title,
+            context: (chunk.context as string) ?? latestChunks?.[chunkIndex]?.context,
+            summary: (chunk.summary as string) ?? latestChunks?.[chunkIndex]?.summary,
             keywords: Array.isArray(chunk.keywords)
               ? chunk.keywords as string[]
-              : latestChunks?.[chunkIndex]?.keywords,
+              : latestChunks?.[chunkIndex]?.keywords ?? [],
             questions: Array.isArray(chunk.questions)
               ? chunk.questions as string[]
-              : latestChunks?.[chunkIndex]?.questions,
+              : latestChunks?.[chunkIndex]?.questions ?? [],
           })
           setChunkEnrichOp(prev => prev
             ? { ...prev, current, detail: `Enriched ${current} of ${total} chunks` }
@@ -200,7 +215,7 @@ export function useChunkEnrichment({
 
         } else if (event.type === 'chunk_error') {
           setChunkEnrichOp(prev => prev
-            ? { ...prev, current: event.current as number }
+            ? { ...prev, current: event.current as number, detail: `Enriched ${event.current} of ${event.total} chunks` }
             : null
           )
         } else if (event.type === 'done' || event.type === 'cancelled') {
@@ -210,8 +225,8 @@ export function useChunkEnrichment({
         }
       }
     } catch (err) {
-      if ((err as DOMException).name === 'AbortError') {
-        // User interrupted — no error message needed
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        wasAborted = true
       } else {
         const msg = err instanceof Error ? err.message : 'Stream error'
         setChunkEnrichOp(prev => prev ? { ...prev, errorMessage: msg } : null)
@@ -223,6 +238,10 @@ export function useChunkEnrichment({
       chunkEnrichAbortRef.current = null
       setSelectedChunks(new Set())
     }
+
+    const failedCount = indices.length - enrichedCount
+    if (enrichedCount > 0) onSuccess?.(`Enriched ${enrichedCount} chunk${enrichedCount !== 1 ? 's' : ''} ✓`)
+    if (failedCount > 0 && !wasAborted) onError?.(`${failedCount} chunk${failedCount !== 1 ? 's' : ''} failed to enrich`)
   }
 
   return {

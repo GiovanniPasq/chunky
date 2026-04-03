@@ -36,8 +36,8 @@ Notes
 -----
 - RecursiveChunker does NOT accept chunk_overlap. This is a Chonkie API
   constraint; use OverlapRefinery post-processing if overlap is required.
-- SemanticChunker, LateChunker, NeuralChunker, and SlumberChunker download
-  ML models on first use. They may be slow to initialise.
+- SemanticChunker and NeuralChunker download ML models on first use.
+  They may be slow to initialise.
 """
 
 from __future__ import annotations

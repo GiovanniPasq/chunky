@@ -19,6 +19,7 @@ dist/
 .env.*.local
 .DS_Store
 Thumbs.db
+*.traineddata
 .vscode/
 .idea/
 *.swp

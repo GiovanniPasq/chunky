@@ -7,6 +7,7 @@ GET /api/metrics  → operational counters, active jobs, disk usage
 
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 
@@ -31,16 +32,11 @@ async def health():
     }
 
 
-@router.get("/metrics")
-async def metrics():
-    """Operational metrics snapshot.
+def _collect_metrics() -> dict:
+    """Collect filesystem metrics synchronously.
 
-    Returns:
-        pdf_documents    — PDFs on disk
-        md_documents     — Markdown files on disk
-        cache_size_bytes — total size of the chunks directory
-        uptime_seconds   — seconds since the process started
-        config           — key runtime limits for observability
+    Runs in a thread pool via asyncio.to_thread — glob() and stat() are
+    blocking syscalls that must not run directly on the event loop.
     """
     settings = get_settings()
 
@@ -48,8 +44,8 @@ async def metrics():
     md_dir = Path(settings.MDS_DIR)
     chunks_dir = Path(settings.CHUNKS_DIR)
 
-    pdf_count = len(list(pdf_dir.glob("*.pdf"))) if pdf_dir.exists() else 0
-    md_count = len(list(md_dir.glob("*.md"))) if md_dir.exists() else 0
+    pdf_count = sum(1 for _ in pdf_dir.glob("*.pdf")) if pdf_dir.exists() else 0
+    md_count = sum(1 for _ in md_dir.glob("*.md")) if md_dir.exists() else 0
     cache_bytes = (
         sum(f.stat().st_size for f in chunks_dir.rglob("*") if f.is_file())
         if chunks_dir.exists()
@@ -67,3 +63,17 @@ async def metrics():
             "max_page_count": settings.MAX_PAGE_COUNT,
         },
     }
+
+
+@router.get("/metrics")
+async def metrics():
+    """Operational metrics snapshot.
+
+    Returns:
+        pdf_documents    — PDFs on disk
+        md_documents     — Markdown files on disk
+        cache_size_bytes — total size of the chunks directory
+        uptime_seconds   — seconds since the process started
+        config           — key runtime limits for observability
+    """
+    return await asyncio.to_thread(_collect_metrics)

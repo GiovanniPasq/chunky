@@ -5,8 +5,9 @@
 .md-viewer-wrapper {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  overflow: hidden;        /* keep vertical clipping for the panel */
+  flex: 1;                 /* fill remaining space in the parent flex column */
+  min-height: 0;           /* allow shrinking so the inner .md-viewer can scroll */
+  overflow: hidden;
   position: relative;
 }
 
@@ -97,89 +98,7 @@
   cursor: pointer;
 }
 
-/* ── Chunk visualization toggle button ── */
-.md-chunk-viz-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 6px 12px;
-  background: white;
-  border: 1.5px solid rgba(139, 69, 19, 0.25);
-  border-radius: 8px;
-  cursor: pointer;
-  font-family: inherit;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 1px 4px rgba(139, 69, 19, 0.1);
-}
 
-.md-chunk-viz-btn.active {
-  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
-  border-color: transparent;
-  box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.3);
-}
-
-.md-chunk-viz-btn:hover:not(.active) {
-  background: rgba(139, 69, 19, 0.06);
-  border-color: rgba(139, 69, 19, 0.4);
-  transform: translateY(-1px);
-}
-
-.md-chunk-viz-label {
-  font-size: 11px;
-  font-weight: 700;
-  color: #5C2E0A;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
-}
-
-.md-chunk-viz-btn.active .md-chunk-viz-label {
-  color: #FDF6EC;
-}
-
-.md-chunk-viz-status {
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.5px;
-  border-radius: 4px;
-  padding: 1px 5px;
-}
-
-.md-chunk-viz-status.on {
-  background: rgba(255, 255, 255, 0.25);
-  color: #FDF6EC;
-}
-
-.md-chunk-viz-status.off {
-  background: rgba(139, 69, 19, 0.08);
-  color: #9A7050;
-}
-
-/* ── Chunk action row (selection-dependent second row) ── */
-.md-chunk-actions-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 16px;
-  background: linear-gradient(135deg, rgba(30, 90, 140, 0.06) 0%, rgba(42, 122, 196, 0.06) 100%);
-  border-bottom: 1.5px solid rgba(30, 90, 140, 0.15);
-  flex-shrink: 0;
-  animation: slideDown 0.15s ease-out;
-}
-
-@keyframes slideDown {
-  from { opacity: 0; transform: translateY(-4px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-.md-chunk-actions-label {
-  font-size: 11px;
-  font-weight: 700;
-  color: #1E5A8C;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
-  margin-right: 4px;
-  flex-shrink: 0;
-}
 
 /* ── Edit actions wrapper (right side legacy) ── */
 .md-edit-actions {
@@ -255,23 +174,6 @@
   box-shadow: 0 2px 8px rgba(204, 34, 0, 0.3);
 }
 
-/* Save Chunks variant */
-.md-action-btn.save-chunks {
-  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
-  color: white;
-  box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.3);
-}
-
-.md-action-btn.save-chunks:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0px 4px 12px rgba(139, 69, 19, 0.4);
-}
-
-.md-action-btn.save-chunks:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  transform: none;
-}
 
 /* Reconvert variant */
 .md-action-btn.reconvert {
@@ -361,20 +263,25 @@
 /* ── Viewer / editor area ── */
 .md-viewer {
   flex: 1;
-  overflow-y: auto;
-  overflow-x: auto;        /* allow horizontal scroll for wide tables */
+  overflow-y: scroll;      /* persistent scrollbar — not overlay */
+  overflow-x: auto;
   background: #FDF6EC;
   color: #2c2c2c;
   line-height: 1.7;
   min-height: 0;
+  scrollbar-width: thin;                       /* Firefox */
+  scrollbar-color: #D2691E #E8D8C4;            /* Firefox: thumb / track */
 }
 
-.md-viewer::-webkit-scrollbar { width: 10px; }
-.md-viewer::-webkit-scrollbar-track { background: #F5EDE0; }
+.md-viewer::-webkit-scrollbar { width: 12px; height: 12px; }
+.md-viewer::-webkit-scrollbar-track { background: #E8D8C4; }
 .md-viewer::-webkit-scrollbar-thumb {
   background: linear-gradient(180deg, #8B4513 0%, #D2691E 100%);
   border-radius: 8px;
-  border: 2px solid #F5EDE0;
+  border: 2px solid #E8D8C4;
+}
+.md-viewer::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #5C2E0A 0%, #A0521A 100%);
 }
 
 .md-raw-editor {
@@ -396,97 +303,6 @@
   min-width: 0;
 }
 
-/* ── Chunk visualization ── */
-.chunk-block {
-  border-radius: 8px;
-  padding: 14px 18px;
-  margin-bottom: 12px;
-  position: relative;
-  transition: box-shadow 0.2s;
-}
-
-.chunk-block:hover {
-  box-shadow: 0 2px 12px rgba(139, 69, 19, 0.12);
-}
-
-.chunk-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid rgba(139, 69, 19, 0.12);
-}
-
-.chunk-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
-  border-radius: 20px;
-  padding: 4px 12px;
-  font-size: 12px;
-  font-weight: 800;
-  color: white;
-  letter-spacing: 0.3px;
-  box-shadow: 0 2px 6px rgba(139, 69, 19, 0.3);
-  user-select: none;
-}
-
-.chunk-label {
-  font-size: 11px;
-  font-weight: 700;
-  color: rgba(255, 255, 255, 0.85);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-right: 3px;
-}
-
-.chunk-current {
-  font-size: 13px;
-  font-weight: 900;
-  color: #fff;
-}
-
-.chunk-sep {
-  margin: 0 4px;
-  color: rgba(255, 255, 255, 0.6);
-  font-weight: 400;
-  font-size: 12px;
-}
-
-.chunk-total {
-  font-size: 12px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.8);
-}
-
-.chunk-edit-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: white;
-  border: 1.5px solid rgba(139, 69, 19, 0.25);
-  border-radius: 6px;
-  padding: 4px 12px;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  color: #5C2E0A;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  font-family: inherit;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
-  box-shadow: 0 1px 4px rgba(139, 69, 19, 0.12);
-}
-
-.chunk-edit-btn:hover {
-  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
-  border-color: transparent;
-  color: white;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(139, 69, 19, 0.3);
-}
 
 .no-markdown {
   display: flex;
@@ -546,6 +362,7 @@
 .markdown-content a:hover { color: #8B4513; }
 
 .markdown-content strong { font-weight: 700; color: #3B1A05; }
+.markdown-content thead strong { color: white; }
 .markdown-content em     { font-style: italic; color: #5C2E0A; }
 
 .markdown-content ul,
@@ -684,171 +501,7 @@
   border-color: #8B4513;
 }
 
-.md-action-btn.cancel-chunking {
-  background: transparent;
-  border: 1.5px solid rgba(139, 69, 19, 0.4);
-  color: #8B4513;
-}
 
-.md-action-btn.cancel-chunking:hover {
-  background: rgba(139, 69, 19, 0.08);
-  border-color: #8B4513;
-}
-
-/* Merge chunks variant */
-.md-action-btn.merge-chunks {
-  background: linear-gradient(135deg, #1E5A8C 0%, #2A7AC4 100%);
-  color: white;
-  box-shadow: 0px 2px 8px rgba(30, 90, 140, 0.3);
-}
-
-.md-action-btn.merge-chunks:hover {
-  transform: translateY(-1px);
-  box-shadow: 0px 4px 12px rgba(30, 90, 140, 0.4);
-}
-
-/* Enrich selected chunks variant */
-.md-action-btn.enrich-chunks {
-  background: linear-gradient(135deg, #1E5A8C 0%, #2A7AC4 100%);
-  color: white;
-  box-shadow: 0px 2px 8px rgba(30, 90, 140, 0.3);
-}
-
-.md-action-btn.enrich-chunks:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0px 4px 12px rgba(30, 90, 140, 0.4);
-}
-
-.md-action-btn.enrich-chunks:disabled,
-.md-action-btn.enrich-chunks.loading {
-  opacity: 0.65;
-  cursor: not-allowed;
-  transform: none;
-}
-
-/* Delete selected chunks variant */
-.md-action-btn.delete-chunks {
-  background: linear-gradient(135deg, #CC2200 0%, #A81B00 100%);
-  color: white;
-  box-shadow: 0px 2px 8px rgba(204, 34, 0, 0.3);
-}
-
-.md-action-btn.delete-chunks:hover {
-  transform: translateY(-1px);
-  box-shadow: 0px 4px 12px rgba(204, 34, 0, 0.4);
-}
-
-/* ── Select all / deselect all bar ── */
-.chunk-select-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
-  padding: 6px 4px;
-}
-
-.chunk-select-btn {
-  font-size: 11px;
-  font-weight: 700;
-  color: #5C2E0A;
-  background: rgba(139, 69, 19, 0.07);
-  border: 1.5px solid rgba(139, 69, 19, 0.18);
-  border-radius: 6px;
-  padding: 4px 12px;
-  cursor: pointer;
-  transition: all 0.15s;
-  font-family: inherit;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
-}
-
-.chunk-select-btn:hover {
-  background: rgba(139, 69, 19, 0.13);
-  border-color: rgba(139, 69, 19, 0.3);
-}
-
-.chunk-select-count {
-  font-size: 11px;
-  font-weight: 600;
-  color: #9A7050;
-}
-
-/* ── Enriched chunk indicator ── */
-.chunk-enriched-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  background: linear-gradient(135deg, #3D6B27 0%, #5A8C3E 100%);
-  color: white;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
-  padding: 3px 9px;
-  border-radius: 20px;
-  box-shadow: 0 1px 4px rgba(61, 107, 39, 0.3);
-  user-select: none;
-}
-
-/* Enriched chunk — subtle green left accent */
-.chunk-block--enriched {
-  border-left-color: #3D6B27 !important;
-}
-
-/* ── Per-chunk meta layout ── */
-.chunk-meta-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.chunk-meta-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.chunk-checkbox {
-  width: 16px;
-  height: 16px;
-  accent-color: #8B4513;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-/* Delete button per chunk */
-.chunk-delete-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: white;
-  border: 1.5px solid rgba(204, 34, 0, 0.25);
-  border-radius: 6px;
-  padding: 4px 12px;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  color: #CC2200;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  font-family: inherit;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
-  box-shadow: 0 1px 4px rgba(204, 34, 0, 0.08);
-}
-
-.chunk-delete-btn:hover {
-  background: linear-gradient(135deg, #CC2200 0%, #A81B00 100%);
-  border-color: transparent;
-  color: white;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(204, 34, 0, 0.3);
-}
-
-/* Selected chunk highlight */
-.chunk-block--selected {
-  outline: 2px solid #1E5A8C;
-  outline-offset: 1px;
-}
 
 /* ── Enrich button (section-level, in controls bar) ── */
 .md-action-btn.enrich {
@@ -915,51 +568,6 @@
   transform: scale(1.2);
 }
 
-/* ── Per-chunk enrich button ── */
-.chunk-enrich-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: linear-gradient(135deg, #1E5A8C 0%, #2A7AC4 100%);
-  border: none;
-  border-radius: 6px;
-  padding: 4px 12px;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  color: white;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  font-family: inherit;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
-  box-shadow: 0 1px 4px rgba(30, 90, 140, 0.25);
-}
-
-.chunk-enrich-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(30, 90, 140, 0.4);
-}
-
-.chunk-enrich-btn:disabled,
-.chunk-enrich-btn.loading {
-  opacity: 0.65;
-  cursor: not-allowed;
-  transform: none;
-}
-
-/* ── Per-chunk enrich error ── */
-.chunk-enrich-error {
-  font-size: 11px;
-  color: #A81B00;
-  background: rgba(204, 34, 0, 0.07);
-  border-radius: 5px;
-  padding: 5px 10px;
-  margin-bottom: 8px;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 /* ── Section picker ── */
 .section-picker-overlay {

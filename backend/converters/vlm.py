@@ -139,7 +139,6 @@ class VLMConverter(PDFConverter):
         temperature: float = 0.1,
         user_prompt: Optional[str] = None,
         on_progress: Optional[Callable[[int, int], None]] = None,
-        http_client: Optional[httpx.Client] = None,  # kept for API compat, unused
         stop_event: Optional[threading.Event] = None,
     ) -> None:
         self._model = model

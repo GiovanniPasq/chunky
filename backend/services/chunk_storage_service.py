@@ -145,7 +145,10 @@ class ChunkStorageService:
         stem = Path(filename).stem
         dest_dir = self._chunks_dir / stem
 
-        json_files = sorted(dest_dir.glob("*.json")) if dest_dir.exists() else []
+        try:
+            json_files = sorted(dest_dir.glob("*.json"))
+        except (FileNotFoundError, OSError):
+            json_files = []
 
         if not json_files:
             raise HTTPException(
@@ -155,12 +158,13 @@ class ChunkStorageService:
 
         try:
             payload = json.loads(json_files[-1].read_text(encoding="utf-8"))
+            normalised = [_to_api_schema(c) for c in payload["chunks"]]
+            return LoadChunksResponse(
+                chunks=normalised,
+                total_chunks=payload["total_chunks"],
+                filename=payload["filename"],
+            )
         except (json.JSONDecodeError, OSError) as exc:
             raise HTTPException(status_code=500, detail=f"Saved chunk file is corrupt: {exc}")
-        normalised = [_to_api_schema(c) for c in payload["chunks"]]
-
-        return LoadChunksResponse(
-            chunks=normalised,
-            total_chunks=payload["total_chunks"],
-            filename=payload["filename"],
-        )
+        except KeyError as exc:
+            raise HTTPException(status_code=500, detail=f"Saved chunk file is missing field: {exc}")

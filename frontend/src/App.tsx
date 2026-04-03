@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import Sidebar from './components/layout/Sidebar'
 import MarkdownViewer from './components/viewer/MarkdownViewer'
+import ChunkViewer from './components/viewer/ChunkViewer'
 import SettingsModal from './components/modals/SettingsModal'
 import ProgressModal from './components/modals/ProgressModal'
 import Toast from './components/viewer/Toast'
@@ -28,8 +29,9 @@ export default function App() {
   // ── Toast ───────────────────────────────────────────────────
   const [toast, setToast] = useState<ToastState | null>(null)
 
+  const toastIdRef = useRef(0)
   const showToast = useCallback((message: string, type: 'success' | 'error') => {
-    setToast({ message, type, id: Date.now() })
+    setToast({ message, type, id: ++toastIdRef.current })
   }, [])
 
   const toastCallbacks = useMemo(() => ({
@@ -51,8 +53,8 @@ export default function App() {
   // ── UI state ─────────────────────────────────────────────────
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [scrollSync, setScrollSync] = useState(true)
-  const [chunkViz, setChunkViz] = useState(false)
-  const [pdfHidden, setPdfHidden] = useState(false)
+  const [leftView, setLeftView] = useState<'pdf' | 'markdown'>('pdf')
+  const [rightView, setRightView] = useState<'markdown' | 'chunks'>('markdown')
 
   // Set of PDF filenames that have a corresponding markdown file.
   // Updated whenever documents list changes or a conversion completes.
@@ -62,7 +64,7 @@ export default function App() {
     chunks, settings, saving: savingChunks, chunking,
     applySettings, resetSettings, editChunk, deleteChunk, deleteChunks, mergeChunks, saveChunks, cancelChunking,
     enrichChunk,
-  } = useChunks(documentData, selectedDoc, chunkViz, toastCallbacks)
+  } = useChunks(documentData, selectedDoc, rightView === 'chunks', toastCallbacks)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [pdfScale, setPdfScale] = useState(1.0)
   const [mdScale, setMdScale] = useState(1.0)
@@ -71,6 +73,22 @@ export default function App() {
   const [isDragging, setIsDragging] = useState(false)
   /** Pending document switch while a conversion/chunking is in progress. */
   const [pendingDoc, setPendingDoc] = useState<string | null>(null)
+
+  // Reset to default layout when the selected doc has no markdown.
+  useEffect(() => {
+    if (!documentData) return
+    if (!documentData.has_markdown) { setLeftView('pdf'); setRightView('markdown') }
+  }, [selectedDoc, documentData?.has_markdown])
+
+  const handleSetLeftView = (view: 'pdf' | 'markdown') => {
+    if (view === 'markdown' && rightView === 'markdown') setRightView('chunks')
+    setLeftView(view)
+  }
+
+  const handleSetRightView = (view: 'markdown' | 'chunks') => {
+    if (view === 'markdown' && leftView === 'markdown') setLeftView('pdf')
+    setRightView(view)
+  }
 
   // ── Bulk operation modal state ────────────────────────────────
   const [bulkOp, setBulkOp] = useState<BulkOp | null>(null)
@@ -122,7 +140,7 @@ export default function App() {
       if (!container) return
       const rect = container.getBoundingClientRect()
       const pct = ((e.clientX - rect.left) / rect.width) * 100
-      if (pct >= 20 && pct <= 80) setSplitPct(pct)
+      setSplitPct(Math.min(100, Math.max(0, pct)))
     }
     const onUp = () => setIsDragging(false)
     document.addEventListener('mousemove', onMove)
@@ -377,17 +395,26 @@ export default function App() {
         {!loading && selectedDoc && documentData && (
           <>
             <div className="viewers">
-              {!pdfHidden && (
-                <div className="viewer-panel" style={{ width: `${splitPct}%` }}>
-                  <div className="panel-label">PDF</div>
-                  {documentData.has_pdf ? (
+              {/* ── Left panel ── */}
+              <div className="viewer-panel" style={{ width: `${splitPct}%` }}>
+                <div className="panel-label">
+                  <button
+                    className={`panel-view-tab${leftView === 'pdf' ? ' active' : ''}`}
+                    onClick={() => handleSetLeftView('pdf')}
+                  >PDF</button>
+                  <button
+                    className={`panel-view-tab${leftView === 'markdown' ? ' active' : ''}`}
+                    onClick={() => handleSetLeftView('markdown')}
+                  >Markdown</button>
+                </div>
+                {leftView === 'pdf' ? (
+                  documentData.has_pdf ? (
                     <PDFViewer
                       filename={selectedDoc}
                       scale={pdfScale}
                       onScaleChange={setPdfScale}
                       scrollSyncEnabled={scrollSync}
                       onToggleScrollSync={() => setScrollSync(v => !v)}
-                      onHide={() => setPdfHidden(true)}
                     />
                   ) : (
                     <div className="md-not-found">
@@ -397,92 +424,125 @@ export default function App() {
                           <h2>Converting to PDF…</h2>
                           <p>Please wait while we generate your PDF.</p>
                           <div className="converting-bar" />
-                          <button className="btn-cancel-op" onClick={cancelMdToPdfConversion}>
-                            ✕ Cancel
-                          </button>
+                          <button className="btn-cancel-op" onClick={cancelMdToPdfConversion}>✕ Cancel</button>
                         </>
                       ) : (
                         <>
                           <span className="static-icon">📝</span>
                           <h2>No PDF available</h2>
                           <p>This document only has a Markdown file.</p>
-                          <button onClick={convertMdToPdf}>
-                            ✨ Convert to PDF
-                          </button>
+                          <button onClick={convertMdToPdf}>✨ Convert to PDF</button>
                         </>
                       )}
                     </div>
-                  )}
-                </div>
-              )}
+                  )
+                ) : (
+                  documentData.has_markdown ? (
+                    <MarkdownViewer
+                      content={documentData.md_content}
+                      scale={mdScale}
+                      onScaleChange={setMdScale}
+                      padding={mdPadding}
+                      onPaddingChange={setMdPadding}
+                      scrollSyncEnabled={scrollSync}
+                      onSaveMarkdown={saveMarkdown}
+                      onDeleteMarkdown={deleteMarkdown}
+                      savingMd={savingMd}
+                      sectionEnrichment={settings.sectionEnrichment}
+                      onEnrichSuccess={msg => showToast(msg, 'success')}
+                      onEnrichError={msg => showToast(msg, 'error')}
+                    />
+                  ) : (
+                    <div className="md-not-found">
+                      <span className="static-icon">📄</span>
+                      <h2>Markdown not found</h2>
+                      <p>This document hasn't been converted yet.</p>
+                      <button onClick={handleConvert} disabled={converting}>
+                        ✨ Convert with {converterLabel}
+                      </button>
+                    </div>
+                  )
+                )}
+              </div>
 
-              {!pdfHidden && (
-                <div
-                  className="viewer-divider"
-                  onMouseDown={() => setIsDragging(true)}
-                  title="Drag to resize"
-                >
-                  <div className="viewer-divider-grip">
-                    <span /><span />
-                    <span /><span />
-                    <span /><span />
-                  </div>
-                  <div className="viewer-divider-presets">
-                    <button onClick={e => { e.stopPropagation(); setSplitPct(40) }} title="40 / 60">40·60</button>
-                    <button onClick={e => { e.stopPropagation(); setSplitPct(50) }} title="50 / 50">50·50</button>
-                    <button onClick={e => { e.stopPropagation(); setSplitPct(60) }} title="60 / 40">60·40</button>
-                  </div>
+              {/* ── Divider ── */}
+              <div
+                className="viewer-divider"
+                onMouseDown={() => setIsDragging(true)}
+                title="Drag to resize"
+              >
+                <div className="viewer-divider-grip">
+                  <span /><span />
+                  <span /><span />
+                  <span /><span />
                 </div>
-              )}
+                <div className="viewer-divider-presets">
+                  <button onClick={e => { e.stopPropagation(); setSplitPct(0) }} title="0 / 100">0·100</button>
+                  <button onClick={e => { e.stopPropagation(); setSplitPct(40) }} title="40 / 60">40·60</button>
+                  <button onClick={e => { e.stopPropagation(); setSplitPct(50) }} title="50 / 50">50·50</button>
+                  <button onClick={e => { e.stopPropagation(); setSplitPct(60) }} title="60 / 40">60·40</button>
+                  <button onClick={e => { e.stopPropagation(); setSplitPct(100) }} title="100 / 0">100·0</button>
+                </div>
+              </div>
 
-              <div className="viewer-panel" style={{ width: pdfHidden ? '100%' : `${100 - splitPct}%` }}>
+              {/* ── Right panel ── */}
+              <div className="viewer-panel" style={{ width: `${100 - splitPct}%` }}>
                 <div className="panel-label">
-                  {pdfHidden && (
+                  <button
+                    className={`panel-view-tab${rightView === 'markdown' ? ' active' : ''}`}
+                    onClick={() => handleSetRightView('markdown')}
+                  >Markdown</button>
+                  {documentData.has_markdown && (
                     <button
-                      className="show-pdf-btn"
-                      onClick={() => setPdfHidden(false)}
-                      title="Show PDF panel"
-                    >
-                      PDF →
-                    </button>
+                      className={`panel-view-tab${rightView === 'chunks' ? ' active' : ''}`}
+                      onClick={() => handleSetRightView('chunks')}
+                    >Chunks</button>
                   )}
-                  MARKDOWN
                 </div>
-                {documentData.has_markdown ? (
-                  <MarkdownViewer
-                    content={documentData.md_content}
-                    scale={mdScale}
-                    onScaleChange={setMdScale}
-                    padding={mdPadding}
-                    onPaddingChange={setMdPadding}
-                    scrollSyncEnabled={scrollSync}
+                {rightView === 'markdown' ? (
+                  documentData.has_markdown ? (
+                    <MarkdownViewer
+                      content={documentData.md_content}
+                      scale={mdScale}
+                      onScaleChange={setMdScale}
+                      padding={mdPadding}
+                      onPaddingChange={setMdPadding}
+                      scrollSyncEnabled={scrollSync}
+                      onSaveMarkdown={saveMarkdown}
+                      onDeleteMarkdown={deleteMarkdown}
+                      savingMd={savingMd}
+                      sectionEnrichment={settings.sectionEnrichment}
+                      onEnrichSuccess={msg => showToast(msg, 'success')}
+                      onEnrichError={msg => showToast(msg, 'error')}
+                    />
+                  ) : (
+                    <div className="md-not-found">
+                      <span className="static-icon">📄</span>
+                      <h2>Markdown not found</h2>
+                      <p>This document hasn't been converted yet.</p>
+                      <button onClick={handleConvert} disabled={converting}>
+                        ✨ Convert with {converterLabel}
+                      </button>
+                    </div>
+                  )
+                ) : (
+                  <ChunkViewer
                     chunks={chunks}
-                    chunkVisualizationEnabled={chunkViz}
-                    onToggleChunkViz={() => setChunkViz(v => !v)}
-                    onChunkEdit={editChunk}
+                    content={documentData.md_content}
+                    chunksReady={!!chunks}
+                    chunking={chunking}
+                    savingChunks={savingChunks}
+                    chunkEnrichment={settings.chunkEnrichment}
                     onEnrichChunk={enrichChunk}
+                    onChunkEdit={editChunk}
                     onDeleteChunk={deleteChunk}
                     onDeleteChunks={deleteChunks}
                     onMergeChunks={mergeChunks}
-                    onSaveMarkdown={saveMarkdown}
                     onSaveChunks={saveChunks}
-                    onDeleteMarkdown={deleteMarkdown}
-                    savingMd={savingMd}
-                    savingChunks={savingChunks}
-                    chunksReady={!!chunks}
-                    chunking={chunking}
-                    sectionEnrichment={settings.sectionEnrichment}
-                    chunkEnrichment={settings.chunkEnrichment}
+                    scrollSyncEnabled={scrollSync}
+                    onEnrichSuccess={msg => showToast(msg, 'success')}
+                    onEnrichError={msg => showToast(msg, 'error')}
                   />
-                ) : (
-                  <div className="md-not-found">
-                    <span className="static-icon">📄</span>
-                    <h2>Markdown not found</h2>
-                    <p>This document hasn't been converted yet.</p>
-                    <button onClick={handleConvert} disabled={converting}>
-                      ✨ Convert with {converterLabel}
-                    </button>
-                  </div>
                 )}
               </div>
             </div>

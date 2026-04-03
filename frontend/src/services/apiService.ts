@@ -73,6 +73,7 @@ export async function apiEnrichChunk(
   end: number,
   metadata: Record<string, unknown>,
   signal?: AbortSignal,
+  onConnectionLost?: () => void,
 ): Promise<Record<string, unknown>> {
   const res = await fetch(`${API_BASE}/enrich/chunks`, {
     method: 'POST',
@@ -86,7 +87,7 @@ export async function apiEnrichChunk(
     const errText = await res.text().catch(() => res.statusText)
     throw new Error(`Chunk enrichment failed ${res.status}: ${errText}`)
   }
-  for await (const event of parseSse(res.body!)) {
+  for await (const event of parseSse(res.body!, onConnectionLost)) {
     if (event.type === 'chunk_done') return event.chunk as Record<string, unknown>
     if (event.type === 'error') throw new Error(String(event.message ?? 'Chunk enrichment error'))
     if (event.type === 'cancelled') throw new DOMException('Chunk enrichment cancelled', 'AbortError')

@@ -40,7 +40,6 @@ import asyncio
 import logging
 import threading
 import time
-from concurrent.futures import ProcessPoolExecutor
 from typing import AsyncGenerator, List
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
@@ -49,44 +48,31 @@ from fastapi.responses import FileResponse, StreamingResponse
 from backend.config import get_settings
 from backend.models.schemas import (
     ConvertRequest,
+    ConvertResponse,
     ConverterType,
     DeleteResponse,
     DocumentInfo,
     MdToPdfResponse,
     MultiUploadResponse,
 )
-from backend.services.document_service import DocumentService, convert_pymupdf_in_process
-from backend.utils.sse import sse_event as _sse
+from backend.services.document_service import (
+    DocumentService,
+    convert_in_process,
+    convert_md_to_pdf_in_process,
+)
+from backend.utils.sse import sse_error as _sse_error, sse_event as _sse, sse_watchdog_timeout as _watchdog_timeout
 
 router = APIRouter(prefix="/api", tags=["documents"])
 _svc = DocumentService()
 logger = logging.getLogger(__name__)
 
-# ── Executors ─────────────────────────────────────────────────────────────────
-# Dedicated ProcessPoolExecutor for PyMuPDF: each worker runs in a separate
-# process, so there is no shared state with the main process and PyMuPDF's
-# thread-safety constraints do not apply.
-# max_workers=None → defaults to os.cpu_count() processes.
-_pymupdf_executor: ProcessPoolExecutor | None = None
-
-
-def _get_pymupdf_executor() -> ProcessPoolExecutor:
-    global _pymupdf_executor
-    if _pymupdf_executor is None:
-        _pymupdf_executor = ProcessPoolExecutor(max_workers=None)
-    return _pymupdf_executor
-
-
-# ── Global conversion semaphore (lazy init) ───────────────────────────────────
-# Controls total concurrent conversions across ALL requests (single + batch).
-_semaphore: asyncio.Semaphore | None = None
-
-
-def _get_semaphore() -> asyncio.Semaphore:
-    global _semaphore
-    if _semaphore is None:
-        _semaphore = asyncio.Semaphore(get_settings().MAX_CONCURRENT_CONVERSIONS)
-    return _semaphore
+# Converters that run in a ProcessPoolExecutor (CPU-bound: C extensions or ML models).
+# VLM is excluded — it is pure I/O (HTTP calls to a model endpoint) and runs in a thread.
+_CPU_BOUND_CONVERTERS = frozenset({
+    ConverterType.pymupdf,
+    ConverterType.docling,
+    ConverterType.markitdown,
+})
 
 
 # ── Read endpoints ────────────────────────────────────────────────────────────
@@ -157,7 +143,7 @@ async def convert_pdfs(
     """
 
     async def event_stream() -> AsyncGenerator[str, None]:
-        semaphore = _get_semaphore()
+        semaphore = http_request.app.state.conversion_semaphore
         filenames = request.filenames
         total = len(filenames)
         queue: asyncio.Queue[dict | None] = asyncio.Queue()
@@ -170,17 +156,41 @@ async def convert_pdfs(
         _stop_events: list[threading.Event] = []
         _stop_events_lock = asyncio.Lock()
 
-        http_client = http_request.app.state.http_client_sync
-        watchdog_s = get_settings().SSE_WATCHDOG_TIMEOUT_S
+        watchdog_s = get_settings().SSE_WATCHDOG_TIMEOUT_S  # used as numeric threshold in event loop
         loop = asyncio.get_running_loop()
+        is_cpu_bound = request.converter in _CPU_BOUND_CONVERTERS
 
-        is_pymupdf = request.converter == ConverterType.pymupdf
+        # Build the dispatch coroutine once for the whole batch.
+        # CPU-bound converters run in the process pool; VLM runs in a thread
+        # because it spends its time waiting on HTTP responses (I/O-bound).
+        if is_cpu_bound:
+            async def _dispatch(fn: str, _stop, _on_progress) -> ConvertResponse:
+                return await loop.run_in_executor(
+                    http_request.app.state.cpu_converter_executor,
+                    convert_in_process,
+                    fn,
+                    request.converter,
+                )
+        else:
+            async def _dispatch(fn: str, _stop, _on_progress) -> ConvertResponse:
+                return await asyncio.to_thread(
+                    _svc.convert_to_markdown,
+                    fn,
+                    converter_type=request.converter,
+                    vlm_settings=request.vlm,
+                    stop_event=_stop,
+                    on_progress=_on_progress,
+                )
 
         async def convert_one(idx: int, fn: str) -> None:
             nonlocal succeeded, failed
-            stop = threading.Event()
-            async with _stop_events_lock:
-                _stop_events.append(stop)
+
+            # stop_event is only meaningful for VLM: CPU-bound converters run
+            # in a separate process and cannot receive a threading.Event.
+            stop = threading.Event() if not is_cpu_bound else None
+            if stop is not None:
+                async with _stop_events_lock:
+                    _stop_events.append(stop)
 
             async with semaphore:
                 if await http_request.is_disconnected():
@@ -188,47 +198,30 @@ async def convert_pdfs(
 
                 await queue.put({"type": "file_start", "filename": fn, "index": idx + 1, "total": total})
 
-                # Thread-safe callback: the worker thread calls this after each
-                # VLM page; it posts a progress event into the async queue.
-                # file_index / file_total let the frontend display batch context
-                # alongside the per-page numbers.
+                # Thread-safe progress callback used by VLM only (one event per page).
+                # Not passed to CPU-bound converters — not picklable cross-process,
+                # and PyMuPDF / Docling / MarkItDown have no per-page events anyway.
                 def _on_progress(current: int, total_pages: int) -> None:
-                    # Note: _on_progress is not passed to PyMuPDF (not picklable cross-process),
-                    # but PyMuPDF does not emit per-page events anyway.
-                    loop.call_soon_threadsafe(
-                        queue.put_nowait,
-                        {
-                            "type": "progress",
-                            "filename": fn,
-                            "current": current,
-                            "total": total_pages,
-                            "file_index": idx + 1,
-                            "file_total": total,
-                            "percentage": round(current / total_pages * 100) if total_pages else 0,
-                        },
-                    )
+                    try:
+                        loop.call_soon_threadsafe(
+                            queue.put_nowait,
+                            {
+                                "type": "progress",
+                                "filename": fn,
+                                "current": current,
+                                "total": total_pages,
+                                "file_index": idx + 1,
+                                "file_total": total,
+                                "percentage": round(current / total_pages * 100) if total_pages else 0,
+                            },
+                        )
+                    except Exception as _err:
+                        logger.warning("Failed to queue progress event for '%s': %s", fn, _err)
 
                 t0 = time.monotonic()
                 _done = 0
                 try:
-                    if is_pymupdf:
-                        # Run in a separate process: no shared threads, no PyMuPDF crash risk.
-                        result = await loop.run_in_executor(
-                            _get_pymupdf_executor(),
-                            convert_pymupdf_in_process,
-                            fn,
-                        )
-                    else:
-                        # VLM, Docling, MarkItDown: standard thread pool.
-                        result = await asyncio.to_thread(
-                            _svc.convert_to_markdown,
-                            fn,
-                            converter_type=request.converter,
-                            vlm_settings=request.vlm,
-                            stop_event=stop,
-                            on_progress=_on_progress,
-                            http_client=http_client,
-                        )
+                    result = await _dispatch(fn, stop, _on_progress)
 
                     async with _lock:
                         succeeded += 1
@@ -312,11 +305,7 @@ async def convert_pdfs(
                             extra={"operation": "convert"},
                         )
                         await _cancel_all()
-                        yield _sse({
-                            "type": "error",
-                            "status": 504,
-                            "message": f"No progress for {watchdog_s}s — operation timed out",
-                        })
+                        yield _sse_error(504, f"No progress for {watchdog_s}s — operation timed out")
                         return
                     continue
 
@@ -338,13 +327,20 @@ async def convert_pdfs(
 # ── MD → PDF conversion ───────────────────────────────────────────────────────
 
 @router.post("/md-to-pdf/{filename}", response_model=MdToPdfResponse)
-async def convert_md_to_pdf(filename: str):
+async def convert_md_to_pdf(filename: str, http_request: Request):
     """Convert a stored Markdown file to PDF using weasyprint.
 
-    Runs in a thread pool so the event loop stays free for other requests.
+    Runs in the shared CPU process pool — WeasyPrint is CPU-bound (HTML layout
+    and PDF rendering) and holds the GIL, so a process gives true parallelism
+    and memory isolation from the main process.
     """
     try:
-        return await asyncio.to_thread(_svc.convert_md_to_pdf, filename)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            http_request.app.state.cpu_converter_executor,
+            convert_md_to_pdf_in_process,
+            filename,
+        )
     except HTTPException:
         raise
     except Exception:

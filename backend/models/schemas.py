@@ -20,6 +20,7 @@ class ConverterType(str, Enum):
     pymupdf = "pymupdf"
     docling = "docling"
     markitdown = "markitdown"
+    liteparse = "liteparse"
     vlm = "vlm"
 
 
@@ -43,16 +44,16 @@ class SplitterType(str, Enum):
     # Shared
     token = "token"
     recursive = "recursive"
-    character = "character"
+
+    #LangChain-only
     markdown = "markdown"
+    character = "character"
 
     # Chonkie-only
     sentence = "sentence"
     fast = "fast"
     semantic = "semantic"
-    late = "late"
     neural = "neural"
-    slumber = "slumber"
     table = "table"
     code = "code"
 
