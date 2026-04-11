@@ -85,7 +85,7 @@ async def chunk_text(http_request: Request, request: ChunkRequest):
             return
         except Exception as exc:
             logger.exception("Unexpected error during chunking")
-            yield _sse_error(500, str(exc))
+            yield _sse_error(500, "An internal error occurred. Check server logs.")
             return
 
         yield _sse({

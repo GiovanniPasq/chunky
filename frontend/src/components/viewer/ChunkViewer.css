@@ -316,3 +316,101 @@
   font-weight: 600;
   color: #9A7050;
 }
+
+/* ── Interrupt-enrichment confirmation dialog ── */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2100;
+  background: rgba(20, 8, 2, 0.72);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: pmFadeIn 0.18s ease-out;
+}
+
+.confirm-card {
+  background: linear-gradient(145deg, #ffffff 0%, #FFF8EC 100%);
+  border-radius: 16px;
+  width: min(420px, 92vw);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow:
+    0 40px 100px rgba(20, 8, 2, 0.5),
+    0 8px 32px rgba(139, 69, 19, 0.18),
+    0 0 0 1px rgba(255, 255, 255, 0.15);
+  animation: pmSlideIn 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.confirm-card-header {
+  padding: 20px 26px 14px;
+  background: linear-gradient(135deg, rgba(139, 69, 19, 0.07) 0%, rgba(210, 105, 30, 0.07) 100%);
+  border-bottom: 2px solid #F0E6D6;
+}
+
+.confirm-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.confirm-card-body {
+  padding: 18px 26px;
+}
+
+.confirm-message {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #5C2E0A;
+  line-height: 1.6;
+}
+
+.confirm-card-footer {
+  padding: 12px 26px 20px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.confirm-btn {
+  border: none;
+  border-radius: 9px;
+  padding: 9px 28px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: inherit;
+}
+
+.confirm-btn--cancel {
+  background: rgba(139, 69, 19, 0.08);
+  color: #8B4513;
+  border: 1.5px solid rgba(139, 69, 19, 0.2);
+}
+
+.confirm-btn--cancel:hover {
+  background: rgba(139, 69, 19, 0.14);
+  border-color: rgba(139, 69, 19, 0.35);
+}
+
+.confirm-btn--ok {
+  background: linear-gradient(135deg, #CC2200 0%, #A81B00 100%);
+  color: white;
+  box-shadow: 0 4px 14px rgba(204, 34, 0, 0.32);
+}
+
+.confirm-btn--ok:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(204, 34, 0, 0.46);
+}

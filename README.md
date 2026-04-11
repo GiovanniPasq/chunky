@@ -23,9 +23,9 @@
 
 ## Why Chunky?
 
-Most RAG pipelines fail silently — not because of bad chunking, but because of bad Markdown. When PDFs are converted, tables collapse, layouts scramble, and artifacts bleed into your text. You never see it. You just get hallucinations downstream. Chunky is a local, open-source tool that gives you full visibility at both stages — validate your Markdown, validate your chunks, fix what's wrong before it reaches your vector store.
+Most RAG pipelines fail silently — and when they do, the cause is often bad Markdown, bad chunking, or both. When PDFs are converted, tables collapse, layouts scramble, and artifacts bleed into your text. You never see it. You just get hallucinations downstream. Chunky is a local, open-source tool that gives you full visibility at both stages — validate your Markdown, validate your chunks, fix what's wrong before it reaches your vector store.
 
-As [NVIDIA's research](https://developer.nvidia.com/blog/finding-the-best-chunking-strategy-for-accurate-ai-responses/) shows, no single chunking strategy wins universally. Chunking is not a set-and-forget parameter — yet most tools give you zero visibility into what your chunks actually look like. That's the gap Chunky fills.
+As [NVIDIA's research](https://developer.nvidia.com/blog/finding-the-best-chunking-strategy-for-accurate-ai-responses/) shows, the importance of choosing the right chunking strategy cannot be overstated — no single approach wins universally, and treating it as a set-and-forget parameter leads to silent retrieval failures. Yet most tools give you zero visibility into what your chunks actually look like. That's the gap Chunky fills.
 
 <p align="center">
   <img src="assets/pipeline.svg" width="700">
@@ -41,13 +41,12 @@ As [NVIDIA's research](https://developer.nvidia.com/blog/finding-the-best-chunki
 
 | | |
 |---|---|
-| 📄 **Side-by-side viewer** | PDF and Markdown side-by-side with synchronized scrolling |
-| ✨ **Four PDF → Markdown converters** | PyMuPDF, Docling, MarkItDown, VLM — switch on the fly without losing your settings |
+| 📄 **Side-by-side viewer** | PDF and Markdown side by side for easy comparison and validation |
+| ✨ **Six PDF → Markdown converters** | PyMuPDF, Docling, MarkItDown, LiteParse, VLM, Cloud API |
 | 🔄 **Re-convert on the fly** | Switch converter and regenerate without restarting the pipeline |
 | 📦 **Bulk PDF conversion** | Convert multiple PDFs to Markdown in a single batch operation |
 | ✂️ **12 chunking strategies** | LangChain (4 strategies) and Chonkie (8 strategies) |
 | 📚 **Bulk chunking** | Chunk multiple Markdown files at once with the same configuration |
-| 🎨 **Color-coded chunk visualization** | See every chunk numbered and color-coded — edit any of them directly |
 | 🧠 **Markdown enrichment** *(beta)* | Clean conversion artifacts before chunking |
 | ✨ **Chunk enrichment** *(beta)* | LLM-generated titles, summaries, keywords, and questions per chunk |
 | 🔌 **Pluggable architecture** | Add a converter or splitter in minutes — zero frontend changes |
@@ -87,7 +86,7 @@ docker compose up --build
 
 ## PDF → Markdown Converters
 
-No single converter wins on every document type. Chunky ships with four — switch between them in the UI and re-convert without losing your settings.
+No single converter wins on every document type. Chunky ships with six — switch between them in the UI and re-convert without losing your settings.
 
 | Converter | Library | Best for |
 |-----------|---------|----------|
@@ -96,6 +95,7 @@ No single converter wins on every document type. Chunky ships with four — swit
 | **MarkItDown** | `markitdown[all]` | Broad-format documents, simple and deterministic output |
 | **LiteParse** | `liteparse` | Fast, lightweight parsing by LlamaIndex — good for standard documents |
 | **VLM** | `openai` + any vision model | Scanned PDFs, handwriting, diagrams — anything a human can read |
+| **Cloud API** | `httpx` | POSTs the PDF to a configurable external endpoint and returns the Markdown response body directly |
 
 > **Note:** The **LiteParse** converter requires Node.js and the CLI installed separately: `npm install -g @llamaindex/liteparse`
 
@@ -103,21 +103,7 @@ No single converter wins on every document type. Chunky ships with four — swit
 
 The VLM converter rasterises each page at 300 DPI and sends it to any OpenAI-compatible vision model. By default it targets a **locally running Ollama instance** — no API key, no internet access required.
 
-```python
-# Default — Ollama (local, no API key needed)
-VLMConverter()
-
-# Different local model
-VLMConverter(model="minicpm-v")
-
-# OpenAI
-VLMConverter(model="gpt-4o", base_url="https://api.openai.com/v1", api_key="sk-...")
-
-# Google Gemini
-VLMConverter(model="gemini-2.5-flash", base_url="https://generativelanguage.googleapis.com/v1beta/openai/",api_key="AIza...")
-```
-
-VLM conversions report per-page progress, which the frontend polls via `GET /api/convert-progress/{filename}`.
+Through the frontend, you can configure the model name, base URL, and API key directly in the UI before requesting a conversion — no code changes needed.
 
 > **Note:** Conversion speed with Docling or a locally running Ollama instance depends heavily on available hardware. On CPU-only machines, both can be significantly slower than on systems with a dedicated GPU.
 
@@ -268,13 +254,3 @@ chunks/
   <stem>/        # one directory per document
     <stem>_<library>-<strategy>_<HH-MM-SS>.json
 ```
-
----
-
-## Contributing
-
-Contributions are very welcome — open an issue or submit a PR. Areas where help is especially appreciated:
-
-- New PDF converters
-- New splitter strategies
-- Enrichment pipeline improvements

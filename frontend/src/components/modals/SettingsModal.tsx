@@ -1,9 +1,13 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { ChunkSettings, Capabilities, CapabilityLibrary, EnrichmentSettings } from '../../types'
 import { capabilityService } from '../../services/apiService'
-import { DEFAULT_SETTINGS, DEFAULT_VLM_PROMPT, DEFAULT_SECTION_PROMPT, DEFAULT_CHUNK_PROMPT } from '../../hooks/useSettings'
+import { DEFAULT_SETTINGS, DEFAULT_VLM_PROMPT, DEFAULT_SECTION_PROMPT, DEFAULT_CHUNK_PROMPT, DEFAULT_VLM_MODEL, DEFAULT_VLM_BASE_URL, DEFAULT_VLM_TEMPERATURE } from '../../hooks/useSettings'
 import EnrichmentSettingsPanel from './EnrichmentSettings'
 import './SettingsModal.css'
+
+// Module-level cache — capabilities never change while the backend is running,
+// so we only ever fetch them once per page load.
+let capabilitiesCache: Capabilities | null = null
 
 interface Props {
   isOpen: boolean
@@ -35,10 +39,28 @@ export default function SettingsModal({ isOpen, onClose, onSave, onReset, curren
   const [activeTab, setActiveTab] = useState<TabId>('conversion')
 
   const fetchCaps = useCallback(() => {
+    // Serve from cache on subsequent opens — capabilities don't change at runtime.
+    if (capabilitiesCache) {
+      const data = capabilitiesCache
+      setCaps(data)
+      setLoadState('ok')
+      setSettings(prev => {
+        const lib = data.splitters.some(l => l.library === prev.splitterLibrary)
+          ? prev.splitterLibrary
+          : (data.splitters[0]?.library ?? prev.splitterLibrary)
+        const strategy = resolveStrategy(data, lib, prev.splitterType)
+        const converter = data.converters.some(c => c.name === prev.converter)
+          ? prev.converter
+          : (data.converters[0]?.name ?? prev.converter)
+        return { ...prev, splitterLibrary: lib, splitterType: strategy, converter }
+      })
+      return
+    }
     setLoadState('loading')
     setCaps(null)
     capabilityService.get()
       .then(data => {
+        capabilitiesCache = data
         setCaps(data)
         setLoadState('ok')
         setSettings(prev => {
@@ -57,7 +79,7 @@ export default function SettingsModal({ isOpen, onClose, onSave, onReset, curren
 
   useEffect(() => {
     if (isOpen) fetchCaps()
-  }, [isOpen])
+  }, [isOpen, fetchCaps])
 
   useEffect(() => {
     if (!isOpen) setSettings(current)
@@ -76,6 +98,9 @@ export default function SettingsModal({ isOpen, onClose, onSave, onReset, curren
 
   const setVlmUserPrompt = (value: string) =>
     setSettings(prev => ({ ...prev, vlm: { ...prev.vlm, user_prompt: value || undefined } }))
+
+  const setCloud = (key: 'base_url' | 'bearer_token', value: string) =>
+    setSettings(prev => ({ ...prev, cloud: { ...prev.cloud, [key]: value || undefined } }))
 
   const setSectionEnrichment = (updated: EnrichmentSettings) =>
     setSettings(prev => ({ ...prev, sectionEnrichment: updated }))
@@ -185,23 +210,46 @@ export default function SettingsModal({ isOpen, onClose, onSave, onReset, curren
                     </div>
                   </div>
 
+                  {settings.converter === 'cloud' && (
+                    <div className="vlm-settings">
+                      <div className="form-group">
+                        <label>Endpoint URL</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. https://my-api.example.com/convert"
+                          value={settings.cloud?.base_url ?? ''}
+                          onChange={e => setCloud('base_url', e.target.value)}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>Bearer Token <span className="label-hint">(optional)</span></label>
+                        <input
+                          type="password"
+                          placeholder="Leave empty if the endpoint requires no auth"
+                          value={settings.cloud?.bearer_token ?? ''}
+                          onChange={e => setCloud('bearer_token', e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  )}
+
                   {settings.converter === 'vlm' && (
                     <div className="vlm-settings">
                       <div className="form-group">
-                        <label>Model <span className="label-hint">(default: qwen3-vl:4b-instruct-q4_K_M)</span></label>
+                        <label>Model</label>
                         <input
                           type="text"
-                          placeholder="e.g. llama3.2-vision, gpt-4o, gemini-2.5-flash"
-                          value={settings.vlm?.model ?? ''}
+                          placeholder={DEFAULT_VLM_MODEL}
+                          value={settings.vlm?.model ?? DEFAULT_VLM_MODEL}
                           onChange={e => setVlm('model', e.target.value)}
                         />
                       </div>
                       <div className="form-group">
-                        <label>Base URL <span className="label-hint">(default: http://localhost:11434/v1)</span></label>
+                        <label>Base URL</label>
                         <input
                           type="text"
-                          placeholder="e.g. https://api.openai.com/v1"
-                          value={settings.vlm?.base_url ?? ''}
+                          placeholder={DEFAULT_VLM_BASE_URL}
+                          value={settings.vlm?.base_url ?? DEFAULT_VLM_BASE_URL}
                           onChange={e => setVlm('base_url', e.target.value)}
                         />
                       </div>
@@ -215,15 +263,15 @@ export default function SettingsModal({ isOpen, onClose, onSave, onReset, curren
                         />
                       </div>
                       <div className="form-group">
-                        <label>Temperature <span className="label-hint">(0 = deterministic, 1 = creative, default: 0.1)</span></label>
+                        <label>Temperature <span className="label-hint">(0 = deterministic, 1 = creative)</span></label>
                         <div className="temperature-control">
                           <input
                             type="range"
                             min={0} max={1} step={0.01}
-                            value={settings.vlm?.temperature ?? 0.1}
+                            value={settings.vlm?.temperature ?? DEFAULT_VLM_TEMPERATURE}
                             onChange={e => setVlmTemperature(parseFloat(e.target.value))}
                           />
-                          <span className="temperature-value">{(settings.vlm?.temperature ?? 0.1).toFixed(2)}</span>
+                          <span className="temperature-value">{(settings.vlm?.temperature ?? DEFAULT_VLM_TEMPERATURE).toFixed(2)}</span>
                         </div>
                       </div>
                       <div className="form-group">
@@ -294,7 +342,7 @@ export default function SettingsModal({ isOpen, onClose, onSave, onReset, curren
                       <input
                         type="number"
                         value={settings.chunkSize}
-                        onChange={e => set('chunkSize', parseInt(e.target.value))}
+                        onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) set('chunkSize', v) }}
                         min={100} max={10000} step={100}
                         disabled={isSizeDisabled}
                       />
@@ -304,7 +352,7 @@ export default function SettingsModal({ isOpen, onClose, onSave, onReset, curren
                       <input
                         type="number"
                         value={settings.chunkOverlap}
-                        onChange={e => set('chunkOverlap', parseInt(e.target.value))}
+                        onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) set('chunkOverlap', v) }}
                         min={0} max={Math.floor(settings.chunkSize / 2)} step={50}
                         disabled={isOverlapDisabled}
                       />

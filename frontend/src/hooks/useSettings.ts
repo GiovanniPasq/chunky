@@ -69,6 +69,22 @@ export const DEFAULT_CHUNK_PROMPT =
 `You are a document analysis specialist. Analyze the provided text chunk and return a JSON object with EXACTLY these fields: "cleaned_chunk" (cleaned normalized text), "title" (short descriptive title), "context" (one sentence describing the surrounding document context), "summary" (one sentence summary), "keywords" (array of keyword strings), "questions" (array of questions this chunk could answer). Return ONLY valid JSON — no commentary, no code fences.`
 
 // ---------------------------------------------------------------------------
+// VLM defaults — kept in sync with VLMConverter.__init__ in vlm.py.
+// ---------------------------------------------------------------------------
+
+/** Default model for VLM conversion (mirrors `model` default in vlm.py). */
+export const DEFAULT_VLM_MODEL = 'qwen3-vl:4b-instruct-q4_K_M'
+
+/** Default base URL for VLM conversion (mirrors `base_url` default in vlm.py). */
+export const DEFAULT_VLM_BASE_URL = 'http://localhost:11434/v1'
+
+/** Default API key for VLM conversion (mirrors `api_key` default in vlm.py). */
+export const DEFAULT_VLM_API_KEY = 'ollama'
+
+/** Default sampling temperature for VLM conversion (mirrors `temperature` default in vlm.py). */
+export const DEFAULT_VLM_TEMPERATURE = 0.1
+
+// ---------------------------------------------------------------------------
 // Enrichment defaults — kept in sync with EnrichmentService.__init__ in
 // enrichment_service.py, which shares the same model/endpoint as vlm.py.
 // ---------------------------------------------------------------------------
@@ -89,6 +105,12 @@ export const DEFAULT_SETTINGS: ChunkSettings = {
   chunkOverlap: 51,
   enableMarkdownSizing: false,
   converter: 'pymupdf',
+  vlm: {
+    model: DEFAULT_VLM_MODEL,
+    base_url: DEFAULT_VLM_BASE_URL,
+    api_key: DEFAULT_VLM_API_KEY,
+    temperature: DEFAULT_VLM_TEMPERATURE,
+  },
   sectionEnrichment: {
     model: DEFAULT_ENRICHMENT_MODEL,
     base_url: DEFAULT_ENRICHMENT_BASE_URL,
@@ -126,6 +148,7 @@ export function loadSettings(): ChunkSettings {
       ...stored,
       // Deep-merge nested objects so new default fields are always present
       vlm: mergeNested(DEFAULT_SETTINGS.vlm ?? {}, stored.vlm),
+      cloud: mergeNested(DEFAULT_SETTINGS.cloud ?? {}, stored.cloud),
       sectionEnrichment: mergeNested(DEFAULT_SETTINGS.sectionEnrichment ?? {}, stored.sectionEnrichment),
       chunkEnrichment: mergeNested(DEFAULT_SETTINGS.chunkEnrichment ?? {}, stored.chunkEnrichment),
     }

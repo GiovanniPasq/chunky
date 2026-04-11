@@ -45,7 +45,11 @@ export function useChunkEnrichment({
   const [chunkEnrichOp, setChunkEnrichOp] = useState<EnrichOp | null>(null)
   const [enrichingChunks, setEnrichingChunks] = useState<Set<number>>(new Set())
   const [chunkEnrichErrors, setChunkEnrichErrors] = useState<Map<number, string>>(new Map())
-  const chunkEnrichAbortRef = useRef<AbortController | null>(null)
+  // Separate abort controllers so that starting one flow never silently
+  // orphans the other (shared ref caused: bulk's finally clearing single's ref,
+  // and interrupt only aborting whichever wrote last).
+  const singleEnrichAbortRef = useRef<AbortController | null>(null)
+  const bulkEnrichAbortRef = useRef<AbortController | null>(null)
 
   // Refs for values used inside long-running async handlers so they always
   // see the latest state without being in the closure's capture list.
@@ -53,6 +57,14 @@ export function useChunkEnrichment({
   chunksRef.current = chunks
   const selectedChunksRef = useRef(selectedChunks)
   selectedChunksRef.current = selectedChunks
+
+  // Abort any in-flight enrichment on unmount.
+  useEffect(() => {
+    return () => {
+      singleEnrichAbortRef.current?.abort()
+      bulkEnrichAbortRef.current?.abort()
+    }
+  }, [])
 
   // Clear per-chunk state when the document content changes (doc switch / reconvert).
   useEffect(() => {
@@ -74,7 +86,8 @@ export function useChunkEnrichment({
   // ── Single-chunk enrichment ──────────────────────────────────────────────
 
   const handleInterruptChunkEnrich = () => {
-    chunkEnrichAbortRef.current?.abort()
+    singleEnrichAbortRef.current?.abort()
+    bulkEnrichAbortRef.current?.abort()
     setChunkEnrichOp(null)
   }
 
@@ -91,8 +104,9 @@ export function useChunkEnrichment({
     const chunk = currentChunks[chunkIndex]
     if (!chunk) return
 
+    singleEnrichAbortRef.current?.abort()
     const abortCtrl = new AbortController()
-    chunkEnrichAbortRef.current = abortCtrl
+    singleEnrichAbortRef.current = abortCtrl
 
     setChunkEnrichErrors(prev => { const m = new Map(prev); m.delete(chunkIndex); return m })
     setEnrichingChunks(prev => new Set([...prev, chunkIndex]))
@@ -121,7 +135,7 @@ export function useChunkEnrichment({
       const msg = err instanceof Error ? err.message : 'Enrichment failed'
       setChunkEnrichErrors(prev => new Map(prev).set(chunkIndex, msg))
     } finally {
-      if (chunkEnrichAbortRef.current === abortCtrl) chunkEnrichAbortRef.current = null
+      if (singleEnrichAbortRef.current === abortCtrl) singleEnrichAbortRef.current = null
       setEnrichingChunks(prev => { const s = new Set(prev); s.delete(chunkIndex); return s })
     }
   }
@@ -160,7 +174,7 @@ export function useChunkEnrichment({
     }))
 
     const abortCtrl = new AbortController()
-    chunkEnrichAbortRef.current = abortCtrl
+    bulkEnrichAbortRef.current = abortCtrl
 
     setChunkEnrichOp({ title: 'Chunk Enrichment', detail: '', current: 0, total: indices.length })
 
@@ -179,8 +193,9 @@ export function useChunkEnrichment({
         throw new Error(`HTTP ${res.status}: ${errText}`)
       }
 
+      if (!res.body) throw new Error('No response body')
       for await (const event of parseSse(
-        res.body!,
+        res.body,
         () => setChunkEnrichOp(prev => prev ? { ...prev, errorMessage: CONNECTION_LOST_MSG } : null),
       )) {
         if (event.type === 'chunk_done') {
@@ -230,12 +245,15 @@ export function useChunkEnrichment({
       } else {
         const msg = err instanceof Error ? err.message : 'Stream error'
         setChunkEnrichOp(prev => prev ? { ...prev, errorMessage: msg } : null)
-        // Keep modal open briefly so the user can read the error before it dismisses.
-        await new Promise(r => setTimeout(r, 2000))
+        // Keep modal open briefly so the user can read the error, but respect abort/unmount.
+        await new Promise<void>(r => {
+          const id = setTimeout(r, 2000)
+          abortCtrl.signal.addEventListener('abort', () => { clearTimeout(id); r() }, { once: true })
+        })
       }
     } finally {
       setChunkEnrichOp(null)
-      chunkEnrichAbortRef.current = null
+      bulkEnrichAbortRef.current = null
       setSelectedChunks(new Set())
     }
 

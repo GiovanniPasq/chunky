@@ -20,6 +20,27 @@ from fastapi import HTTPException
 from backend.config import get_settings
 from backend.models.schemas import LoadChunksResponse, SaveChunksRequest, SaveChunksResponse
 
+def _safe_stem(filename: str) -> str:
+    """Extract and validate the filename stem, raising 400 on invalid input.
+
+    Mirrors the path-traversal guard in document_service._safe_filename but
+    returns the stem rather than the full name, since chunk directories are
+    keyed by stem (e.g. ``chunks/report/`` for ``report.pdf``).
+    """
+    try:
+        name = Path(filename).name
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail=f"Invalid filename '{filename}'.")
+    if not name or name in (".", ".."):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid filename '{filename}': path traversal is not allowed.",
+        )
+    stem = Path(name).stem
+    if not stem or stem in (".", ".."):
+        raise HTTPException(status_code=400, detail=f"Invalid filename '{filename}'.")
+    return stem
+
 def _sanitise(value: str) -> str:
     """Replace non-alphanumeric characters with hyphens and collapse runs."""
     return re.sub(r"-{2,}", "-", re.sub(r"[^a-zA-Z0-9]", "-", value)).strip("-")
@@ -96,7 +117,7 @@ class ChunkStorageService:
         so the file is ready for the enrichment pipeline even if the chunks
         were produced before enrichment ran.
         """
-        stem = Path(request.filename).stem
+        stem = _safe_stem(request.filename)
         doc_name = _sanitise(stem) or "doc"
         dest_dir = self._chunks_dir / stem
         dest_dir.mkdir(parents=True, exist_ok=True)
@@ -109,14 +130,14 @@ class ChunkStorageService:
         else:
             chunk_type = "chunks"
 
-        ts = datetime.now(tz=timezone.utc).strftime("%H-%M-%S")
+        ts = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d_%H-%M-%S-%f")
         dest_path = dest_dir / f"{doc_name}_{chunk_type}_{ts}.json"
 
         normalised_chunks = [_normalise_chunk(c) for c in request.chunks]
 
         payload: Dict[str, Any] = {
             "filename": request.filename,
-            "timestamp": ts,
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
             "total_chunks": len(normalised_chunks),
             "chunks": normalised_chunks,
         }
@@ -135,14 +156,15 @@ class ChunkStorageService:
     def load_chunks(self, filename: str) -> LoadChunksResponse:
         """Load the most recently saved chunk file for *filename*.
 
-        Because the timestamp portion of each filename is ISO-8601 with fixed
-        width, lexicographic sort equals chronological sort — no date parsing
-        required.
+        Because the timestamp portion of each filename uses ISO-8601 date+time
+        with fixed width (``YYYY-MM-DD_HH-MM-SS``), lexicographic sort equals
+        chronological sort — no date parsing required.
 
         Raises:
+            HTTPException 400: If *filename* is invalid or contains path traversal.
             HTTPException 404: If no saved chunks exist for this document.
         """
-        stem = Path(filename).stem
+        stem = _safe_stem(filename)
         dest_dir = self._chunks_dir / stem
 
         try:

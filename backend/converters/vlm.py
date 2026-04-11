@@ -84,15 +84,6 @@ _DPI_SCALE = _RENDER_DPI / 72  # fitz uses 72 DPI as its baseline
 
 _DEFAULT_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
 
-# Retry settings for timed-out VLM calls.
-_MAX_RETRY_ATTEMPTS = 3
-_RETRY_BASE_DELAY_S = 1.0  # seconds; doubles each attempt (1 s, 2 s, 4 s)
-
-# Maximum number of page-transcription API calls in flight at once.
-# A value of 3 pipelines well against most local/cloud VLM endpoints without
-# flooding a single-worker model (e.g. Ollama) with too many queued requests.
-_MAX_CONCURRENT_PAGES = 2
-
 
 @register_converter(
     name="vlm",
@@ -141,6 +132,9 @@ class VLMConverter(PDFConverter):
         on_progress: Optional[Callable[[int, int], None]] = None,
         stop_event: Optional[threading.Event] = None,
     ) -> None:
+        from backend.config import get_settings as _get_settings
+        _s = _get_settings()
+
         self._model = model
         self._base_url = base_url
         self._api_key = api_key
@@ -148,7 +142,15 @@ class VLMConverter(PDFConverter):
         self._user_prompt = user_prompt
         self._on_progress = on_progress
         self._stop_event = stop_event
-        self._timeout = httpx.Timeout(connect=10.0, read=300.0, write=10.0, pool=5.0)
+        self._max_retry_attempts = _s.HTTP_MAX_RETRY_ATTEMPTS
+        self._retry_base_delay_s = _s.HTTP_RETRY_BASE_DELAY_S
+        self._max_concurrent_pages = _s.VLM_MAX_CONCURRENT_PAGES
+        self._timeout = httpx.Timeout(
+            connect=_s.HTTP_CONNECT_TIMEOUT_S,
+            read=_s.VLM_READ_TIMEOUT_S,
+            write=10.0,
+            pool=_s.HTTP_POOL_TIMEOUT_S,
+        )
 
     # ------------------------------------------------------------------
     # PDFConverter interface
@@ -177,33 +179,31 @@ class VLMConverter(PDFConverter):
     # ------------------------------------------------------------------
 
     async def _async_convert(self, pdf_path: Path, total_pages: Optional[int]) -> str:
-        """Async core: render all pages in an executor, then transcribe concurrently."""
+        """Async core: render pages on-demand and transcribe concurrently.
+
+        Pages are rendered one at a time inside each transcription task rather
+        than all upfront.  This keeps peak memory at
+        ``_MAX_CONCURRENT_PAGES × (one page PNG)`` instead of
+        ``total_pages × (one page PNG)``, which for a 100-page document at
+        300 DPI can be the difference between ~30 MB and ~1.5 GB.
+        """
         loop = asyncio.get_running_loop()
 
         if self._stop_event and self._stop_event.is_set():
             raise InterruptedError("Conversion cancelled before start")
 
-        # ── Render all pages (CPU-bound C-native) ────────────────────────────
-        # All rendering runs in a single executor call so the fitz document
-        # context stays intact for the full duration.  Stop-event is checked
-        # between pages so a cancellation request is honoured promptly.
-        def _render_all() -> tuple[int, list[str]]:
+        # ── Get page count (cheap single open) ───────────────────────────────
+        def _get_page_count() -> int:
             with fitz.open(str(pdf_path)) as doc:
-                n = total_pages if total_pages is not None else doc.page_count
-                images: list[str] = []
-                for i in range(n):
-                    if self._stop_event and self._stop_event.is_set():
-                        raise InterruptedError("Conversion cancelled during rendering")
-                    images.append(self._render_page_as_b64(doc[i]))
-                return n, images
+                return total_pages if total_pages is not None else doc.page_count
 
-        total, rendered = await loop.run_in_executor(None, _render_all)
+        total = await loop.run_in_executor(None, _get_page_count)
 
-        # ── Transcribe all pages concurrently (I/O-bound async HTTP) ─────────
-        # AsyncOpenAI + httpx.AsyncClient are created here so they are bound
-        # to this event loop (created by asyncio.run()).  A semaphore caps the
-        # number of in-flight API calls to avoid flooding single-worker models.
-        sem = asyncio.Semaphore(_MAX_CONCURRENT_PAGES)
+        # ── Transcribe pages concurrently (render + API call per task) ───────
+        # Each task renders its own page inside the executor and immediately
+        # feeds the base64 image to the VLM.  The rendered bytes are eligible
+        # for GC as soon as the API call returns — no large list held in memory.
+        sem = asyncio.Semaphore(self._max_concurrent_pages)
 
         async with httpx.AsyncClient(timeout=self._timeout) as http:
             from openai import AsyncOpenAI
@@ -213,19 +213,30 @@ class VLMConverter(PDFConverter):
                 http_client=http,
             )
 
-            async def _process(page_num: int, img_b64: str) -> str:
+            async def _process(page_num: int) -> str:
                 if self._stop_event and self._stop_event.is_set():
                     raise InterruptedError("Conversion cancelled before page")
+
+                # Render this page in the executor (CPU-bound, releases GIL).
+                # Re-opening the PDF is cheap — fitz uses OS-level page caching.
+                def _render_one() -> str:
+                    with fitz.open(str(pdf_path)) as doc:
+                        if self._stop_event and self._stop_event.is_set():
+                            raise InterruptedError("Conversion cancelled during rendering")
+                        return self._render_page_as_b64(doc[page_num])
+
+                img_b64 = await loop.run_in_executor(None, _render_one)
+
                 async with sem:
-                    markdown = await self._transcribe_page_with_retry_async(client, img_b64)
+                    markdown = await self._transcribe_page_with_retry_async(
+                        client, img_b64, page_num=page_num
+                    )
+
                 if self._on_progress:
                     self._on_progress(page_num + 1, total)
                 return markdown
 
-            page_tasks = [
-                asyncio.create_task(_process(i, img))
-                for i, img in enumerate(rendered)
-            ]
+            page_tasks = [asyncio.create_task(_process(i)) for i in range(total)]
 
             # Watcher: polls the threading stop-event every 0.25 s and actively
             # cancels all page tasks the moment it fires.  Without this, tasks
@@ -299,36 +310,57 @@ class VLMConverter(PDFConverter):
         content = re.sub(r"\n?```$", "", content)
         return content.strip()
 
-    async def _transcribe_page_with_retry_async(self, client, img_b64: str) -> str:
-        """Call ``_transcribe_page_async`` with exponential back-off on timeout.
+    async def _transcribe_page_with_retry_async(
+        self, client, img_b64: str, page_num: int = 0
+    ) -> str:
+        """Call ``_transcribe_page_async`` with exponential back-off on transient errors.
 
-        Uses ``asyncio.sleep()`` between retries (non-blocking).  Stop-event
-        is checked before each attempt so no new API call is started after
-        cancellation has been requested.
+        Retries on timeout, connection failure, and transient server errors
+        (5xx / 429 rate-limit).  4xx errors that indicate a bad request are
+        not retried.  Stop-event is checked before each attempt so no new API
+        call is started after cancellation has been requested.
         """
-        from openai import APITimeoutError
+        from openai import APIConnectionError, APIStatusError, APITimeoutError
 
         last_exc: Exception | None = None
-        for attempt in range(_MAX_RETRY_ATTEMPTS):
+        for attempt in range(self._max_retry_attempts):
             if self._stop_event and self._stop_event.is_set():
                 raise InterruptedError("Conversion cancelled before retry")
 
             try:
                 return await self._transcribe_page_async(client, img_b64)
-            except APITimeoutError as exc:
+            except (APITimeoutError, APIConnectionError) as exc:
                 last_exc = exc
-                if attempt < _MAX_RETRY_ATTEMPTS - 1:
-                    delay = _RETRY_BASE_DELAY_S * (2 ** attempt)
-                    logger.warning(
-                        "VLM page call timed out (attempt %d/%d), retrying in %.0fs",
-                        attempt + 1,
-                        _MAX_RETRY_ATTEMPTS,
-                        delay,
-                    )
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error(
-                        "VLM page call timed out after %d attempts — aborting conversion",
-                        _MAX_RETRY_ATTEMPTS,
-                    )
-        raise last_exc  # type: ignore[misc]
+            except APIStatusError as exc:
+                # Retry on transient server-side errors; surface client errors immediately.
+                if exc.status_code < 500 and exc.status_code != 429:
+                    raise
+                last_exc = exc
+
+            if attempt < self._max_retry_attempts - 1:
+                delay = self._retry_base_delay_s * (2 ** attempt)
+                logger.warning(
+                    "VLM page call failed (%s) (attempt %d/%d), retrying in %.0fs",
+                    type(last_exc).__name__,
+                    attempt + 1,
+                    self._max_retry_attempts,
+                    delay,
+                    extra={
+                        "model": self._model,
+                        "base_url": self._base_url,
+                        "page_num": page_num,
+                        "attempt": attempt + 1,
+                    },
+                )
+                await asyncio.sleep(delay)
+            else:
+                logger.error(
+                    "VLM page call failed after %d attempts — aborting conversion",
+                    self._max_retry_attempts,
+                    extra={
+                        "model": self._model,
+                        "base_url": self._base_url,
+                        "page_num": page_num,
+                    },
+                )
+        raise last_exc or RuntimeError("No retry attempts configured")

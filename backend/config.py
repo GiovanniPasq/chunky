@@ -50,9 +50,45 @@ class Settings(BaseSettings):
     """Output format: 'text' (human-readable) or 'json' (structured, for production)."""
 
     # ── SSE watchdog ───────────────────────────────────────────
-    SSE_WATCHDOG_TIMEOUT_S: int = 120
+    SSE_WATCHDOG_TIMEOUT_S: int = 600
     """Seconds of SSE silence before an operation is automatically cancelled.
     Increase for very slow models (e.g. large VLMs on CPU). Set to 0 to disable."""
+
+    # ── HTTP timeouts ──────────────────────────────────────────
+    HTTP_CONNECT_TIMEOUT_S: float = 10.0
+    """Seconds to wait while establishing a TCP connection to any external service."""
+
+    HTTP_POOL_TIMEOUT_S: float = 5.0
+    """Seconds to wait for a free connection from the httpx connection pool."""
+
+    VLM_READ_TIMEOUT_S: float = 300.0
+    """Seconds to wait for a VLM page-transcription response.
+    Increase for large models running on CPU (e.g. 34B+ parameter models)."""
+
+    CLOUD_READ_TIMEOUT_S: float = 300.0
+    """Seconds to wait for the cloud conversion endpoint to return Markdown."""
+
+    CLOUD_WRITE_TIMEOUT_S: float = 30.0
+    """Seconds allowed for uploading the PDF to the cloud endpoint.
+    Raise for very large files on slow upload links."""
+
+    ENRICH_READ_TIMEOUT_S: float = 120.0
+    """Seconds to wait for an enrichment LLM response.
+    Also used as the read timeout for the shared httpx client in app.state."""
+
+    # ── Retry ──────────────────────────────────────────
+    HTTP_MAX_RETRY_ATTEMPTS: int = 3
+    """Max number of attempts for transient HTTP/LLM errors (VLM, Cloud, Enrichment).
+    Set to 1 to disable retries (first attempt only)."""
+
+    HTTP_RETRY_BASE_DELAY_S: float = 1.0
+    """Initial back-off delay in seconds before the first retry.
+    Each subsequent retry doubles the delay (1 s, 2 s, 4 s, …)."""
+
+    # ── VLM concurrency ───────────────────────────────
+    VLM_MAX_CONCURRENT_PAGES: int = 2
+    """Max VLM page-transcription API calls in flight at once per conversion.
+    Increase for fast remote endpoints; decrease for single-GPU local models."""
 
     # ── App ────────────────────────────────────────────────────
     APP_VERSION: str = "0.3.0"

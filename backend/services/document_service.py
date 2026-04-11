@@ -4,7 +4,7 @@ Document service — orchestrates PDF upload, conversion, and deletion.
 # VERSION 3 — Unified ProcessPoolExecutor for all CPU-bound converters
 #
 # All CPU-bound converters (PyMuPDF, Docling, MarkItDown) now run in a shared
-# ProcessPoolExecutor via convert_in_process(). VLM remains thread-based (I/O).
+# ProcessPoolExecutor via convert_in_process(). VLM and Cloud remain thread-based (I/O).
 # Worker processes are initialised once via _init_cpu_worker() which pre-loads
 # the DocumentService and Docling ML models, avoiding per-job reload cost.
 # Top-level functions are required because child processes serialise them via
@@ -27,12 +27,14 @@ logger = logging.getLogger(__name__)
 from fastapi import HTTPException, UploadFile
 
 from backend.converters.base import PDFConverter
+from backend.converters.cloud import CloudConverter
 from backend.converters.docling import DoclingConverter
 from backend.converters.liteparse import LiteParseConverter
 from backend.converters.markitdown import MarkItDownConverter
 from backend.converters.pymupdf import PyMuPDFConverter
 from backend.converters.vlm import VLMConverter
 from backend.models.schemas import (
+    CloudSettings,
     ConvertResponse,
     ConverterType,
     DeleteResponse,
@@ -48,23 +50,13 @@ _ALLOWED_EXTENSIONS = {".pdf", ".md"}
 
 # ---------------------------------------------------------------------------
 # Top-level worker functions for ProcessPoolExecutor
-#
-# These MUST be top-level (not methods or lambdas) because they are serialised
-# via pickle when submitted to the ProcessPoolExecutor.
 # ---------------------------------------------------------------------------
 
-# Module-level service instance used exclusively inside worker processes.
-# Populated by _init_cpu_worker() which runs once when each worker starts.
 _worker_svc: "DocumentService | None" = None
 
 
 def _init_cpu_worker() -> None:
-    """Initializer executed once per worker process at startup.
-
-    Configures logging (child processes do not inherit the parent's logging
-    setup) and pre-loads the DocumentService plus the Docling ML models so
-    that the first real conversion job does not pay the 2-10s model-load cost.
-    """
+    """Initializer executed once per worker process at startup."""
     import logging as _logging
     _logging.basicConfig(
         level=_logging.INFO,
@@ -74,41 +66,23 @@ def _init_cpu_worker() -> None:
     global _worker_svc
     _worker_svc = DocumentService()
 
-    # Pre-warm Docling: importing and instantiating DocumentConverter loads all
-    # ML model weights into memory. Subsequent calls reuse the cached weights.
     try:
         from docling.document_converter import DocumentConverter
         DocumentConverter()
-    except Exception:
-        pass  # Docling not installed — silently skip pre-warm
+    except Exception as exc:
+        import logging as _log
+        _log.getLogger(__name__).warning("Docling pre-load failed in worker: %s", exc)
 
 
 def convert_in_process(filename: str, converter_type: ConverterType) -> ConvertResponse:
-    """Run a CPU-bound PDF→Markdown conversion in a worker process.
-
-    Handles PyMuPDF, Docling, and MarkItDown — all CPU-bound converters that
-    benefit from process isolation (memory, thread-safety, GIL avoidance).
-    VLM is intentionally excluded: it is I/O-bound (HTTP calls) and runs in a
-    thread instead.
-
-    Uses the module-level _worker_svc pre-created by _init_cpu_worker so that
-    heavy state (e.g. Docling ML models) is loaded once per worker lifetime,
-    not once per job.
-    """
+    """Run a CPU-bound PDF→Markdown conversion in a worker process."""
     if _worker_svc is None:
         raise RuntimeError("Worker process not initialised — _init_cpu_worker did not complete")
     return _worker_svc.convert_to_markdown(filename, converter_type=converter_type)
 
 
 def convert_md_to_pdf_in_process(md_filename: str) -> MdToPdfResponse:
-    """Run a Markdown→PDF conversion in a worker process.
-
-    WeasyPrint (HTML layout + PDF rendering) is CPU-bound and holds the GIL
-    for its entire duration, so running it in the shared process pool gives
-    true parallelism and memory isolation from the main process.
-
-    Uses the module-level _worker_svc pre-created by _init_cpu_worker.
-    """
+    """Run a Markdown→PDF conversion in a worker process."""
     if _worker_svc is None:
         raise RuntimeError("Worker process not initialised — _init_cpu_worker did not complete")
     return _worker_svc.convert_md_to_pdf(md_filename)
@@ -120,11 +94,6 @@ def convert_md_to_pdf_in_process(md_filename: str) -> MdToPdfResponse:
 
 
 def _safe_filename(filename: str, description: str = "filename") -> str:
-    """Reject any filename that contains path separators or traversal sequences.
-
-    Accepts only a bare filename (no directory components). Raises HTTP 400
-    if the value would escape the intended storage directory.
-    """
     try:
         name = Path(filename).name
     except (ValueError, TypeError):
@@ -145,7 +114,6 @@ def _stem(filename: str) -> str:
 
 
 def _dest_dir(filename: str, pdfs_dir: Path, mds_dir: Path) -> Path:
-    """Return the target directory for a given filename, or raise 400."""
     ext = Path(filename).suffix.lower()
     if ext == ".pdf":
         return pdfs_dir
@@ -160,15 +128,11 @@ def _dest_dir(filename: str, pdfs_dir: Path, mds_dir: Path) -> Path:
 def _build_converter(
     converter_type: ConverterType,
     vlm_settings: Optional[VLMSettings],
+    cloud_settings: Optional[CloudSettings],
     on_progress: Optional[Callable[[int, int], None]] = None,
     stop_event: Optional[threading.Event] = None,
 ) -> PDFConverter:
-    """Instantiate the requested converter, forwarding VLM settings when relevant.
-
-    Note: VLMConverter manages its own httpx.AsyncClient internally (bound to
-    the private event loop created by asyncio.run inside convert()), so no
-    shared http_client is accepted or passed here.
-    """
+    """Instantiate the requested converter, forwarding runtime settings when relevant."""
     if converter_type == ConverterType.vlm:
         kwargs: dict = vlm_settings.model_dump(exclude_none=True) if vlm_settings else {}
         if on_progress:
@@ -177,10 +141,18 @@ def _build_converter(
             kwargs["stop_event"] = stop_event
         return VLMConverter(**kwargs)
 
+    if converter_type == ConverterType.cloud:
+        kwargs = cloud_settings.model_dump(exclude_none=True) if cloud_settings else {}
+        if on_progress:
+            kwargs["on_progress"] = on_progress
+        if stop_event is not None:
+            kwargs["stop_event"] = stop_event
+        return CloudConverter(**kwargs)
+
     return _CONVERTER_MAP[converter_type]()
 
 
-# Converter registry — maps enum value to class (excludes VLM which needs args)
+# Converter registry — maps enum value to class (excludes VLM and Cloud which need runtime args)
 _CONVERTER_MAP: dict[ConverterType, Type[PDFConverter]] = {
     ConverterType.pymupdf: PyMuPDFConverter,
     ConverterType.docling: DoclingConverter,
@@ -198,8 +170,6 @@ class DocumentService:
     """Handles all document-level operations: listing, uploading, converting, deleting."""
 
     def __init__(self) -> None:
-        # Storage paths resolved at construction time so that env-var overrides
-        # applied after module import (e.g. in tests) are picked up correctly.
         s = get_settings()
         self._pdfs_dir = Path(s.PDFS_DIR)
         self._mds_dir = Path(s.MDS_DIR)
@@ -210,7 +180,6 @@ class DocumentService:
     # ------------------------------------------------------------------
 
     def list_documents(self) -> List[str]:
-        """Return a sorted list of all available documents (PDFs + MD-only files)."""
         results: List[str] = []
         pdf_stems: set = set()
 
@@ -219,7 +188,6 @@ class DocumentService:
                 results.append(f.name)
                 pdf_stems.add(f.stem)
 
-        # Include MD files that have no matching PDF
         if self._mds_dir.exists():
             for f in self._mds_dir.glob("*.md"):
                 if f.stem not in pdf_stems:
@@ -228,10 +196,6 @@ class DocumentService:
         return sorted(results)
 
     def list_documents_metadata(self) -> list[dict]:
-        """Return a list of ``{filename, has_markdown}`` dicts for every document.
-
-        This is a cheap stat-only scan — it does NOT read file contents.
-        """
         results = []
         pdf_stems: set[str] = set()
 
@@ -249,7 +213,6 @@ class DocumentService:
         return results
 
     def get_document(self, filename: str) -> DocumentInfo:
-        """Return metadata and existing Markdown content for a PDF or MD-only file."""
         filename = _safe_filename(filename, "document name")
         ext = Path(filename).suffix.lower()
 
@@ -267,7 +230,6 @@ class DocumentService:
                 has_pdf=False,
             )
 
-        # Default: PDF file
         pdf_path = self._pdfs_dir / filename
         if not pdf_path.exists():
             raise HTTPException(status_code=404, detail=f"PDF '{filename}' not found")
@@ -285,7 +247,6 @@ class DocumentService:
         )
 
     def get_pdf_path(self, filename: str) -> Path:
-        """Resolve a PDF filename to its absolute path, raising 404 if missing."""
         filename = _safe_filename(filename, "PDF filename")
         pdf_path = self._pdfs_dir / filename
         if not pdf_path.exists():
@@ -297,20 +258,10 @@ class DocumentService:
     # ------------------------------------------------------------------
 
     def upload_file(self, file: UploadFile) -> None:
-        """Persist a single uploaded PDF or Markdown file.
-
-        Storage layout:
-        - .pdf → docs/pdfs/
-        - .md  → docs/mds/
-
-        Raises HTTP 422 when:
-        - The file exceeds MAX_FILE_SIZE_MB.
-        - A .pdf file fails the magic-bytes check (not a real PDF).
-        """
         import filetype
 
         name = _safe_filename(file.filename or "", "upload filename")
-        dest_dir = _dest_dir(name, self._pdfs_dir, self._mds_dir)  # raises 400 for unsupported extensions
+        dest_dir = _dest_dir(name, self._pdfs_dir, self._mds_dir)
         dest_dir.mkdir(parents=True, exist_ok=True)
 
         settings = get_settings()
@@ -329,7 +280,6 @@ class DocumentService:
                         break
                     size += len(chunk)
                     if max_bytes > 0 and size > max_bytes:
-                        out.close()
                         dest_path.unlink(missing_ok=True)
                         raise HTTPException(
                             status_code=422,
@@ -338,7 +288,6 @@ class DocumentService:
                                 f"({size // (1024 * 1024)} MB received so far)."
                             ),
                         )
-                    # Collect the first 512 bytes for magic-byte detection.
                     if len(buf_for_magic) < 512:
                         buf_for_magic.extend(chunk[: 512 - len(buf_for_magic)])
                     out.write(chunk)
@@ -348,7 +297,6 @@ class DocumentService:
             dest_path.unlink(missing_ok=True)
             raise HTTPException(status_code=500, detail=f"Failed to write '{name}': {exc}") from exc
 
-        # Magic-bytes check: only for files uploaded with a .pdf extension.
         if is_pdf_ext:
             kind = filetype.guess(bytes(buf_for_magic))
             if kind is None or kind.mime != "application/pdf":
@@ -366,7 +314,6 @@ class DocumentService:
         )
 
     def upload_files(self, files: List[UploadFile]) -> MultiUploadResponse:
-        """Upload multiple files, collecting per-file results without raising on failure."""
         results: List[UploadFileResult] = []
 
         for file in files:
@@ -395,23 +342,11 @@ class DocumentService:
         filename: str,
         converter_type: ConverterType = ConverterType.pymupdf,
         vlm_settings: Optional[VLMSettings] = None,
+        cloud_settings: Optional[CloudSettings] = None,
         stop_event: Optional[threading.Event] = None,
         on_progress: Optional[Callable[[int, int], None]] = None,
     ) -> ConvertResponse:
-        """Convert a stored PDF to Markdown and persist the result.
-
-        Args:
-            filename:       Name of the PDF in the configured pdfs directory.
-            converter_type: Which converter engine to use.
-            vlm_settings:   Optional VLM overrides (model / base_url / api_key).
-                            Ignored unless converter_type == ConverterType.vlm.
-            stop_event:     Optional threading.Event; when set, the VLM page
-                            loop raises InterruptedError between pages to allow
-                            a clean cancellation without waiting for the full run.
-            on_progress:    Optional callback called after each VLM page with
-                            (current_page, total_pages).  Only fired for VLM
-                            conversions; other converters have no page-level steps.
-        """
+        """Convert a stored PDF to Markdown and persist the result."""
         filename = _safe_filename(filename, "PDF filename")
         pdf_path = self._pdfs_dir / filename
         if not pdf_path.exists():
@@ -419,12 +354,9 @@ class DocumentService:
 
         settings = get_settings()
 
-        # Page count guard — open the PDF once to read page count, then reuse
-        # the value so the converter (especially VLMConverter) does not need to
-        # open the file a second time.
         page_count: Optional[int] = None
         try:
-            import fitz  # PyMuPDF
+            import fitz
             with fitz.open(str(pdf_path)) as doc:
                 page_count = doc.page_count
             if settings.MAX_PAGE_COUNT > 0 and page_count > settings.MAX_PAGE_COUNT:
@@ -438,7 +370,9 @@ class DocumentService:
         except HTTPException:
             raise
         except Exception as exc:
-            logger.warning("Could not read page count for '%s': %s", filename, exc, exc_info=True)
+            logger.warning(
+                "Could not read page count for '%s': %s", filename, exc, exc_info=True
+            )
 
         def _progress_handler(current: int, total: int) -> None:
             if on_progress:
@@ -453,12 +387,18 @@ class DocumentService:
             extra={"operation": "convert", "file_name": filename},
         )
         t0 = time.monotonic()
+
+        # I/O-bound converters (VLM, Cloud) receive stop_event and on_progress.
+        # CPU-bound converters run in isolated processes and cannot accept these.
+        _is_io_bound = converter_type in (ConverterType.vlm, ConverterType.cloud)
+
         try:
             converter = _build_converter(
                 converter_type,
                 vlm_settings,
-                on_progress=_progress_handler if converter_type == ConverterType.vlm else None,
-                stop_event=stop_event if converter_type == ConverterType.vlm else None,
+                cloud_settings,
+                on_progress=_progress_handler if _is_io_bound else None,
+                stop_event=stop_event if _is_io_bound else None,
             )
             md_content = converter.convert(pdf_path, total_pages=page_count)
         except InterruptedError:
@@ -494,7 +434,6 @@ class DocumentService:
     # ------------------------------------------------------------------
 
     def convert_md_to_pdf(self, md_filename: str) -> MdToPdfResponse:
-        """Convert a stored Markdown file to PDF using weasyprint."""
         from backend.utils.md_to_pdf import _convert_file
 
         md_filename = _safe_filename(md_filename, "Markdown filename")
@@ -517,17 +456,12 @@ class DocumentService:
         )
 
     def delete_document(self, filename: str) -> DeleteResponse:
-        """Delete a document and all its derived files (Markdown, chunks).
-
-        Handles both PDF files and MD-only files. Raises 404 if not found.
-        """
         filename = _safe_filename(filename, "document name")
         ext = Path(filename).suffix.lower()
         deleted: List[str] = []
         stem = _stem(filename)
 
         if ext == ".md":
-            # MD-only file: delete the MD and any associated chunks
             md_path = self._mds_dir / filename
             if not md_path.exists():
                 raise HTTPException(status_code=404, detail=f"MD '{filename}' not found")
@@ -546,7 +480,6 @@ class DocumentService:
                 message=f"Deleted '{filename}' and {associated} associated file(s)",
             )
 
-        # Default: PDF file
         pdf_path = self._pdfs_dir / filename
         if not pdf_path.exists():
             raise HTTPException(status_code=404, detail=f"PDF '{filename}' not found")
@@ -564,7 +497,7 @@ class DocumentService:
             shutil.rmtree(chunks_path)
             deleted.append(str(chunks_path))
 
-        associated = len(deleted) - 1  # exclude the PDF itself
+        associated = len(deleted) - 1
         return DeleteResponse(
             success=True,
             deleted=deleted,
@@ -572,10 +505,6 @@ class DocumentService:
         )
 
     def delete_documents(self, filenames: List[str]) -> DeleteResponse:
-        """Delete multiple documents, collecting errors without short-circuiting.
-
-        Raises 404 only when *every* requested file is missing.
-        """
         all_deleted: List[str] = []
         errors: List[str] = []
 

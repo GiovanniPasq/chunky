@@ -41,6 +41,11 @@ export interface VLMSettings {
   user_prompt?: string
 }
 
+export interface CloudSettings {
+  base_url?: string
+  bearer_token?: string
+}
+
 export interface EnrichmentSettings {
   model?: string
   base_url?: string
@@ -64,6 +69,7 @@ export interface ChunkSettings {
   enableMarkdownSizing: boolean
   converter: ConverterType
   vlm?: VLMSettings
+  cloud?: CloudSettings
   sectionEnrichment?: EnrichmentSettings
   chunkEnrichment?: EnrichmentSettings
 }

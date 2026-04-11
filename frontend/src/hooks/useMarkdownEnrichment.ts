@@ -99,6 +99,11 @@ export function useMarkdownEnrichment({
   const contentRef = useRef(content)
   contentRef.current = content
 
+  // Abort any in-flight enrichment on unmount.
+  useEffect(() => {
+    return () => { mdEnrichAbortRef.current?.abort() }
+  }, [])
+
   // Clear picker and pre-enrich snapshot when the document content changes
   // (document switch, conversion, etc.).
   useEffect(() => {
@@ -213,9 +218,16 @@ export function useMarkdownEnrichment({
 
   const confirmPicker = () => {
     const currentContent = editModeRef.current ? editContentRef.current : contentRef.current
-    const indices = Array.from(pickerSelected).sort((a, b) => a - b)
+    // Re-split from the current content rather than using pickerBlocks from when
+    // the picker was opened.  If the user edited the document while the picker
+    // was open, pickerBlocks would be stale and startMdEnrichment would
+    // reconstruct the document with old block boundaries → content corruption.
+    const freshBlocks = splitIntoBlocks(currentContent)
+    const indices = Array.from(pickerSelected)
+      .filter(i => i < freshBlocks.length)
+      .sort((a, b) => a - b)
     setPickerOpen(false)
-    startMdEnrichment(currentContent, pickerBlocks, indices)
+    startMdEnrichment(currentContent, freshBlocks, indices)
   }
 
   return {

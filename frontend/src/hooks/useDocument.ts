@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import type { ChunkSettings, Chunk, DocumentData, ConverterType, VLMSettings } from '../types'
-import { DEFAULT_SETTINGS, loadSettings, saveSettings } from './useSettings'
+import type { ChunkSettings, DocumentData, ConverterType, VLMSettings, CloudSettings } from '../types'
 import { parseSse, CONNECTION_LOST_MSG } from '../utils/parseSse'
+import { consumeChunkSse } from '../utils/consumeChunkSse'
 import { API_BASE } from '../services/apiService'
 
 export type BulkProgressFn = (current: number, total: number, filename: string) => void
@@ -18,58 +18,6 @@ export interface ConversionProgress {
   active: boolean
   current: number
   total: number
-}
-
-// ─────────────────────────────────────────────────────────────
-// SSE stream consumer for chunking
-// ─────────────────────────────────────────────────────────────
-
-async function consumeChunkSse(
-  content: string,
-  s: ChunkSettings,
-  signal?: AbortSignal,
-): Promise<Chunk[]> {
-  const res = await fetch(`${API}/chunk`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    signal,
-    body: JSON.stringify({
-      content,
-      splitter_type: s.splitterType,
-      splitter_library: s.splitterLibrary,
-      chunk_size: s.chunkSize,
-      chunk_overlap: s.chunkOverlap,
-      enable_markdown_sizing: s.enableMarkdownSizing,
-    }),
-  })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`HTTP ${res.status}: ${text}`)
-  }
-
-  for await (const event of parseSse(res.body!)) {
-    if (event.type === 'done') {
-      const raw = (event.chunks as Chunk[]) ?? []
-      return raw.map(c => ({
-        index: c.index,
-        content: c.content,
-        cleaned_chunk: c.cleaned_chunk ?? '',
-        title: c.title ?? '',
-        context: c.context ?? '',
-        summary: c.summary ?? '',
-        keywords: c.keywords ?? [],
-        questions: c.questions ?? [],
-        metadata: c.metadata ?? {},
-        start: c.start ?? 0,
-        end: c.end ?? 0,
-      }))
-    } else if (event.type === 'error') {
-      throw new Error(String(event.message ?? 'Chunking error'))
-    } else if (event.type === 'cancelled') {
-      throw new DOMException('Chunking cancelled', 'AbortError')
-    }
-  }
-  throw new Error('Stream ended without a done event')
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -107,6 +55,7 @@ export function useDocument(toast: ToastCallbacks) {
   const fetchDocuments = useCallback(async () => {
     try {
       const res = await fetch(`${API}/documents`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data: string[] = await res.json()
       setDocuments(data)
     } catch {
@@ -148,6 +97,7 @@ export function useDocument(toast: ToastCallbacks) {
 
     convertAbortRef.current?.abort()
     setConverting(false)
+    setConversionErrorMessage(null)
 
     setSelectedDoc(filename)
     setDocumentData(null)
@@ -208,13 +158,10 @@ export function useDocument(toast: ToastCallbacks) {
     }
   }, [fetchDocuments])
 
-  /**
-   * Convert the currently selected document to Markdown.
-   * Progress is streamed via SSE — no polling.
-   */
   const convertToMarkdown = useCallback(async (
     converter: ConverterType = 'pymupdf',
     vlm?: VLMSettings,
+    cloud?: CloudSettings,
   ) => {
     if (!selectedDocRef.current) return
 
@@ -231,6 +178,7 @@ export function useDocument(toast: ToastCallbacks) {
         converter,
       }
       if (converter === 'vlm' && vlm) body.vlm = vlm
+      if (converter === 'cloud' && cloud) body.cloud = cloud
 
       const res = await fetch(`${API}/convert`, {
         method: 'POST',
@@ -242,10 +190,11 @@ export function useDocument(toast: ToastCallbacks) {
         const text = await res.text().catch(() => '')
         throw new Error(`HTTP ${res.status}: ${text}`)
       }
+      if (!res.body) throw new Error('No response body')
 
       let mdContent: string | undefined
       let fileError: string | undefined
-      for await (const event of parseSse(res.body!, () => setConversionErrorMessage(CONNECTION_LOST_MSG))) {
+      for await (const event of parseSse(res.body, () => setConversionErrorMessage(CONNECTION_LOST_MSG))) {
         if (event.type === 'progress') {
           setConversionProgress({ active: true, current: event.current as number, total: event.total as number })
         } else if (event.type === 'file_done') {
@@ -266,8 +215,6 @@ export function useDocument(toast: ToastCallbacks) {
       if (err instanceof DOMException && err.name === 'AbortError') return
       toastRef.current.onError(err instanceof Error ? err.message : 'Conversion failed')
     } finally {
-      // Only reset state if this invocation is still the active one.
-      // Guards against a new conversion starting before our async cleanup ran.
       if (convertAbortRef.current === abortCtrl) {
         setConverting(false)
         setConversionProgress(null)
@@ -322,9 +269,6 @@ export function useDocument(toast: ToastCallbacks) {
     if (!selectedDocRef.current) return
     setSavingMd(true)
     try {
-      // Prefer the authoritative md_filename from the server; fall back to a
-      // suffix swap only when documentData isn't loaded yet (shouldn't happen
-      // in practice since the save button is only shown when md_content exists).
       const mdFilename =
         documentDataRef.current?.md_filename ??
         selectedDocRef.current.replace(/\.pdf$/i, '.md')
@@ -361,24 +305,11 @@ export function useDocument(toast: ToastCallbacks) {
     }
   }, [])
 
-  /**
-   * Convert multiple files concurrently via the unified /api/convert endpoint.
-   * The backend runs up to MAX_CONCURRENT_CONVERSIONS in parallel with a semaphore.
-   *
-   * @param filenames        Files to convert.
-   * @param converter        Converter engine.
-   * @param vlm              Optional VLM overrides.
-   * @param onFileStart      Called when each file begins processing.
-   * @param onFileResult     Called when each file finishes (success or failure).
-   * @param onBatchProgress  Called after each file completes with the running completion count.
-   * @param signal           AbortSignal to cancel the entire batch mid-stream.
-   * @param onConnectionLost Called when the SSE stream is silent for 60 s.
-   * @param onPageProgress   Called on each VLM page event with per-page and per-file counts.
-   */
   const batchConvert = useCallback(async (
     filenames: string[],
     converter: ConverterType,
     vlm: VLMSettings | undefined,
+    cloud: CloudSettings | undefined,
     onFileStart: (filename: string, index: number, total: number) => void,
     onFileResult: (filename: string, success: boolean) => void,
     onBatchProgress: (current: number, total: number, filename: string, percentage: number) => void,
@@ -388,6 +319,7 @@ export function useDocument(toast: ToastCallbacks) {
   ): Promise<void> => {
     const body: Record<string, unknown> = { filenames, converter }
     if (converter === 'vlm' && vlm) body.vlm = vlm
+    if (converter === 'cloud' && cloud) body.cloud = cloud
 
     const res = await fetch(`${API}/convert`, {
       method: 'POST',
@@ -399,8 +331,9 @@ export function useDocument(toast: ToastCallbacks) {
       const text = await res.text().catch(() => '')
       throw new Error(`HTTP ${res.status}: ${text}`)
     }
+    if (!res.body) throw new Error('No response body')
 
-    for await (const event of parseSse(res.body!, onConnectionLost)) {
+    for await (const event of parseSse(res.body, onConnectionLost)) {
       if (event.type === 'progress') {
         onPageProgress?.(
           event.filename as string,
@@ -424,10 +357,6 @@ export function useDocument(toast: ToastCallbacks) {
           event.filename as string,
           event.percentage as number,
         )
-        // Yield to the event loop so React flushes the state update before
-        // processing the next event. Without this, React 18 automatic
-        // batching would collect all setState calls in one synchronous pass
-        // and render only the final value, making progress jump to 100%.
         await new Promise<void>(r => setTimeout(r, 0))
       } else if (event.type === 'batch_done' || event.type === 'cancelled') {
         return
@@ -471,179 +400,4 @@ export function useDocument(toast: ToastCallbacks) {
     saveMarkdown, deleteMarkdown,
     batchConvert, chunkAndSaveFile,
   }
-}
-
-// ─────────────────────────────────────────────────────────────
-// useChunks
-// ─────────────────────────────────────────────────────────────
-export function useChunks(
-  documentData: DocumentData | null,
-  selectedDoc: string | null,
-  chunkingEnabled: boolean,
-  toast: ToastCallbacks,
-) {
-  const [chunks, setChunks] = useState<Chunk[] | null>(null)
-  const [settings, setSettings] = useState<ChunkSettings>(() => loadSettings())
-  const [saving, setSaving] = useState(false)
-  const [chunking, setChunking] = useState(false)
-
-  // Keep latest toast in a ref so stable useCallback closures see the current functions.
-  const toastRef = useRef<ToastCallbacks>(toast)
-  toastRef.current = toast
-
-  const chunkAbortRef = useRef<AbortController | null>(null)
-
-  // chunkContent is stable (refs + state setters only) so it can be a
-  // useCallback with [] deps and safely listed in the useEffect below.
-  const chunkContent = useCallback(async (content: string, s: ChunkSettings) => {
-    chunkAbortRef.current?.abort()
-    const abortCtrl = new AbortController()
-    chunkAbortRef.current = abortCtrl
-
-    setChunking(true)
-    setChunks(null)
-    try {
-      const normalised = await consumeChunkSse(content, s, abortCtrl.signal)
-      setChunks(normalised)
-    } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') return
-      toastRef.current.onError('Chunking failed')
-    } finally {
-      if (chunkAbortRef.current === abortCtrl) {
-        setChunking(false)
-      }
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!chunkingEnabled || !documentData?.md_content) {
-      chunkAbortRef.current?.abort()
-      setChunks(null)
-      setChunking(false)
-      return
-    }
-    chunkContent(documentData.md_content, settings)
-  }, [documentData, settings, chunkingEnabled, chunkContent])
-
-  const cancelChunking = useCallback(() => {
-    chunkAbortRef.current?.abort()
-    setChunking(false)
-  }, [])
-
-  const applySettings = useCallback((newSettings: ChunkSettings) => {
-    saveSettings(newSettings)
-    setSettings(newSettings)
-  }, [])
-
-  const resetSettings = useCallback(() => {
-    setSettings(DEFAULT_SETTINGS)
-  }, [])
-
-  const editChunk = useCallback((index: number, content: string) => {
-    setChunks(prev => {
-      if (!prev) return prev
-      const updated = [...prev]
-      updated[index] = { ...updated[index], content }
-      return updated
-    })
-  }, [])
-
-  const deleteChunk = useCallback((index: number) => {
-    setChunks(prev => {
-      if (!prev) return prev
-      return prev
-        .filter(c => c.index !== index)
-        .map((c, i) => ({ ...c, index: i }))
-    })
-  }, [])
-
-  const deleteChunks = useCallback((indices: Set<number>) => {
-    setChunks(prev => {
-      if (!prev) return prev
-      return prev
-        .filter(c => !indices.has(c.index))
-        .map((c, i) => ({ ...c, index: i }))
-    })
-  }, [])
-
-  const mergeChunks = useCallback((indices: number[]) => {
-    if (indices.length < 2) return
-    setChunks(prev => {
-      if (!prev) return prev
-      const sorted = [...indices].sort((a, b) => a - b)
-      const toMerge = sorted.map(i => prev[i]).filter(Boolean)
-      if (toMerge.length < 2) return prev
-
-      let merged = toMerge[0].content
-      for (let i = 1; i < toMerge.length; i++) {
-        const b = toMerge[i].content
-        const maxLen = Math.min(merged.length, b.length, 300)
-        let overlapLen = 0
-        for (let len = maxLen; len > 0; len--) {
-          if (merged.slice(-len) === b.slice(0, len)) {
-            overlapLen = len
-            break
-          }
-        }
-        merged = overlapLen > 0 ? merged + b.slice(overlapLen) : merged + '\n\n' + b
-      }
-
-      const sortedSet = new Set(sorted)
-      const newChunks: Chunk[] = []
-      for (let i = 0; i < prev.length; i++) {
-        if (i === sorted[0]) {
-          newChunks.push({ ...toMerge[0], content: merged, end: toMerge[toMerge.length - 1].end })
-        } else if (!sortedSet.has(i)) {
-          newChunks.push(prev[i])
-        }
-      }
-      return newChunks.map((c, i) => ({ ...c, index: i }))
-    })
-  }, [])
-
-  const saveChunks = useCallback(async () => {
-    if (!chunks || !selectedDoc) return
-    setSaving(true)
-    try {
-      const res = await fetch(`${API}/chunks/save`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          filename: selectedDoc,
-          splitter_type: settings.splitterType,
-          splitter_library: settings.splitterLibrary,
-          chunks: chunks.map(c => ({
-            index: c.index,
-            content: c.content,
-            cleaned_chunk: c.cleaned_chunk,
-            title: c.title,
-            context: c.context,
-            summary: c.summary,
-            keywords: c.keywords,
-            questions: c.questions,
-            metadata: c.metadata ?? {},
-            start: c.start,
-            end: c.end,
-          })),
-        }),
-      })
-      if (!res.ok) throw new Error()
-      toastRef.current.onSuccess(`Saved ${chunks.length} chunks ✓`)
-    } catch {
-      toastRef.current.onError('Failed to save chunks')
-    } finally {
-      setSaving(false)
-    }
-  }, [chunks, selectedDoc, settings.splitterType, settings.splitterLibrary])
-
-  const enrichChunk = useCallback((index: number, updates: Partial<Chunk>) => {
-    setChunks(prev => {
-      if (!prev) return prev
-      const updated = [...prev]
-      updated[index] = { ...updated[index], ...updates }
-      return updated
-    })
-  }, [])
-
-  return { chunks, settings, saving, chunking, cancelChunking, applySettings, resetSettings, editChunk, deleteChunk, deleteChunks, mergeChunks, saveChunks, enrichChunk }
 }

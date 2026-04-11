@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, memo, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Chunk, EnrichmentSettings } from '../../types'
 import { useChunkEnrichment } from '../../hooks/useChunkEnrichment'
 import ChunkEditModal from '../chunks/ChunkEditModal'
 import ProgressModal from '../modals/ProgressModal'
+import { VIEWER_SCROLL } from '../../utils/viewerEvents'
 import './MarkdownViewer.css'
 import './ChunkViewer.css'
 
@@ -25,6 +26,35 @@ interface Props {
   onSaveChunks: () => void
   onEnrichSuccess?: (msg: string) => void
   onEnrichError?: (msg: string) => void
+}
+
+// ── Lazy rendering ─────────────────────────────────────────────────────────
+// Renders a height-matched placeholder until the chunk scrolls within 300px
+// of the viewport, then swaps in the real content and disconnects the observer.
+// This keeps frame times low for documents with 100+ chunks.
+
+function LazyChunk({ children, estimatedHeight }: { children: ReactNode; estimatedHeight: number }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [visible, setVisible] = useState(false)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setVisible(true)
+          observer.disconnect()
+        }
+      },
+      { rootMargin: '300px' },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  if (visible) return <>{children}</>
+  return <div ref={ref} style={{ minHeight: estimatedHeight }} />
 }
 
 const CHUNK_COLORS = [
@@ -50,7 +80,12 @@ function isEnriched(chunk: Chunk): boolean {
   )
 }
 
-export default function ChunkViewer({
+type PendingOp =
+  | { type: 'delete-single'; index: number }
+  | { type: 'delete-bulk'; indices: Set<number> }
+  | { type: 'merge'; indices: number[] }
+
+function ChunkViewer({
   chunks,
   content,
   chunksReady,
@@ -70,11 +105,13 @@ export default function ChunkViewer({
   const [selectedChunks, setSelectedChunks] = useState<Set<number>>(new Set())
   const [editingChunkIndex, setEditingChunkIndex] = useState<number | null>(null)
   const [enrichError, setEnrichError] = useState<string | null>(null)
+  const [pendingOp, setPendingOp] = useState<PendingOp | null>(null)
 
   const containerRef = useRef<HTMLDivElement>(null)
   const isScrollingRef = useRef(false)
   const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout>>()
   const rafRef = useRef<number>()
+  const prevChunkCountRef = useRef<number | null>(null)
 
   const {
     chunkEnrichOp,
@@ -95,9 +132,15 @@ export default function ChunkViewer({
     onError: onEnrichError,
   })
 
-  // Clear selection when chunks change (edit, delete, merge, rechunk, doc switch).
+  // Clear selection only on structural changes (delete, merge, rechunk, doc switch).
+  // Enrichment updates change chunk content but not length — those must NOT clear
+  // the selection or the user sees checkboxes flash off during bulk enrichment.
   useEffect(() => {
-    setSelectedChunks(new Set())
+    const newCount = chunks?.length ?? null
+    if (newCount !== prevChunkCountRef.current) {
+      prevChunkCountRef.current = newCount
+      setSelectedChunks(new Set())
+    }
   }, [chunks])
 
   // ── Scroll sync ────────────────────────────────────────────────────────────
@@ -110,7 +153,7 @@ export default function ChunkViewer({
       const maxScroll = el.scrollHeight - el.clientHeight
       if (maxScroll <= 0) return
       const pct = Math.min(1, Math.max(0, el.scrollTop / maxScroll))
-      window.dispatchEvent(new CustomEvent('viewer-scroll', {
+      window.dispatchEvent(new CustomEvent(VIEWER_SCROLL, {
         detail: { source: 'markdown', percentage: pct }
       }))
     })
@@ -128,11 +171,13 @@ export default function ChunkViewer({
       el.scrollTo({ top: Math.round(Math.min(1, Math.max(0, ev.detail.percentage)) * maxScroll), behavior: 'instant' })
       scrollTimeoutRef.current = setTimeout(() => { isScrollingRef.current = false }, 50)
     }
-    window.addEventListener('viewer-scroll', onExtScroll)
-    return () => window.removeEventListener('viewer-scroll', onExtScroll)
+    window.addEventListener(VIEWER_SCROLL, onExtScroll)
+    return () => window.removeEventListener(VIEWER_SCROLL, onExtScroll)
   }, [scrollSyncEnabled])
 
   // ── Helpers ────────────────────────────────────────────────────────────────
+
+  const isEnrichmentActive = enrichingChunks.size > 0 || chunkEnrichOp !== null
 
   const getColor = (i: number) => CHUNK_COLORS[i % CHUNK_COLORS.length]
   const getBorderColor = (i: number) => CHUNK_BORDER_COLORS[i % CHUNK_BORDER_COLORS.length]
@@ -147,13 +192,36 @@ export default function ChunkViewer({
 
   const handleMergeSelected = () => {
     const indices = Array.from(selectedChunks).sort((a, b) => a - b)
+    if (isEnrichmentActive) { setPendingOp({ type: 'merge', indices }); return }
     onMergeChunks(indices)
     setSelectedChunks(new Set())
   }
 
   const handleDeleteSelected = () => {
+    if (isEnrichmentActive) { setPendingOp({ type: 'delete-bulk', indices: new Set(selectedChunks) }); return }
     onDeleteChunks(selectedChunks)
     setSelectedChunks(new Set())
+  }
+
+  const handleDeleteChunk = (index: number) => {
+    if (isEnrichmentActive) { setPendingOp({ type: 'delete-single', index }); return }
+    onDeleteChunk(index)
+  }
+
+  const handleConfirmInterrupt = () => {
+    handleInterruptChunkEnrich()
+    const op = pendingOp
+    setPendingOp(null)
+    if (!op) return
+    if (op.type === 'delete-single') {
+      onDeleteChunk(op.index)
+    } else if (op.type === 'delete-bulk') {
+      onDeleteChunks(op.indices)
+      setSelectedChunks(new Set())
+    } else if (op.type === 'merge') {
+      onMergeChunks(op.indices)
+      setSelectedChunks(new Set())
+    }
   }
 
   const handleChunkSave = (index: number, updatedContent: string, metadataUpdates?: Partial<Chunk>) => {
@@ -172,6 +240,30 @@ export default function ChunkViewer({
         onInterrupt={handleInterruptChunkEnrich}
         errorMessage={chunkEnrichOp?.errorMessage}
       />
+
+      {pendingOp && (
+        <div className="confirm-overlay">
+          <div className="confirm-card" role="dialog" aria-modal="true">
+            <div className="confirm-card-header">
+              <h3 className="confirm-title">Enrichment in progress</h3>
+            </div>
+            <div className="confirm-card-body">
+              <p className="confirm-message">
+                An enrichment operation is currently running. Proceeding will interrupt it.
+                Do you want to continue?
+              </p>
+            </div>
+            <div className="confirm-card-footer">
+              <button className="confirm-btn confirm-btn--cancel" onClick={() => setPendingOp(null)}>
+                Cancel
+              </button>
+              <button className="confirm-btn confirm-btn--ok" onClick={handleConfirmInterrupt}>
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {editingChunkIndex !== null && chunks?.[editingChunkIndex] && (
         <ChunkEditModal
@@ -266,9 +358,12 @@ export default function ChunkViewer({
               const isEnriching = enrichingChunks.has(i)
               const enrichErrMsg = chunkEnrichErrors.get(i)
               const enriched = isEnriched(chunk)
+              // Estimate height from content length so the placeholder approximates
+              // the real height and minimises scroll-position jumps on reveal.
+              const estimatedHeight = Math.max(100, Math.min(800, chunk.content.length * 0.4))
               return (
+                <LazyChunk key={`${chunk.start}-${chunk.end}`} estimatedHeight={estimatedHeight}>
                 <div
-                  key={i}
                   className={`chunk-block${isSelected ? ' chunk-block--selected' : ''}${enriched ? ' chunk-block--enriched' : ''}`}
                   style={{
                     backgroundColor: getColor(i),
@@ -313,7 +408,7 @@ export default function ChunkViewer({
                       </button>
                       <button
                         className="chunk-delete-btn"
-                        onClick={() => onDeleteChunk(i)}
+                        onClick={() => handleDeleteChunk(i)}
                         title="Delete chunk"
                         disabled={isEnriching}
                       >
@@ -326,8 +421,11 @@ export default function ChunkViewer({
                       ⚠️ {enrichErrMsg}
                     </div>
                   )}
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{chunk.content}</ReactMarkdown>
+                  <div className="markdown-content">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{chunk.content}</ReactMarkdown>
+                  </div>
                 </div>
+                </LazyChunk>
               )
             })}
           </div>
@@ -336,3 +434,5 @@ export default function ChunkViewer({
     </div>
   )
 }
+
+export default memo(ChunkViewer)

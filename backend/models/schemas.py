@@ -22,6 +22,7 @@ class ConverterType(str, Enum):
     markitdown = "markitdown"
     liteparse = "liteparse"
     vlm = "vlm"
+    cloud = "cloud"
 
 
 class SplitterType(str, Enum):
@@ -81,6 +82,18 @@ class VLMSettings(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Cloud settings (only used when converter == cloud)
+# ---------------------------------------------------------------------------
+
+
+class CloudSettings(BaseModel):
+    """Settings for the Cloud converter."""
+
+    base_url: Optional[str] = Field(default=None)
+    bearer_token: Optional[str] = Field(default=None)
+
+
+# ---------------------------------------------------------------------------
 # Document endpoints
 # ---------------------------------------------------------------------------
 
@@ -91,6 +104,7 @@ class ConvertRequest(BaseModel):
     filenames: List[str] = Field(..., min_length=1, description="PDF filename(s) to convert.")
     converter: ConverterType = Field(default=ConverterType.pymupdf)
     vlm: Optional[VLMSettings] = Field(default=None)
+    cloud: Optional[CloudSettings] = Field(default=None)
 
 
 class DocumentInfo(BaseModel):
@@ -140,7 +154,7 @@ class DeleteResponse(BaseModel):
 class ChunkRequest(BaseModel):
     """Body for POST /api/chunk."""
 
-    content: str = Field(..., min_length=1, description="Text content to split.")
+    content: str = Field(..., min_length=1, max_length=10_000_000, description="Text content to split.")
     splitter_type: SplitterType = Field(
         default=SplitterType.token,
         description="Splitting strategy.",
@@ -234,7 +248,7 @@ class EnrichmentRequest(BaseModel):
 
 
 class EnrichMarkdownRequest(BaseModel):
-    content: str = Field(..., min_length=1)
+    content: str = Field(..., min_length=1, max_length=10_000_000)
     settings: EnrichmentRequest
 
 

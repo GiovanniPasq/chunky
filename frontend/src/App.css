@@ -227,11 +227,26 @@
 }
 
 /* ── Preset ratio popup — floats to the right of the divider ── */
+/* padding-left bridges the gap between the divider edge and the visible popup
+   so the mouse never leaves a hoverable element while moving toward the buttons. */
 .viewer-divider-presets {
   position: absolute;
   top: 50%;
-  left: calc(100% + 10px);
+  left: 100%;
   transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 6px 8px 16px;
+  background: transparent;
+  border-radius: 8px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  transform: translateY(-50%) translateX(-4px);
+}
+
+.viewer-divider-presets-inner {
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -240,10 +255,6 @@
   border-radius: 8px;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(8px);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.18s ease, transform 0.18s ease;
-  transform: translateY(-50%) translateX(-4px);
 }
 
 .viewer-divider:hover .viewer-divider-presets {

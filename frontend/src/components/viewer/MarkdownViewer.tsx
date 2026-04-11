@@ -1,8 +1,9 @@
-import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
+import { useRef, useEffect, useState, useCallback, useMemo, memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { EnrichmentSettings } from '../../types'
 import { useMarkdownEnrichment } from '../../hooks/useMarkdownEnrichment'
+import { VIEWER_SCROLL, VIEWER_CLICK_SYNC, VIEWER_PAGE_SYNC } from '../../utils/viewerEvents'
 import ProgressModal from '../modals/ProgressModal'
 import './MarkdownViewer.css'
 
@@ -39,9 +40,60 @@ function splitAtPageMarkers(md: string): Array<{ page: number; content: string }
   return sections.length > 0 ? sections : null
 }
 
+// ── Lazy section splitting ──────────────────────────────────────────────────
+
+// Split markdown at blank-line boundaries into groups of ~targetSize chars.
+// Splitting at \n\n guarantees we never cut inside a block element (table row,
+// code fence, list item) so each section is always valid standalone markdown.
+function splitIntoLazySections(md: string, targetSize = 2500): string[] {
+  const blocks = md.split(/\n\n+/)
+  const sections: string[] = []
+  let current = ''
+  for (const block of blocks) {
+    if (current.length > 0 && current.length + block.length + 2 > targetSize) {
+      sections.push(current)
+      current = block
+    } else {
+      current = current.length > 0 ? `${current}\n\n${block}` : block
+    }
+  }
+  if (current.length > 0) sections.push(current)
+  return sections.length > 0 ? sections : [md]
+}
+
+// Renders a height-matched placeholder until the section scrolls within 300 px
+// of the viewport, then replaces it with the parsed ReactMarkdown output.
+// React.memo prevents re-parsing when the parent re-renders with the same content.
+const LazySection = memo(function LazySection({
+  content: sectionContent,
+  estimatedHeight,
+}: {
+  content: string
+  estimatedHeight: number
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [visible, setVisible] = useState(false)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) { setVisible(true); observer.disconnect() }
+      },
+      { rootMargin: '300px' },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  if (visible) return <ReactMarkdown remarkPlugins={[remarkGfm]}>{sectionContent}</ReactMarkdown>
+  return <div ref={ref} style={{ minHeight: estimatedHeight }} />
+})
+
 // ── Component ──────────────────────────────────────────────────────────────
 
-export default function MarkdownViewer({
+function MarkdownViewer({
   content, scale = 1.0, onScaleChange, padding = 20, onPaddingChange,
   scrollSyncEnabled = true,
   onSaveMarkdown, onDeleteMarkdown,
@@ -86,9 +138,25 @@ export default function MarkdownViewer({
   const rafRef = useRef<number>()
   const savedScrollRatioRef = useRef<number>(0)
 
-  // Split content at VLM page markers into per-page sections (null = no markers).
-  const pageSections = useMemo(() => splitAtPageMarkers(content), [content])
-  const hasPageSync = pageSections !== null && pageSections.length > 0
+  // Pre-compute lazy sections once per content change.
+  // For VLM output (page markers present) each page is further split into
+  // ~2 500-char buckets. For plain output the whole string is bucketed directly.
+  // Either way, only sections near the viewport are ever parsed by ReactMarkdown.
+  const lazyContent = useMemo(() => {
+    const paged = splitAtPageMarkers(content)
+    if (paged) {
+      return {
+        type: 'paged' as const,
+        pages: paged.map(ps => ({
+          page: ps.page,
+          sections: splitIntoLazySections(ps.content),
+        })),
+      }
+    }
+    return { type: 'single' as const, sections: splitIntoLazySections(content) }
+  }, [content])
+
+  const hasPageSync = lazyContent.type === 'paged'
 
   // Scroll MarkdownViewer to the anchor element for a given page number.
   const scrollToPage = useCallback((pageNum: number) => {
@@ -112,8 +180,8 @@ export default function MarkdownViewer({
       if (ev.detail.source !== 'pdf') return
       scrollToPage(ev.detail.page as number)
     }
-    window.addEventListener('viewer-page-sync', handler)
-    return () => window.removeEventListener('viewer-page-sync', handler)
+    window.addEventListener(VIEWER_PAGE_SYNC, handler)
+    return () => window.removeEventListener(VIEWER_PAGE_SYNC, handler)
   }, [hasPageSync, scrollToPage])
 
   useEffect(() => {
@@ -191,7 +259,7 @@ export default function MarkdownViewer({
       if (maxScroll <= 0) return
       const pct = Math.min(1, Math.max(0, el.scrollTop / maxScroll))
       savedScrollRatioRef.current = pct
-      window.dispatchEvent(new CustomEvent('viewer-scroll', {
+      window.dispatchEvent(new CustomEvent(VIEWER_SCROLL, {
         detail: { source: 'markdown', percentage: pct }
       }))
     })
@@ -206,7 +274,7 @@ export default function MarkdownViewer({
     const rect = range.getBoundingClientRect()
     const cRect = containerRef.current.getBoundingClientRect()
     const relY = (rect.top - cRect.top + containerRef.current.scrollTop) / containerRef.current.scrollHeight
-    window.dispatchEvent(new CustomEvent('viewer-click-sync', {
+    window.dispatchEvent(new CustomEvent(VIEWER_CLICK_SYNC, {
       detail: { source: 'markdown', percentage: relY, selectedText: text }
     }))
   }, [scrollSyncEnabled])
@@ -224,8 +292,8 @@ export default function MarkdownViewer({
       savedScrollRatioRef.current = ev.detail.percentage
       scrollTimeoutRef.current = setTimeout(() => { isScrollingRef.current = false }, 50)
     }
-    window.addEventListener('viewer-scroll', onExtScroll)
-    return () => window.removeEventListener('viewer-scroll', onExtScroll)
+    window.addEventListener(VIEWER_SCROLL, onExtScroll)
+    return () => window.removeEventListener(VIEWER_SCROLL, onExtScroll)
   }, [scrollSyncEnabled])
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -396,8 +464,8 @@ export default function MarkdownViewer({
             />
           ) : (
             <div className="markdown-content" style={{ padding: `${padding}px` }}>
-              {pageSections ? (
-                pageSections.map(({ page, content: pageContent }) => (
+              {lazyContent.type === 'paged' ? (
+                lazyContent.pages.map(({ page, sections }) => (
                   <div key={page}>
                     {page === 1
                       ? <div id="md-page-anchor-1" style={{ height: 0 }} />
@@ -407,7 +475,7 @@ export default function MarkdownViewer({
                           <button
                             className="md-page-label"
                             title={`Jump PDF to page ${page}`}
-                            onClick={() => window.dispatchEvent(new CustomEvent('viewer-page-sync', {
+                            onClick={() => window.dispatchEvent(new CustomEvent(VIEWER_PAGE_SYNC, {
                               detail: { source: 'markdown', page },
                             }))}
                           >
@@ -416,11 +484,23 @@ export default function MarkdownViewer({
                         </div>
                       )
                     }
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{pageContent}</ReactMarkdown>
+                    {sections.map((section, i) => (
+                      <LazySection
+                        key={i}
+                        content={section}
+                        estimatedHeight={Math.max(80, section.length * 0.3)}
+                      />
+                    ))}
                   </div>
                 ))
               ) : (
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+                lazyContent.sections.map((section, i) => (
+                  <LazySection
+                    key={i}
+                    content={section}
+                    estimatedHeight={Math.max(80, section.length * 0.3)}
+                  />
+                ))
               )}
             </div>
           )
@@ -431,3 +511,5 @@ export default function MarkdownViewer({
     </div>
   )
 }
+
+export default memo(MarkdownViewer)

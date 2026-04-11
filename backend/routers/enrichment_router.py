@@ -99,7 +99,8 @@ async def enrich_markdown(http_request: Request, body: EnrichMarkdownRequest):
                 await queue.put({"type": "error", "status": exc.status_code, "message": exc.detail})
             except Exception as exc:
                 logger.exception("Unexpected error during markdown enrichment")
-                await queue.put({"type": "error", "status": 500, "message": str(exc)})
+                await queue.put({"type": "error", "status": 500,
+                                 "message": "An internal error occurred. Check server logs."})
             finally:
                 await queue.put(None)  # sentinel
 
@@ -124,7 +125,8 @@ async def enrich_markdown(http_request: Request, body: EnrichMarkdownRequest):
                     if time.monotonic() - last_heartbeat >= _HEARTBEAT_INTERVAL_S:
                         yield ": heartbeat\n\n"
                         last_heartbeat = time.monotonic()
-                        last_event = time.monotonic()
+                        # Do NOT reset last_event here — last_event tracks real
+                        # progress; a heartbeat is only a connection keepalive.
 
                     # Watchdog: if no event has arrived for watchdog_s seconds,
                     # something is stuck — cancel and report.
@@ -194,12 +196,13 @@ async def enrich_chunks(http_request: Request, body: EnrichChunksRequest):
         total = len(chunks)
 
         watchdog_s = get_settings().SSE_WATCHDOG_TIMEOUT_S
-        max_concurrent = get_settings().MAX_CONCURRENT_ENRICHMENTS
+        # Use the global semaphore from app.state so the cap is enforced across
+        # ALL concurrent /enrich/chunks requests, not just within this one call.
+        semaphore = http_request.app.state.enrichment_semaphore
 
         yield _sse({"type": "start", "operation": "enrich_chunks", "total": total})
 
         queue: asyncio.Queue[dict | None] = asyncio.Queue()
-        semaphore = asyncio.Semaphore(max_concurrent)
 
         async def enrich_one(chunk: dict) -> None:
             chunk_index = chunk["index"]
@@ -232,7 +235,7 @@ async def enrich_chunks(http_request: Request, body: EnrichChunksRequest):
                         exc,
                     )
                     await queue.put({"type": "chunk_error", "chunk_index": chunk_index,
-                                     "message": str(exc)})
+                                     "message": "Chunk enrichment failed. Check server logs."})
 
         async def run_all() -> None:
             tasks = [asyncio.create_task(enrich_one(c)) for c in chunks]
@@ -262,7 +265,8 @@ async def enrich_chunks(http_request: Request, body: EnrichChunksRequest):
                     if time.monotonic() - last_heartbeat >= _HEARTBEAT_INTERVAL_S:
                         yield ": heartbeat\n\n"
                         last_heartbeat = time.monotonic()
-                        last_event = time.monotonic()
+                        # Do NOT reset last_event here — last_event tracks real
+                        # progress; a heartbeat is only a connection keepalive.
 
                     # Watchdog: if no chunk event has arrived for watchdog_s seconds,
                     # something is stuck — cancel all in-flight chunks.
@@ -313,7 +317,8 @@ async def enrich_chunks(http_request: Request, body: EnrichChunksRequest):
         yield _sse({
             "type": "done",
             "operation": "enrich_chunks",
-            "total_chunks": succeeded,
+            "total_chunks": total,
+            "succeeded": succeeded,
         })
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

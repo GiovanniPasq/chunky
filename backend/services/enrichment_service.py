@@ -19,11 +19,96 @@ import httpx
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Retry config
+# JSON repair helpers
 # ---------------------------------------------------------------------------
 
-_MAX_RETRY_ATTEMPTS = 3
-_RETRY_BASE_DELAY_S = 1.0  # seconds; doubles each attempt (1 s, 2 s, 4 s)
+def _repair_truncated_json(raw: str) -> "dict | None":
+    """Return the last complete JSON object found in *raw*, or None.
+
+    Walks the string once tracking string/escape/brace state to find the
+    position of the closing brace that brings the outermost object back to
+    depth 0, then attempts to parse everything up to that point.  Handles
+    the most common truncation pattern: the model is cut off mid-value
+    (string, array, or nested object) but an earlier version of the object
+    was already fully closed.
+    """
+    in_string = False
+    escaped = False
+    depth = 0
+    last_close = -1
+
+    for i, ch in enumerate(raw):
+        if escaped:
+            escaped = False
+            continue
+        if ch == "\\" and in_string:
+            escaped = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                last_close = i + 1
+
+    if last_close <= 0:
+        return None
+    try:
+        return json.loads(raw[:last_close])
+    except json.JSONDecodeError:
+        return None
+
+
+def _extract_fields_regex(raw: str, original_content: str) -> "dict | None":
+    """Extract individual fields from a truncated JSON string via regex.
+
+    Only fields whose value is fully present in *raw* are extracted; the
+    rest fall back to safe empty defaults so the chunk is never dropped.
+    Returns None if nothing useful was found.
+    """
+    result: dict = {
+        "cleaned_chunk": original_content,
+        "title": "",
+        "context": "",
+        "summary": "",
+        "keywords": [],
+        "questions": [],
+    }
+    found_any = False
+
+    for field in ("cleaned_chunk", "title", "context", "summary"):
+        m = re.search(
+            rf'"{re.escape(field)}"\s*:\s*"((?:[^"\\]|\\.)*)"',
+            raw,
+            re.DOTALL,
+        )
+        if m:
+            try:
+                result[field] = json.loads(f'"{m.group(1)}"')
+            except (json.JSONDecodeError, ValueError):
+                result[field] = m.group(1)
+            found_any = True
+
+    for field in ("keywords", "questions"):
+        m = re.search(
+            rf'"{re.escape(field)}"\s*:\s*(\[.*?\])',
+            raw,
+            re.DOTALL,
+        )
+        if m:
+            try:
+                result[field] = json.loads(m.group(1))
+                found_any = True
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+    return result if found_any else None
+
 
 # ---------------------------------------------------------------------------
 # Prompts
@@ -87,12 +172,23 @@ class EnrichmentService:
         self._user_prompt = user_prompt
 
         # If a shared client is provided its timeout settings apply.
-        # Otherwise fall back to a conservative per-request timeout.
+        # Otherwise fall back to a per-request timeout sourced from settings.
+        from backend.config import get_settings as _get_settings
+        _s = _get_settings()
+
+        self._max_retry_attempts = _s.HTTP_MAX_RETRY_ATTEMPTS
+        self._retry_base_delay_s = _s.HTTP_RETRY_BASE_DELAY_S
+
         client_kwargs: Dict[str, Any] = dict(base_url=base_url, api_key=api_key)
         if http_client is not None:
             client_kwargs["http_client"] = http_client
         else:
-            client_kwargs["timeout"] = httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=5.0)
+            client_kwargs["timeout"] = httpx.Timeout(
+                connect=_s.HTTP_CONNECT_TIMEOUT_S,
+                read=_s.ENRICH_READ_TIMEOUT_S,
+                write=10.0,
+                pool=_s.HTTP_POOL_TIMEOUT_S,
+            )
 
         self._client = AsyncOpenAI(**client_kwargs)
 
@@ -101,33 +197,52 @@ class EnrichmentService:
     # ------------------------------------------------------------------
 
     async def _call_with_retry(self, coro_factory) -> Any:
-        """Call ``coro_factory()`` up to _MAX_RETRY_ATTEMPTS times.
+        """Call ``coro_factory()`` up to HTTP_MAX_RETRY_ATTEMPTS times.
 
-        Retries on ``APITimeoutError`` with exponential back-off.
-        Raises the final exception when all attempts are exhausted.
+        Retries on transient errors:
+        - ``APITimeoutError`` / ``APIConnectionError`` — network-level failures
+        - ``APIStatusError`` with status 429 or >= 500 — rate-limit / server error
+
+        4xx errors other than 429 (bad request, invalid auth) are not retried.
         """
-        from openai import APITimeoutError
+        from openai import APIConnectionError, APIStatusError, APITimeoutError
 
         last_exc: Exception | None = None
-        for attempt in range(_MAX_RETRY_ATTEMPTS):
+        for attempt in range(self._max_retry_attempts):
             try:
                 return await coro_factory()
-            except APITimeoutError as exc:
+            except (APITimeoutError, APIConnectionError) as exc:
                 last_exc = exc
-                if attempt < _MAX_RETRY_ATTEMPTS - 1:
-                    delay = _RETRY_BASE_DELAY_S * (2 ** attempt)
-                    logger.warning(
-                        "LLM call timed out (attempt %d/%d), retrying in %.0fs",
-                        attempt + 1,
-                        _MAX_RETRY_ATTEMPTS,
-                        delay,
-                    )
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error(
-                        "LLM call timed out after %d attempts — marking as failed",
-                        _MAX_RETRY_ATTEMPTS,
-                    )
+            except APIStatusError as exc:
+                # Surface definitive client errors immediately; retry server errors.
+                if exc.status_code < 500 and exc.status_code != 429:
+                    raise
+                last_exc = exc
+
+            if attempt < self._max_retry_attempts - 1:
+                delay = self._retry_base_delay_s * (2 ** attempt)
+                logger.warning(
+                    "LLM call failed (%s) (attempt %d/%d), retrying in %.0fs",
+                    type(last_exc).__name__,
+                    attempt + 1,
+                    self._max_retry_attempts,
+                    delay,
+                    extra={
+                        "model": self._model,
+                        "base_url": self._client.base_url,
+                        "attempt": attempt + 1,
+                    },
+                )
+                await asyncio.sleep(delay)
+            else:
+                logger.error(
+                    "LLM call failed after %d attempts — marking as failed",
+                    self._max_retry_attempts,
+                    extra={
+                        "model": self._model,
+                        "base_url": self._client.base_url,
+                    },
+                )
         raise last_exc or RuntimeError("All LLM retry attempts exhausted")
 
     async def _complete(self, messages: list) -> Any:
@@ -186,20 +301,34 @@ class EnrichmentService:
         raw = (response.choices[0].message.content or "").strip()
         raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
         raw = re.sub(r"\s*```$", "", raw).strip()
+
+        # Attempt 1: parse the response as-is.
         try:
             return json.loads(raw)
         except json.JSONDecodeError as exc:
-            logger.error(
-                "enrich_chunk: failed to parse LLM JSON response — %s. Raw: %.200s. "
-                "Returning original content with empty enrichment fields.",
+            logger.warning(
+                "enrich_chunk: JSON parse failed (%s) — attempting repair. Raw: %.120s",
                 exc,
                 raw,
             )
-            return {
-                "cleaned_chunk": content,
-                "title": "",
-                "context": "",
-                "summary": "",
-                "keywords": [],
-                "questions": [],
-            }
+
+        # Attempt 2: find the last fully-closed JSON object in the response.
+        # Handles the common case where the model is cut off mid-field but an
+        # earlier, complete version of the object exists in the stream.
+        repaired = _repair_truncated_json(raw)
+        if repaired is not None:
+            logger.warning("enrich_chunk: recovered via truncation repair.")
+            return repaired
+
+        # Attempt 3: extract whichever individual fields completed before cut-off.
+        extracted = _extract_fields_regex(raw, content)
+        if extracted is not None:
+            logger.warning("enrich_chunk: recovered partial fields via regex extraction.")
+            return extracted
+
+        # Final fallback: nothing could be salvaged — raise so the caller emits chunk_error.
+        logger.error(
+            "enrich_chunk: could not recover JSON — aborting chunk. Raw: %.200s",
+            raw,
+        )
+        raise ValueError("LLM returned unparseable JSON after all recovery attempts")

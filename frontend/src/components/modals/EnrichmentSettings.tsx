@@ -29,7 +29,7 @@ export default function EnrichmentSettings({ title, settings, onChange, defaultP
       </div>
 
       <div className="form-group">
-        <label>Base URL <span className="label-hint">(default: http://localhost:11434/v1)</span></label>
+        <label>Base URL</label>
         <input
           type="text"
           placeholder="e.g. https://api.openai.com/v1"
