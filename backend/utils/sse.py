@@ -12,7 +12,6 @@ Usage::
 """
 
 import json
-from typing import Optional
 
 from backend.config import get_settings
 
@@ -27,7 +26,7 @@ def sse_error(status: int, message: str) -> str:
     return sse_event({"type": "error", "status": status, "message": message})
 
 
-def sse_watchdog_timeout() -> Optional[float]:
+def sse_watchdog_timeout() -> float | None:
     """Return the SSE watchdog timeout in seconds, or None if disabled.
 
     Reads ``SSE_WATCHDOG_TIMEOUT_S`` from settings.  A value <= 0 means the

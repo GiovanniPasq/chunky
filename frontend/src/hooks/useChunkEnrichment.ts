@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import type { Chunk, EnrichmentSettings, EnrichOp } from '../types'
 import { apiEnrichChunk, buildEnrichmentBody, API_BASE } from '../services/apiService'
 import { parseSse, CONNECTION_LOST_MSG } from '../utils/parseSse'
+import { missingEnrichmentModelError } from '../utils/chunkUtils'
 
 // ── Hook ─────────────────────────────────────────────────────────────────────
 
@@ -96,7 +97,7 @@ export function useChunkEnrichment({
     if (!chunkEnrichment?.model) {
       setChunkEnrichErrors(prev => new Map(prev).set(
         chunkIndex,
-        'Configure Chunk Enrichment settings (model) in Settings → Enrichment tab.',
+        missingEnrichmentModelError('Chunk Enrichment settings'),
       ))
       return
     }
@@ -109,7 +110,7 @@ export function useChunkEnrichment({
     singleEnrichAbortRef.current = abortCtrl
 
     setChunkEnrichErrors(prev => { const m = new Map(prev); m.delete(chunkIndex); return m })
-    setEnrichingChunks(prev => new Set([...prev, chunkIndex]))
+    setEnrichingChunks(prev => new Set(prev).add(chunkIndex))
 
     try {
       const result = await apiEnrichChunk(
@@ -159,19 +160,21 @@ export function useChunkEnrichment({
     const currentSelected = selectedChunksRef.current
 
     if (!chunkEnrichment?.model) {
-      setEnrichError('Configure Chunk Enrichment settings (model) in Settings → Enrichment tab.')
+      setEnrichError(missingEnrichmentModelError('Chunk Enrichment settings'))
       return
     }
     if (!currentChunks || currentSelected.size === 0) return
 
     const indices = Array.from(currentSelected).sort((a, b) => a - b)
-    const chunksToEnrich = indices.map(i => ({
-      index: i,
-      content: currentChunks[i].content,
-      start: currentChunks[i].start ?? 0,
-      end: currentChunks[i].end ?? 0,
-      metadata: (currentChunks[i].metadata ?? {}) as Record<string, unknown>,
-    }))
+    const chunksToEnrich = indices
+      .filter(i => i < currentChunks.length)
+      .map(i => ({
+        index: i,
+        content: currentChunks[i].content,
+        start: currentChunks[i].start ?? 0,
+        end: currentChunks[i].end ?? 0,
+        metadata: (currentChunks[i].metadata ?? {}) as Record<string, unknown>,
+      }))
 
     const abortCtrl = new AbortController()
     bulkEnrichAbortRef.current = abortCtrl
@@ -209,10 +212,10 @@ export function useChunkEnrichment({
 
           const latestChunks = chunksRef.current
           onEnrichChunk(chunkIndex, {
-            cleaned_chunk: (chunk.cleaned_chunk as string) ?? latestChunks?.[chunkIndex]?.cleaned_chunk,
-            title: (chunk.title as string) ?? latestChunks?.[chunkIndex]?.title,
-            context: (chunk.context as string) ?? latestChunks?.[chunkIndex]?.context,
-            summary: (chunk.summary as string) ?? latestChunks?.[chunkIndex]?.summary,
+            cleaned_chunk: typeof chunk.cleaned_chunk === 'string' ? chunk.cleaned_chunk : (latestChunks?.[chunkIndex]?.cleaned_chunk ?? ''),
+            title: typeof chunk.title === 'string' ? chunk.title : (latestChunks?.[chunkIndex]?.title ?? ''),
+            context: typeof chunk.context === 'string' ? chunk.context : (latestChunks?.[chunkIndex]?.context ?? ''),
+            summary: typeof chunk.summary === 'string' ? chunk.summary : (latestChunks?.[chunkIndex]?.summary ?? ''),
             keywords: Array.isArray(chunk.keywords)
               ? chunk.keywords as string[]
               : latestChunks?.[chunkIndex]?.keywords ?? [],

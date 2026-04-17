@@ -5,7 +5,7 @@ Abstract base class for text splitters.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List
+from typing import Any
 
 from backend.models.schemas import ChunkItem, ChunkRequest
 
@@ -20,7 +20,7 @@ class TextSplitter(ABC):
     """
 
     @abstractmethod
-    def split(self, request: ChunkRequest) -> List[ChunkItem]:
+    def split(self, request: ChunkRequest) -> list[ChunkItem]:
         """Split the text in *request* and return a list of :class:`ChunkItem`.
 
         Args:
@@ -39,9 +39,9 @@ class TextSplitter(ABC):
     @staticmethod
     def build_chunks(
         original: str,
-        splits: List[str],
+        splits: list[str],
         char_overlap: int,
-    ) -> List[ChunkItem]:
+    ) -> list[ChunkItem]:
         """Map raw text splits back to their character positions in *original*.
 
         Args:
@@ -56,7 +56,7 @@ class TextSplitter(ABC):
         Returns:
             :class:`ChunkItem` list with ``start`` / ``end`` positions filled in.
         """
-        chunks: List[ChunkItem] = []
+        chunks: list[ChunkItem] = []
         search_start = 0
 
         for i, text in enumerate(splits):
@@ -70,7 +70,7 @@ class TextSplitter(ABC):
         return chunks
 
     @staticmethod
-    def measure_char_overlap(splits: List[str]) -> int:
+    def measure_char_overlap(splits: list[str]) -> int:
         """Return the character length of the overlap between the first two splits.
 
         Token-based splitters report ``chunk_overlap`` in tokens, but

@@ -20,7 +20,7 @@ Example
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any
 
 
 # ---------------------------------------------------------------------------
@@ -39,7 +39,7 @@ class SplitterStrategyMeta:
 class SplitterLibraryMeta:
     library: str           # enum value, e.g. "langchain"
     label: str             # human-readable, e.g. "LangChain"
-    strategies: List[SplitterStrategyMeta] = field(default_factory=list)
+    strategies: list[SplitterStrategyMeta] = field(default_factory=list)
 
 
 @dataclass
@@ -59,9 +59,9 @@ class _CapabilityRegistry:
 
     def __init__(self) -> None:
         # library_key → SplitterLibraryMeta
-        self._splitters: Dict[str, SplitterLibraryMeta] = {}
+        self._splitters: dict[str, SplitterLibraryMeta] = {}
         # converter_name → ConverterMeta
-        self._converters: Dict[str, ConverterMeta] = {}
+        self._converters: dict[str, ConverterMeta] = {}
 
     # ------------------------------------------------------------------
     # Registration API
@@ -101,7 +101,7 @@ class _CapabilityRegistry:
     # Query API
     # ------------------------------------------------------------------
 
-    def get_capabilities(self) -> Dict[str, Any]:
+    def get_capabilities(self) -> dict[str, Any]:
         """Return the full capabilities dict served to the frontend."""
         return {
             "splitters": [

@@ -1,9 +1,10 @@
-import { useRef, useEffect, useState, useCallback, useMemo, memo } from 'react'
+import { useRef, useEffect, useState, useMemo, memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { EnrichmentSettings } from '../../types'
 import { useMarkdownEnrichment } from '../../hooks/useMarkdownEnrichment'
-import { VIEWER_SCROLL, VIEWER_CLICK_SYNC, VIEWER_PAGE_SYNC } from '../../utils/viewerEvents'
+import { useScrollSync } from '../../hooks/useScrollSync'
+import { VIEWER_PAGE_SYNC } from '../../utils/viewerEvents'
 import ProgressModal from '../modals/ProgressModal'
 import './MarkdownViewer.css'
 
@@ -133,9 +134,7 @@ function MarkdownViewer({
 
   const containerRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const isScrollingRef = useRef(false)
-  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout>>()
-  const rafRef = useRef<number>()
+  const restoreRafRef = useRef<number>()
   const savedScrollRatioRef = useRef<number>(0)
 
   // Pre-compute lazy sections once per content change.
@@ -158,23 +157,21 @@ function MarkdownViewer({
 
   const hasPageSync = lazyContent.type === 'paged'
 
-  // Scroll MarkdownViewer to the anchor element for a given page number.
-  const scrollToPage = useCallback((pageNum: number) => {
-    if (!containerRef.current) return
-    const anchor = document.getElementById(`md-page-anchor-${pageNum}`)
-    if (!anchor) {
-      if (pageNum === 1) containerRef.current.scrollTo({ top: 0, behavior: 'smooth' })
-      return
-    }
-    const containerRect = containerRef.current.getBoundingClientRect()
-    const anchorRect = anchor.getBoundingClientRect()
-    const scrollTop = containerRef.current.scrollTop + (anchorRect.top - containerRect.top) - 8
-    containerRef.current.scrollTo({ top: Math.max(0, scrollTop), behavior: 'smooth' })
-  }, [])
-
   // Listen for page-sync events from the PDF viewer.
   useEffect(() => {
     if (!hasPageSync) return
+    const scrollToPage = (pageNum: number) => {
+      if (!containerRef.current) return
+      const anchor = document.getElementById(`md-page-anchor-${pageNum}`)
+      if (!anchor) {
+        if (pageNum === 1) containerRef.current.scrollTo({ top: 0, behavior: 'smooth' })
+        return
+      }
+      const containerRect = containerRef.current.getBoundingClientRect()
+      const anchorRect = anchor.getBoundingClientRect()
+      const scrollTop = containerRef.current.scrollTop + (anchorRect.top - containerRect.top) - 8
+      containerRef.current.scrollTo({ top: Math.max(0, scrollTop), behavior: 'smooth' })
+    }
     const handler = (e: Event) => {
       const ev = e as CustomEvent
       if (ev.detail.source !== 'pdf') return
@@ -182,7 +179,7 @@ function MarkdownViewer({
     }
     window.addEventListener(VIEWER_PAGE_SYNC, handler)
     return () => window.removeEventListener(VIEWER_PAGE_SYNC, handler)
-  }, [hasPageSync, scrollToPage])
+  }, [hasPageSync])
 
   useEffect(() => {
     setEditContent(content)
@@ -193,9 +190,9 @@ function MarkdownViewer({
   // ── Scroll ratio save/restore ──────────────────────────────────────────────
 
   const restoreScrollRatio = (toEditMode: boolean) => {
-    if (rafRef.current !== undefined) cancelAnimationFrame(rafRef.current)
-    rafRef.current = requestAnimationFrame(() => {
-      rafRef.current = undefined
+    if (restoreRafRef.current !== undefined) cancelAnimationFrame(restoreRafRef.current)
+    restoreRafRef.current = requestAnimationFrame(() => {
+      restoreRafRef.current = undefined
       const el: HTMLElement | null = toEditMode
         ? (textareaRef.current ?? containerRef.current)
         : containerRef.current
@@ -216,8 +213,13 @@ function MarkdownViewer({
 
   useEffect(() => {
     restoreScrollRatio(editMode)
-    return () => { if (rafRef.current !== undefined) cancelAnimationFrame(rafRef.current) }
+    return () => { if (restoreRafRef.current !== undefined) cancelAnimationFrame(restoreRafRef.current) }
   }, [editMode])
+
+  // Cancel any in-flight RAF on unmount, regardless of editMode state.
+  useEffect(() => {
+    return () => { if (restoreRafRef.current !== undefined) cancelAnimationFrame(restoreRafRef.current) }
+  }, [])
 
   const handleSaveMd = async () => {
     const ta = textareaRef.current
@@ -250,51 +252,13 @@ function MarkdownViewer({
 
   // ── Scroll sync ────────────────────────────────────────────────────────────
 
-  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    if (isScrollingRef.current || !scrollSyncEnabled) return
-    if (rafRef.current) cancelAnimationFrame(rafRef.current)
-    rafRef.current = requestAnimationFrame(() => {
-      const el = e.target as HTMLDivElement
-      const maxScroll = el.scrollHeight - el.clientHeight
-      if (maxScroll <= 0) return
-      const pct = Math.min(1, Math.max(0, el.scrollTop / maxScroll))
-      savedScrollRatioRef.current = pct
-      window.dispatchEvent(new CustomEvent(VIEWER_SCROLL, {
-        detail: { source: 'markdown', percentage: pct }
-      }))
-    })
-  }, [scrollSyncEnabled])
-
-  const handleMouseUp = useCallback(() => {
-    if (!scrollSyncEnabled || !containerRef.current) return
-    const sel = window.getSelection()
-    const text = sel?.toString().trim()
-    if (!text || !sel || sel.rangeCount === 0) return
-    const range = sel.getRangeAt(0)
-    const rect = range.getBoundingClientRect()
-    const cRect = containerRef.current.getBoundingClientRect()
-    const relY = (rect.top - cRect.top + containerRef.current.scrollTop) / containerRef.current.scrollHeight
-    window.dispatchEvent(new CustomEvent(VIEWER_CLICK_SYNC, {
-      detail: { source: 'markdown', percentage: relY, selectedText: text }
-    }))
-  }, [scrollSyncEnabled])
-
-  useEffect(() => {
-    const onExtScroll = (e: Event) => {
-      const ev = e as CustomEvent
-      if (ev.detail.source !== 'pdf' || !containerRef.current || !scrollSyncEnabled) return
-      isScrollingRef.current = true
-      clearTimeout(scrollTimeoutRef.current)
-      const el = containerRef.current
-      const maxScroll = el.scrollHeight - el.clientHeight
-      if (maxScroll <= 0) { isScrollingRef.current = false; return }
-      el.scrollTo({ top: Math.round(Math.min(1, Math.max(0, ev.detail.percentage)) * maxScroll), behavior: 'instant' })
-      savedScrollRatioRef.current = ev.detail.percentage
-      scrollTimeoutRef.current = setTimeout(() => { isScrollingRef.current = false }, 50)
-    }
-    window.addEventListener(VIEWER_SCROLL, onExtScroll)
-    return () => window.removeEventListener(VIEWER_SCROLL, onExtScroll)
-  }, [scrollSyncEnabled])
+  const { handleScroll } = useScrollSync(
+    scrollSyncEnabled ?? false,
+    'markdown',
+    'pdf',
+    containerRef,
+    (pct) => { savedScrollRatioRef.current = pct },
+  )
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -449,7 +413,6 @@ function MarkdownViewer({
         className="md-viewer"
         ref={containerRef}
         onScroll={handleScroll}
-        onMouseUp={handleMouseUp}
         style={{ fontSize: `${(11 * scale).toFixed(1)}pt` }}
       >
         {content ? (

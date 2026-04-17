@@ -14,12 +14,13 @@ import os
 import re
 import threading
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable
 
 import fitz  # PyMuPDF — required for rasterising pages
 import httpx
 
 from backend.registry import register_converter
+from backend.utils.retry import async_retry_with_backoff
 from .base import PDFConverter
 
 logger = logging.getLogger(__name__)
@@ -78,11 +79,14 @@ _PROMPT = """You are an expert document parser specializing in converting PDF pa
 **Output Format:**
 Return raw markdown with no wrapper, no code blocks, no explanations. Start immediately with the page content."""
 
-# DPI used when rasterising each PDF page before sending it to the VLM.
-_RENDER_DPI = 300
-_DPI_SCALE = _RENDER_DPI / 72  # fitz uses 72 DPI as its baseline
+def _get_render_dpi() -> int:
+    from backend.config import get_settings as _gs
+    return _gs().VLM_RENDER_DPI
 
-_DEFAULT_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+
+def _get_default_base_url() -> str:
+    from backend.config import get_settings as _gs
+    return os.getenv("OLLAMA_BASE_URL", _gs().VLM_DEFAULT_BASE_URL)
 
 
 @register_converter(
@@ -124,21 +128,21 @@ class VLMConverter(PDFConverter):
 
     def __init__(
         self,
-        model: str = "qwen3-vl:4b-instruct-q4_K_M",
-        base_url: str = _DEFAULT_BASE_URL,
-        api_key: str = "ollama",
-        temperature: float = 0.1,
-        user_prompt: Optional[str] = None,
-        on_progress: Optional[Callable[[int, int], None]] = None,
-        stop_event: Optional[threading.Event] = None,
+        model: str = "",
+        base_url: str = "",
+        api_key: str = "",
+        temperature: float | None = None,
+        user_prompt: str | None = None,
+        on_progress: Callable[[int, int], None] | None = None,
+        stop_event: threading.Event | None = None,
     ) -> None:
         from backend.config import get_settings as _get_settings
         _s = _get_settings()
 
-        self._model = model
-        self._base_url = base_url
-        self._api_key = api_key
-        self._temperature = temperature
+        self._model = model or _s.VLM_DEFAULT_MODEL
+        self._base_url = base_url or _get_default_base_url()
+        self._api_key = api_key or _s.VLM_DEFAULT_API_KEY
+        self._temperature = temperature if temperature is not None else _s.VLM_DEFAULT_TEMPERATURE
         self._user_prompt = user_prompt
         self._on_progress = on_progress
         self._stop_event = stop_event
@@ -148,7 +152,7 @@ class VLMConverter(PDFConverter):
         self._timeout = httpx.Timeout(
             connect=_s.HTTP_CONNECT_TIMEOUT_S,
             read=_s.VLM_READ_TIMEOUT_S,
-            write=10.0,
+            write=_s.VLM_WRITE_TIMEOUT_S,
             pool=_s.HTTP_POOL_TIMEOUT_S,
         )
 
@@ -156,7 +160,7 @@ class VLMConverter(PDFConverter):
     # PDFConverter interface
     # ------------------------------------------------------------------
 
-    def convert(self, pdf_path: Path, total_pages: Optional[int] = None) -> str:
+    def convert(self, pdf_path: Path, total_pages: int | None = None) -> str:
         """Render every page and transcribe each one via the VLM concurrently.
 
         Called from a ``ThreadPoolExecutor`` worker via ``asyncio.to_thread()``.
@@ -178,32 +182,35 @@ class VLMConverter(PDFConverter):
     # Async implementation
     # ------------------------------------------------------------------
 
-    async def _async_convert(self, pdf_path: Path, total_pages: Optional[int]) -> str:
+    async def _async_convert(self, pdf_path: Path, total_pages: int | None) -> str:
         """Async core: render pages on-demand and transcribe concurrently.
 
-        Pages are rendered one at a time inside each transcription task rather
-        than all upfront.  This keeps peak memory at
-        ``_MAX_CONCURRENT_PAGES × (one page PNG)`` instead of
-        ``total_pages × (one page PNG)``, which for a 100-page document at
-        300 DPI can be the difference between ~30 MB and ~1.5 GB.
+        Rendering and the API call share the same semaphore slot, so at most
+        ``_MAX_CONCURRENT_PAGES`` page PNGs exist in memory at any one time.
+        Peak memory is bounded to ``_MAX_CONCURRENT_PAGES × (one page PNG)``
+        instead of ``total_pages × (one page PNG)``, which for a 100-page
+        document at 300 DPI can be the difference between ~30 MB and ~1.5 GB.
         """
         loop = asyncio.get_running_loop()
 
         if self._stop_event and self._stop_event.is_set():
             raise InterruptedError("Conversion cancelled before start")
 
-        # ── Get page count (cheap single open) ───────────────────────────────
-        def _get_page_count() -> int:
-            with fitz.open(str(pdf_path)) as doc:
-                return total_pages if total_pages is not None else doc.page_count
-
-        total = await loop.run_in_executor(None, _get_page_count)
+        # ── Get page count ────────────────────────────────────────────────────
+        if total_pages is not None:
+            total = total_pages
+        else:
+            def _get_page_count() -> int:
+                with fitz.open(str(pdf_path)) as doc:
+                    return doc.page_count
+            total = await loop.run_in_executor(None, _get_page_count)
 
         # ── Transcribe pages concurrently (render + API call per task) ───────
         # Each task renders its own page inside the executor and immediately
         # feeds the base64 image to the VLM.  The rendered bytes are eligible
         # for GC as soon as the API call returns — no large list held in memory.
         sem = asyncio.Semaphore(self._max_concurrent_pages)
+        completed_pages = 0  # incremented each time any page finishes (asyncio-safe)
 
         async with httpx.AsyncClient(timeout=self._timeout) as http:
             from openai import AsyncOpenAI
@@ -214,6 +221,7 @@ class VLMConverter(PDFConverter):
             )
 
             async def _process(page_num: int) -> str:
+                nonlocal completed_pages
                 if self._stop_event and self._stop_event.is_set():
                     raise InterruptedError("Conversion cancelled before page")
 
@@ -225,15 +233,15 @@ class VLMConverter(PDFConverter):
                             raise InterruptedError("Conversion cancelled during rendering")
                         return self._render_page_as_b64(doc[page_num])
 
-                img_b64 = await loop.run_in_executor(None, _render_one)
-
                 async with sem:
+                    img_b64 = await loop.run_in_executor(None, _render_one)
                     markdown = await self._transcribe_page_with_retry_async(
                         client, img_b64, page_num=page_num
                     )
 
+                completed_pages += 1
                 if self._on_progress:
-                    self._on_progress(page_num + 1, total)
+                    self._on_progress(completed_pages, total)
                 return markdown
 
             page_tasks = [asyncio.create_task(_process(i)) for i in range(total)]
@@ -270,7 +278,10 @@ class VLMConverter(PDFConverter):
                 raise
             finally:
                 watcher.cancel()
-                await asyncio.gather(watcher, return_exceptions=True)
+                try:
+                    await asyncio.gather(watcher, return_exceptions=True)
+                except Exception as _exc:
+                    logger.warning("Error awaiting watcher cancellation: %s", _exc)
 
         parts = [f"<!-- page-marker:{i + 1} -->\n{md}" for i, md in enumerate(results)]
         return "\n\n---\n\n".join(parts)
@@ -282,7 +293,8 @@ class VLMConverter(PDFConverter):
     @staticmethod
     def _render_page_as_b64(page) -> str:
         """Rasterise a fitz page and return a base64-encoded PNG string."""
-        matrix = fitz.Matrix(_DPI_SCALE, _DPI_SCALE)
+        dpi_scale = _get_render_dpi() / 72  # fitz uses 72 DPI as its baseline
+        matrix = fitz.Matrix(dpi_scale, dpi_scale)
         pix = page.get_pixmap(matrix=matrix)
         return base64.b64encode(pix.tobytes("png")).decode("utf-8")
 
@@ -305,62 +317,39 @@ class VLMConverter(PDFConverter):
                 },
             ],
         )
+        if not response.choices:
+            raise ValueError("VLM returned an empty choices list — no content to extract")
         content = (response.choices[0].message.content or "").strip()
         content = re.sub(r"^```(?:markdown)?\n?", "", content)
         content = re.sub(r"\n?```$", "", content)
         return content.strip()
+
+    @staticmethod
+    def _is_retryable(exc: Exception) -> bool:
+        from openai import APIConnectionError, APIStatusError, APITimeoutError
+        if isinstance(exc, (APITimeoutError, APIConnectionError)):
+            return True
+        if isinstance(exc, APIStatusError):
+            return exc.status_code >= 500 or exc.status_code == 429
+        return False
 
     async def _transcribe_page_with_retry_async(
         self, client, img_b64: str, page_num: int = 0
     ) -> str:
         """Call ``_transcribe_page_async`` with exponential back-off on transient errors.
 
-        Retries on timeout, connection failure, and transient server errors
-        (5xx / 429 rate-limit).  4xx errors that indicate a bad request are
-        not retried.  Stop-event is checked before each attempt so no new API
-        call is started after cancellation has been requested.
+        Stop-event is checked before each attempt so no new API call is started
+        after cancellation has been requested.
         """
-        from openai import APIConnectionError, APIStatusError, APITimeoutError
+        if self._stop_event and self._stop_event.is_set():
+            raise InterruptedError("Conversion cancelled before retry")
 
-        last_exc: Exception | None = None
-        for attempt in range(self._max_retry_attempts):
-            if self._stop_event and self._stop_event.is_set():
-                raise InterruptedError("Conversion cancelled before retry")
-
-            try:
-                return await self._transcribe_page_async(client, img_b64)
-            except (APITimeoutError, APIConnectionError) as exc:
-                last_exc = exc
-            except APIStatusError as exc:
-                # Retry on transient server-side errors; surface client errors immediately.
-                if exc.status_code < 500 and exc.status_code != 429:
-                    raise
-                last_exc = exc
-
-            if attempt < self._max_retry_attempts - 1:
-                delay = self._retry_base_delay_s * (2 ** attempt)
-                logger.warning(
-                    "VLM page call failed (%s) (attempt %d/%d), retrying in %.0fs",
-                    type(last_exc).__name__,
-                    attempt + 1,
-                    self._max_retry_attempts,
-                    delay,
-                    extra={
-                        "model": self._model,
-                        "base_url": self._base_url,
-                        "page_num": page_num,
-                        "attempt": attempt + 1,
-                    },
-                )
-                await asyncio.sleep(delay)
-            else:
-                logger.error(
-                    "VLM page call failed after %d attempts — aborting conversion",
-                    self._max_retry_attempts,
-                    extra={
-                        "model": self._model,
-                        "base_url": self._base_url,
-                        "page_num": page_num,
-                    },
-                )
-        raise last_exc or RuntimeError("No retry attempts configured")
+        return await async_retry_with_backoff(
+            lambda: self._transcribe_page_async(client, img_b64),
+            is_retryable=self._is_retryable,
+            max_attempts=self._max_retry_attempts,
+            base_delay_s=self._retry_base_delay_s,
+            logger=logger,
+            context={"model": self._model, "base_url": self._base_url, "page_num": page_num},
+            operation="VLM page call",
+        )

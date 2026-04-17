@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import type { EnrichmentSettings, EnrichOp } from '../types'
 import { apiEnrichMarkdown } from '../services/apiService'
 import { CONNECTION_LOST_MSG } from '../utils/parseSse'
+import { missingEnrichmentModelError } from '../utils/chunkUtils'
 
 // ── Types exported for use in MarkdownViewer ─────────────────────────────────
 
@@ -190,7 +191,7 @@ export function useMarkdownEnrichment({
 
   const handleEnrichSection = () => {
     if (!sectionEnrichment?.model) {
-      setEnrichError('Configure Section Enrichment (model) in Settings → Enrichment tab.')
+      setEnrichError(missingEnrichmentModelError('Section Enrichment'))
       return
     }
     setEnrichError(null)

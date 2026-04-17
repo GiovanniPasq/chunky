@@ -19,7 +19,7 @@ Install:
 
 from __future__ import annotations
 
-from typing import Callable, Dict, List
+from typing import Callable
 
 from fastapi import HTTPException
 from langchain_text_splitters import (
@@ -69,7 +69,7 @@ class LangChainSplitter(TextSplitter):
         (activated by ``enable_markdown_sizing``).
     """
 
-    def split(self, request: ChunkRequest) -> List[ChunkItem]:
+    def split(self, request: ChunkRequest) -> list[ChunkItem]:
         handler = self._DISPATCH.get(request.splitter_type)
         if handler is None:
             raise HTTPException(
@@ -87,7 +87,7 @@ class LangChainSplitter(TextSplitter):
         strategy="token", label="Token",
         description="Splits on token boundaries via tiktoken. Ideal for LLM context-window management.",
     )
-    def _split_token(self, request: ChunkRequest) -> List[ChunkItem]:
+    def _split_token(self, request: ChunkRequest) -> list[ChunkItem]:
         splitter = TokenTextSplitter(
             chunk_size=request.chunk_size,
             chunk_overlap=request.chunk_overlap,
@@ -104,7 +104,7 @@ class LangChainSplitter(TextSplitter):
         strategy="recursive", label="Recursive",
         description="Tries paragraph → sentence → word boundaries in order.",
     )
-    def _split_recursive(self, request: ChunkRequest) -> List[ChunkItem]:
+    def _split_recursive(self, request: ChunkRequest) -> list[ChunkItem]:
         # Use markdown-aware separators: headings, fences, horizontal rules,
         # blank lines, newlines — in that priority order.  chunk_size and
         # chunk_overlap are in characters (length_function=len is the default).
@@ -124,7 +124,7 @@ class LangChainSplitter(TextSplitter):
         strategy="character", label="Character",
         description="Splits on \\n\\n paragraphs, falls back to chunk_size characters.",
     )
-    def _split_character(self, request: ChunkRequest) -> List[ChunkItem]:
+    def _split_character(self, request: ChunkRequest) -> list[ChunkItem]:
         splitter = CharacterTextSplitter(
             chunk_size=request.chunk_size,
             chunk_overlap=request.chunk_overlap,
@@ -144,7 +144,7 @@ class LangChainSplitter(TextSplitter):
             "via RecursiveCharacterTextSplitter (enable_markdown_sizing)."
         ),
     )
-    def _split_markdown(self, request: ChunkRequest) -> List[ChunkItem]:
+    def _split_markdown(self, request: ChunkRequest) -> list[ChunkItem]:
         """Two-phase Markdown splitting.
 
         Phase 1 — split on H1/H2/H3 headers via
@@ -190,7 +190,7 @@ class LangChainSplitter(TextSplitter):
     # Dispatch table
     # ------------------------------------------------------------------
 
-    _DISPATCH: Dict[SplitterType, Callable[[LangChainSplitter, ChunkRequest], List[ChunkItem]]] = {
+    _DISPATCH: dict[SplitterType, Callable[[LangChainSplitter, ChunkRequest], list[ChunkItem]]] = {
         SplitterType.token: _split_token,
         SplitterType.recursive: _split_recursive,
         SplitterType.character: _split_character,

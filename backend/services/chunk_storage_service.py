@@ -13,77 +13,36 @@ import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import HTTPException
 
 from backend.config import get_settings
 from backend.models.schemas import LoadChunksResponse, SaveChunksRequest, SaveChunksResponse
-
-def _safe_stem(filename: str) -> str:
-    """Extract and validate the filename stem, raising 400 on invalid input.
-
-    Mirrors the path-traversal guard in document_service._safe_filename but
-    returns the stem rather than the full name, since chunk directories are
-    keyed by stem (e.g. ``chunks/report/`` for ``report.pdf``).
-    """
-    try:
-        name = Path(filename).name
-    except (ValueError, TypeError):
-        raise HTTPException(status_code=400, detail=f"Invalid filename '{filename}'.")
-    if not name or name in (".", ".."):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid filename '{filename}': path traversal is not allowed.",
-        )
-    stem = Path(name).stem
-    if not stem or stem in (".", ".."):
-        raise HTTPException(status_code=400, detail=f"Invalid filename '{filename}'.")
-    return stem
+from backend.utils.path import safe_stem as _safe_stem
 
 def _sanitise(value: str) -> str:
     """Replace non-alphanumeric characters with hyphens and collapse runs."""
     return re.sub(r"-{2,}", "-", re.sub(r"[^a-zA-Z0-9]", "-", value)).strip("-")
 
 
-def _to_api_schema(raw: Dict[str, Any]) -> Dict[str, Any]:
-    """Convert a stored chunk (PascalCase keys) to the API / frontend schema (snake_case).
+def _normalise_chunk(raw: dict[str, Any]) -> dict[str, Any]:
+    """Normalise a chunk dict to snake_case, filling missing enrichment fields.
 
-    Accepts both PascalCase (stored format) and snake_case (already-normalised)
-    so the function is safe to call on any chunk dict regardless of its origin.
+    Accepts both snake_case and legacy PascalCase keys so the function is safe
+    to call on incoming request data (write path) and on stored JSON (read path).
+    This eliminates the old separate ``_to_api_schema`` / ``_normalise_chunk``
+    pair that each did one half of the same bidirectional conversion.
     """
     return {
         "index": raw.get("index", 0),
-        "content": raw.get("Chunk", raw.get("content", "")),
-        "cleaned_chunk": raw.get("CleanedChunk", raw.get("cleaned_chunk", "")),
-        "title": raw.get("Title", raw.get("title", "")),
-        "context": raw.get("Context", raw.get("context", "")),
-        "summary": raw.get("Summary", raw.get("summary", "")),
-        "keywords": raw.get("Keywords", raw.get("keywords", [])),
-        "questions": raw.get("Questions", raw.get("questions", [])),
-        "metadata": raw.get("metadata", {}),
-        "start": raw.get("start", 0),
-        "end": raw.get("end", 0),
-    }
-
-
-def _normalise_chunk(raw: Dict[str, Any]) -> Dict[str, Any]:
-    """Ensure every chunk in the payload has all enrichment fields.
-
-    Missing fields are filled with their zero-value defaults so that the
-    stored JSON always conforms to the enriched schema, regardless of whether
-    the chunk was produced before or after the enrichment pipeline runs.
-    """
-    return {
-        "index": raw.get("index", 0),
-        "Chunk": raw.get("content", raw.get("Chunk", "")),
-        "CleanedChunk": raw.get("cleaned_chunk", raw.get("CleanedChunk", "")),
-        "Title": raw.get("title", raw.get("Title", "")),
-        "Context": raw.get("context", raw.get("Context", "")),
-        "Summary": raw.get("summary", raw.get("Summary", "")),
-        "Keywords": raw.get("keywords", raw.get("Keywords", [])),
-        "Questions": raw.get("questions", raw.get("Questions", [])),
-        # Preserve any extra metadata the splitter may have attached.
+        "content": raw.get("content", raw.get("Chunk", "")),
+        "cleaned_chunk": raw.get("cleaned_chunk", raw.get("CleanedChunk", "")),
+        "title": raw.get("title", raw.get("Title", "")),
+        "context": raw.get("context", raw.get("Context", "")),
+        "summary": raw.get("summary", raw.get("Summary", "")),
+        "keywords": raw.get("keywords", raw.get("Keywords", [])),
+        "questions": raw.get("questions", raw.get("Questions", [])),
         "metadata": raw.get("metadata", {}),
         "start": raw.get("start", 0),
         "end": raw.get("end", 0),
@@ -135,7 +94,7 @@ class ChunkStorageService:
 
         normalised_chunks = [_normalise_chunk(c) for c in request.chunks]
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "filename": request.filename,
             "timestamp": datetime.now(tz=timezone.utc).isoformat(),
             "total_chunks": len(normalised_chunks),
@@ -180,7 +139,7 @@ class ChunkStorageService:
 
         try:
             payload = json.loads(json_files[-1].read_text(encoding="utf-8"))
-            normalised = [_to_api_schema(c) for c in payload["chunks"]]
+            normalised = [_normalise_chunk(c) for c in payload["chunks"]]
             return LoadChunksResponse(
                 chunks=normalised,
                 total_chunks=payload["total_chunks"],

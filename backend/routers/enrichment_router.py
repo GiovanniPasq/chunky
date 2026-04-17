@@ -42,23 +42,10 @@ from backend.models.schemas import (
     EnrichMarkdownRequest,
 )
 from backend.services.enrichment_service import EnrichmentService
-from backend.utils.sse import sse_error as _sse_error, sse_event as _sse, sse_watchdog_timeout as _watchdog_timeout
+from backend.utils.sse import sse_error as _sse_error, sse_event as _sse
 
 router = APIRouter(prefix="/api/enrich", tags=["enrichment"])
 
-_HEARTBEAT_INTERVAL_S = 30.0
-
-
-def _build_service(request_settings, http_client) -> EnrichmentService:
-    s = request_settings
-    return EnrichmentService(
-        model=s.model,
-        base_url=s.base_url,
-        api_key=s.api_key,
-        temperature=s.temperature,
-        user_prompt=s.user_prompt,
-        http_client=http_client,
-    )
 
 
 @router.post("/markdown")
@@ -84,7 +71,11 @@ async def enrich_markdown(http_request: Request, body: EnrichMarkdownRequest):
         yield _sse({"type": "start", "operation": "enrich_markdown"})
 
         http_client = http_request.app.state.http_client_async
-        svc = _build_service(body.settings, http_client)
+        s = body.settings
+        svc = EnrichmentService(
+            model=s.model, base_url=s.base_url, api_key=s.api_key,
+            temperature=s.temperature, user_prompt=s.user_prompt, http_client=http_client,
+        )
 
         watchdog_s = get_settings().SSE_WATCHDOG_TIMEOUT_S
         queue: asyncio.Queue[dict | None] = asyncio.Queue()
@@ -122,7 +113,7 @@ async def enrich_markdown(http_request: Request, body: EnrichMarkdownRequest):
                 except asyncio.TimeoutError:
                     # Emit a keepalive comment every 30 s so the frontend's
                     # connection-lost timer doesn't fire during slow LLM responses.
-                    if time.monotonic() - last_heartbeat >= _HEARTBEAT_INTERVAL_S:
+                    if time.monotonic() - last_heartbeat >= get_settings().SSE_HEARTBEAT_INTERVAL_S:
                         yield ": heartbeat\n\n"
                         last_heartbeat = time.monotonic()
                         # Do NOT reset last_event here — last_event tracks real
@@ -144,8 +135,7 @@ async def enrich_markdown(http_request: Request, body: EnrichMarkdownRequest):
                 if event is None:
                     break
 
-                last_event = time.monotonic()
-                last_heartbeat = time.monotonic()
+                last_event = last_heartbeat = time.monotonic()
 
                 if event["type"] == "done":
                     yield _sse({"type": "done", "operation": "enrich_markdown", "enriched_content": event["enriched_content"]})
@@ -159,6 +149,10 @@ async def enrich_markdown(http_request: Request, body: EnrichMarkdownRequest):
             runner.cancel()
             await asyncio.gather(runner, return_exceptions=True)
             yield _sse({"type": "cancelled"})
+        finally:
+            if not runner.done():
+                runner.cancel()
+                await asyncio.gather(runner, return_exceptions=True)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -167,7 +161,7 @@ async def enrich_markdown(http_request: Request, body: EnrichMarkdownRequest):
 async def enrich_chunks(http_request: Request, body: EnrichChunksRequest):
     """Enrich an array of chunks with LLM-generated metadata, streaming per-chunk events.
 
-    Chunks are processed concurrently (up to MAX_CONCURRENT_ENRICHMENTS in flight
+    Chunks are processed concurrently (up to ENRICHMENT_MAX_CONCURRENT_CHUNKS in flight
     at once). A ``chunk_done`` event is emitted after each chunk completes so the
     frontend can update the UI incrementally.
 
@@ -191,14 +185,23 @@ async def enrich_chunks(http_request: Request, body: EnrichChunksRequest):
             return
 
         http_client = http_request.app.state.http_client_async
-        svc = _build_service(body.settings, http_client)
+        s = body.settings
+        svc = EnrichmentService(
+            model=s.model, base_url=s.base_url, api_key=s.api_key,
+            temperature=s.temperature, user_prompt=s.user_prompt, http_client=http_client,
+        )
         chunks = [c.model_dump() for c in body.chunks]
         total = len(chunks)
+
+        if total == 0:
+            yield _sse({"type": "start", "operation": "enrich_chunks", "total": 0})
+            yield _sse({"type": "done", "operation": "enrich_chunks", "total_chunks": 0, "succeeded": 0})
+            return
 
         watchdog_s = get_settings().SSE_WATCHDOG_TIMEOUT_S
         # Use the global semaphore from app.state so the cap is enforced across
         # ALL concurrent /enrich/chunks requests, not just within this one call.
-        semaphore = http_request.app.state.enrichment_semaphore
+        semaphore = http_request.app.state.enrichment_chunks_semaphore
 
         yield _sse({"type": "start", "operation": "enrich_chunks", "total": total})
 
@@ -210,6 +213,8 @@ async def enrich_chunks(http_request: Request, body: EnrichChunksRequest):
             async with semaphore:
                 try:
                     enriched = await svc.enrich_chunk(content)
+                    _kw = enriched.get("keywords", [])
+                    _qs = enriched.get("questions", [])
                     result = {
                         "index": chunk_index,
                         "content": content,
@@ -217,10 +222,8 @@ async def enrich_chunks(http_request: Request, body: EnrichChunksRequest):
                         "title": enriched.get("title", ""),
                         "context": enriched.get("context", ""),
                         "summary": enriched.get("summary", ""),
-                        "keywords": enriched.get("keywords", [])
-                            if isinstance(enriched.get("keywords"), list) else [],
-                        "questions": enriched.get("questions", [])
-                            if isinstance(enriched.get("questions"), list) else [],
+                        "keywords": _kw if isinstance(_kw, list) else [],
+                        "questions": _qs if isinstance(_qs, list) else [],
                         "metadata": chunk.get("metadata", {}),
                         "start": chunk.get("start", 0),
                         "end": chunk.get("end", 0),
@@ -262,7 +265,7 @@ async def enrich_chunks(http_request: Request, body: EnrichChunksRequest):
                 except asyncio.TimeoutError:
                     # Emit a keepalive comment every 30 s so the frontend's
                     # connection-lost timer doesn't fire between slow chunks.
-                    if time.monotonic() - last_heartbeat >= _HEARTBEAT_INTERVAL_S:
+                    if time.monotonic() - last_heartbeat >= get_settings().SSE_HEARTBEAT_INTERVAL_S:
                         yield ": heartbeat\n\n"
                         last_heartbeat = time.monotonic()
                         # Do NOT reset last_event here — last_event tracks real
@@ -285,8 +288,7 @@ async def enrich_chunks(http_request: Request, body: EnrichChunksRequest):
                     break
 
                 completed += 1
-                last_event = time.monotonic()
-                last_heartbeat = time.monotonic()
+                last_event = last_heartbeat = time.monotonic()
 
                 if event["type"] == "chunk_done":
                     succeeded += 1
@@ -313,6 +315,10 @@ async def enrich_chunks(http_request: Request, body: EnrichChunksRequest):
             await asyncio.gather(runner, return_exceptions=True)
             yield _sse({"type": "cancelled"})
             return
+        finally:
+            if not runner.done():
+                runner.cancel()
+                await asyncio.gather(runner, return_exceptions=True)
 
         yield _sse({
             "type": "done",

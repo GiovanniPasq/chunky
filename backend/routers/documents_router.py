@@ -42,7 +42,7 @@ import logging
 import threading
 import time
 from concurrent.futures import ProcessPoolExecutor
-from typing import AsyncGenerator, List
+from typing import AsyncGenerator
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
@@ -69,6 +69,18 @@ router = APIRouter(prefix="/api", tags=["documents"])
 _svc = DocumentService()
 logger = logging.getLogger(__name__)
 
+
+async def _escalate_kill(procs: list) -> None:
+    """Send SIGKILL to any worker that is still alive 3 s after SIGTERM."""
+    await asyncio.sleep(3.0)
+    for p in procs:
+        if p.is_alive():
+            try:
+                p.kill()
+                logger.warning("Worker process %d ignored SIGTERM — sent SIGKILL", p.pid)
+            except Exception as exc:
+                logger.debug("Failed to SIGKILL worker %d: %s", p.pid, exc)
+
 # Converters that run in a per-batch ProcessPoolExecutor (CPU-bound).
 # VLM and Cloud are excluded — they are I/O-bound (HTTP calls) and run in threads.
 _CPU_BOUND_CONVERTERS = frozenset({
@@ -80,7 +92,7 @@ _CPU_BOUND_CONVERTERS = frozenset({
 
 # ── Read endpoints ────────────────────────────────────────────────────────────
 
-@router.get("/documents", response_model=List[str])
+@router.get("/documents", response_model=list[str])
 async def list_documents():
     """Return a sorted list of all available document filenames."""
     return await asyncio.to_thread(_svc.list_documents)
@@ -108,7 +120,7 @@ async def serve_pdf(filename: str):
 # ── Upload ────────────────────────────────────────────────────────────────────
 
 @router.post("/upload", response_model=MultiUploadResponse)
-async def upload_files(files: List[UploadFile] = File(...)):
+async def upload_files(files: list[UploadFile] = File(...)):
     """Upload one or more PDF / Markdown files."""
     return await asyncio.to_thread(_svc.upload_files, files)
 
@@ -212,7 +224,10 @@ async def convert_pdfs(
                     async with _lock:
                         succeeded += 1
                         _done = succeeded + failed
-                    await queue.put({
+                    # Use put_nowait (no await) for both events so no other
+                    # coroutine can interleave between them and produce
+                    # out-of-order file_progress percentages on the client.
+                    queue.put_nowait({
                         "type": "file_done",
                         "filename": fn,
                         "success": True,
@@ -225,7 +240,7 @@ async def convert_pdfs(
                         failed += 1
                         _done = succeeded + failed
                     error_summary = f"{type(exc).__name__}: {str(exc)[:120]}"
-                    await queue.put({"type": "file_done", "filename": fn, "success": False, "error": error_summary})
+                    queue.put_nowait({"type": "file_done", "filename": fn, "success": False, "error": error_summary})
                     logger.warning(
                         "Convert failed for '%s': %s",
                         fn,
@@ -234,7 +249,7 @@ async def convert_pdfs(
                         extra={"operation": "convert", "file_name": fn},
                     )
 
-                await queue.put({
+                queue.put_nowait({
                     "type": "file_progress",
                     "filename": fn,
                     "current": _done,
@@ -244,7 +259,15 @@ async def convert_pdfs(
 
         async def run_all() -> None:
             tasks = [asyncio.create_task(convert_one(i, fn)) for i, fn in enumerate(filenames)]
-            await asyncio.gather(*tasks, return_exceptions=True)
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for res in results:
+                if isinstance(res, Exception) and not isinstance(res, asyncio.CancelledError):
+                    logger.error(
+                        "Unexpected exception from conversion task: %s",
+                        res,
+                        exc_info=res,
+                        extra={"operation": "convert"},
+                    )
             await queue.put(None)  # sentinel
 
         runner = asyncio.create_task(run_all())
@@ -292,24 +315,12 @@ async def convert_pdfs(
                     try:
                         http_request.app.state.retired_executors.append(old_executor)
                         old_executor.shutdown(wait=False, cancel_futures=True)
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.warning("Failed to retire old CPU executor: %s", _exc)
 
                 # Escalate to SIGKILL in background for any worker that ignores SIGTERM
                 # (e.g. stuck inside a C extension).  Runs asynchronously so cancellation
                 # returns to the user immediately without waiting.
-                async def _escalate_kill(procs: list) -> None:
-                    await asyncio.sleep(3.0)
-                    for p in procs:
-                        if p.is_alive():
-                            try:
-                                p.kill()
-                                logger.warning(
-                                    "Worker process %d ignored SIGTERM — sent SIGKILL", p.pid
-                                )
-                            except Exception as exc:
-                                logger.debug("Failed to SIGKILL worker %d: %s", p.pid, exc)
-
                 asyncio.create_task(_escalate_kill(worker_procs))
 
             # 4. Cancel the asyncio runner task.
@@ -337,7 +348,7 @@ async def convert_pdfs(
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=0.5)
                 except asyncio.TimeoutError:
-                    if time.monotonic() - last_heartbeat >= 30.0:
+                    if time.monotonic() - last_heartbeat >= get_settings().SSE_HEARTBEAT_INTERVAL_S:
                         yield ": heartbeat\n\n"
                         last_heartbeat = time.monotonic()
                         # Do NOT reset last_event here — last_event tracks real
@@ -358,13 +369,20 @@ async def convert_pdfs(
                     break
 
                 yield _sse(event)
-                last_event = time.monotonic()
-                last_heartbeat = time.monotonic()
+                last_event = last_heartbeat = time.monotonic()
 
             yield _sse({"type": "batch_done", "succeeded": succeeded, "failed": failed})
         except asyncio.CancelledError:
             await _cancel_all()
             yield _sse({"type": "cancelled"})
+        finally:
+            # Guarantee runner cleanup on any exit path (unexpected exceptions,
+            # return statements, CancelledError).  The explicit paths above
+            # already call _cancel_all(); here we just ensure the asyncio task
+            # itself is not leaked if an unhandled exception propagates.
+            if not runner.done():
+                runner.cancel()
+                await asyncio.gather(runner, return_exceptions=True)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -391,6 +409,6 @@ async def convert_md_to_pdf(filename: str, http_request: Request):
 # ── Delete ────────────────────────────────────────────────────────────────────
 
 @router.delete("/documents", response_model=DeleteResponse)
-async def delete_documents(filenames: List[str]):
+async def delete_documents(filenames: list[str]):
     """Delete one or more documents and all their derived files."""
     return await asyncio.to_thread(_svc.delete_documents, filenames)

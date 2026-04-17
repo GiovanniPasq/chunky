@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import type { Chunk } from '../../types'
+import { isChunkEnriched } from '../../utils/chunkUtils'
 import './ChunkEditModal.css'
 
 type TabId = 'content' | 'enrichment'
@@ -11,17 +12,6 @@ interface Props {
   chunk: Chunk
   onSave: (index: number, content: string, metadataUpdates?: Partial<Chunk>) => void
   totalChunks: number
-}
-
-function hasEnrichment(chunk: Chunk): boolean {
-  return !!(
-    chunk.title ||
-    chunk.summary ||
-    chunk.context ||
-    chunk.cleaned_chunk ||
-    chunk.keywords?.length ||
-    chunk.questions?.length
-  )
 }
 
 export default function ChunkEditModal({ isOpen, onClose, chunkIndex, chunk, onSave, totalChunks }: Props) {
@@ -47,7 +37,7 @@ export default function ChunkEditModal({ isOpen, onClose, chunkIndex, chunk, onS
 
   if (!isOpen) return null
 
-  const enriched = hasEnrichment(chunk)
+  const enriched = isChunkEnriched(chunk)
 
   const handleSave = () => {
     const metadataUpdates: Partial<Chunk> = {

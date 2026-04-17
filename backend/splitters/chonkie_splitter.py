@@ -42,7 +42,7 @@ Notes
 
 from __future__ import annotations
 
-from typing import Callable, Dict, List
+from typing import Callable
 
 from fastapi import HTTPException
 
@@ -61,7 +61,7 @@ class ChonkieSplitter(TextSplitter):
     chunk_overlap are always respected without stale state.
     """
 
-    def split(self, request: ChunkRequest) -> List[ChunkItem]:
+    def split(self, request: ChunkRequest) -> list[ChunkItem]:
         handler = self._DISPATCH.get(request.splitter_type)
         if handler is None:
             raise HTTPException(
@@ -82,7 +82,7 @@ class ChonkieSplitter(TextSplitter):
         strategy="token", label="Token",
         description="Splits on token boundaries. Fast, no external tokeniser needed.",
     )
-    def _split_token(self, request: ChunkRequest) -> List[ChunkItem]:
+    def _split_token(self, request: ChunkRequest) -> list[ChunkItem]:
         from chonkie import TokenChunker
 
         # tokenizer='gpt2' uses tiktoken's GPT-2 BPE encoding, making
@@ -105,7 +105,7 @@ class ChonkieSplitter(TextSplitter):
             "Best for high-throughput pipelines where byte-size limits are acceptable."
         ),
     )
-    def _split_fast(self, request: ChunkRequest) -> List[ChunkItem]:
+    def _split_fast(self, request: ChunkRequest) -> list[ChunkItem]:
         from chonkie import FastChunker
 
         # FastChunker does not support chunk_overlap.
@@ -119,7 +119,7 @@ class ChonkieSplitter(TextSplitter):
         strategy="sentence", label="Sentence",
         description="Splits at sentence boundaries. Preserves semantic completeness.",
     )
-    def _split_sentence(self, request: ChunkRequest) -> List[ChunkItem]:
+    def _split_sentence(self, request: ChunkRequest) -> list[ChunkItem]:
         from chonkie import SentenceChunker
 
         chunker = SentenceChunker(
@@ -137,7 +137,7 @@ class ChonkieSplitter(TextSplitter):
             "Note: chunk_overlap is not supported by Chonkie's RecursiveChunker."
         ),
     )
-    def _split_recursive(self, request: ChunkRequest) -> List[ChunkItem]:
+    def _split_recursive(self, request: ChunkRequest) -> list[ChunkItem]:
         from chonkie import RecursiveChunker
 
         # chunk_overlap intentionally omitted — not a supported parameter.
@@ -155,7 +155,7 @@ class ChonkieSplitter(TextSplitter):
             "Ideal for tabular data in RAG pipelines."
         ),
     )
-    def _split_table(self, request: ChunkRequest) -> List[ChunkItem]:
+    def _split_table(self, request: ChunkRequest) -> list[ChunkItem]:
         from chonkie import TableChunker
 
         # TableChunker.chunk_size is in *rows* (default=3), not characters or
@@ -173,7 +173,7 @@ class ChonkieSplitter(TextSplitter):
             "Ideal for chunking code files across multiple languages."
         ),
     )
-    def _split_code(self, request: ChunkRequest) -> List[ChunkItem]:
+    def _split_code(self, request: ChunkRequest) -> list[ChunkItem]:
         from chonkie import CodeChunker
 
         # CodeChunker splits on AST node boundaries; chunk_overlap is not
@@ -191,7 +191,7 @@ class ChonkieSplitter(TextSplitter):
             "Best for preserving topical coherence. "
         ),
     )
-    def _split_semantic(self, request: ChunkRequest) -> List[ChunkItem]:
+    def _split_semantic(self, request: ChunkRequest) -> list[ChunkItem]:
         from chonkie import SemanticChunker
 
         # Uses a lightweight default model. Can be overridden by subclassing
@@ -211,7 +211,7 @@ class ChonkieSplitter(TextSplitter):
             "Great for topic-coherent chunks. "
         ),
     )
-    def _split_neural(self, request: ChunkRequest) -> List[ChunkItem]:
+    def _split_neural(self, request: ChunkRequest) -> list[ChunkItem]:
         from chonkie import NeuralChunker
 
         # NeuralChunker uses a fine-tuned BERT model to detect semantic shift
@@ -228,10 +228,10 @@ class ChonkieSplitter(TextSplitter):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _chunks_from_chonkie(chunker, content: str) -> List[ChunkItem]:
+    def _chunks_from_chonkie(chunker, content: str) -> list[ChunkItem]:
         """Convert Chonkie Chunk objects to ChunkItem."""
         raw_chunks = chunker.chunk(content)
-        items: List[ChunkItem] = []
+        items: list[ChunkItem] = []
         for i, chunk in enumerate(raw_chunks):
             start = getattr(chunk, "start_index", 0)
             end = getattr(chunk, "end_index", start + len(chunk.text))
@@ -250,7 +250,7 @@ class ChonkieSplitter(TextSplitter):
     # Dispatch table
     # ------------------------------------------------------------------
 
-    _DISPATCH: Dict[SplitterType, Callable[[ChonkieSplitter, ChunkRequest], List[ChunkItem]]] = {
+    _DISPATCH: dict[SplitterType, Callable[[ChonkieSplitter, ChunkRequest], list[ChunkItem]]] = {
         SplitterType.token: _split_token,
         SplitterType.fast: _split_fast,
         SplitterType.sentence: _split_sentence,

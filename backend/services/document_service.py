@@ -18,7 +18,7 @@ import shutil
 import threading
 import time
 from pathlib import Path
-from typing import Callable, List, Optional, Type
+from typing import Callable, Type
 
 from backend.config import get_settings
 
@@ -44,6 +44,7 @@ from backend.models.schemas import (
     UploadFileResult,
     VLMSettings,
 )
+from backend.utils.path import safe_filename
 
 _ALLOWED_EXTENSIONS = {".pdf", ".md"}
 
@@ -70,8 +71,7 @@ def _init_cpu_worker() -> None:
         from docling.document_converter import DocumentConverter
         DocumentConverter()
     except Exception as exc:
-        import logging as _log
-        _log.getLogger(__name__).warning("Docling pre-load failed in worker: %s", exc)
+        _logging.getLogger(__name__).warning("Docling pre-load failed in worker: %s", exc)
 
 
 def convert_in_process(filename: str, converter_type: ConverterType) -> ConvertResponse:
@@ -93,22 +93,6 @@ def convert_md_to_pdf_in_process(md_filename: str) -> MdToPdfResponse:
 # ---------------------------------------------------------------------------
 
 
-def _safe_filename(filename: str, description: str = "filename") -> str:
-    try:
-        name = Path(filename).name
-    except (ValueError, TypeError):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid {description} '{filename}'.",
-        )
-    if not name or name != filename or name in (".", ".."):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid {description} '{filename}': path traversal is not allowed.",
-        )
-    return name
-
-
 def _stem(filename: str) -> str:
     return Path(filename).stem
 
@@ -127,10 +111,10 @@ def _dest_dir(filename: str, pdfs_dir: Path, mds_dir: Path) -> Path:
 
 def _build_converter(
     converter_type: ConverterType,
-    vlm_settings: Optional[VLMSettings],
-    cloud_settings: Optional[CloudSettings],
-    on_progress: Optional[Callable[[int, int], None]] = None,
-    stop_event: Optional[threading.Event] = None,
+    vlm_settings: VLMSettings | None,
+    cloud_settings: CloudSettings | None,
+    on_progress: Callable[[int, int], None] | None = None,
+    stop_event: threading.Event | None = None,
 ) -> PDFConverter:
     """Instantiate the requested converter, forwarding runtime settings when relevant."""
     if converter_type == ConverterType.vlm:
@@ -179,8 +163,8 @@ class DocumentService:
     # Read
     # ------------------------------------------------------------------
 
-    def list_documents(self) -> List[str]:
-        results: List[str] = []
+    def list_documents(self) -> list[str]:
+        results: list[str] = []
         pdf_stems: set = set()
 
         if self._pdfs_dir.exists():
@@ -213,7 +197,7 @@ class DocumentService:
         return results
 
     def get_document(self, filename: str) -> DocumentInfo:
-        filename = _safe_filename(filename, "document name")
+        filename = safe_filename(filename, "document name")
         ext = Path(filename).suffix.lower()
 
         if ext == ".md":
@@ -247,7 +231,7 @@ class DocumentService:
         )
 
     def get_pdf_path(self, filename: str) -> Path:
-        filename = _safe_filename(filename, "PDF filename")
+        filename = safe_filename(filename, "PDF filename")
         pdf_path = self._pdfs_dir / filename
         if not pdf_path.exists():
             raise HTTPException(status_code=404, detail=f"PDF '{filename}' not found")
@@ -260,7 +244,7 @@ class DocumentService:
     def upload_file(self, file: UploadFile) -> None:
         import filetype
 
-        name = _safe_filename(file.filename or "", "upload filename")
+        name = safe_filename(file.filename or "", "upload filename")
         dest_dir = _dest_dir(name, self._pdfs_dir, self._mds_dir)
         dest_dir.mkdir(parents=True, exist_ok=True)
 
@@ -313,8 +297,8 @@ class DocumentService:
             extra={"operation": "upload", "file_name": name},
         )
 
-    def upload_files(self, files: List[UploadFile]) -> MultiUploadResponse:
-        results: List[UploadFileResult] = []
+    def upload_files(self, files: list[UploadFile]) -> MultiUploadResponse:
+        results: list[UploadFileResult] = []
 
         for file in files:
             name = file.filename or ""
@@ -341,20 +325,20 @@ class DocumentService:
         self,
         filename: str,
         converter_type: ConverterType = ConverterType.pymupdf,
-        vlm_settings: Optional[VLMSettings] = None,
-        cloud_settings: Optional[CloudSettings] = None,
-        stop_event: Optional[threading.Event] = None,
-        on_progress: Optional[Callable[[int, int], None]] = None,
+        vlm_settings: VLMSettings | None = None,
+        cloud_settings: CloudSettings | None = None,
+        stop_event: threading.Event | None = None,
+        on_progress: Callable[[int, int], None] | None = None,
     ) -> ConvertResponse:
         """Convert a stored PDF to Markdown and persist the result."""
-        filename = _safe_filename(filename, "PDF filename")
+        filename = safe_filename(filename, "PDF filename")
         pdf_path = self._pdfs_dir / filename
         if not pdf_path.exists():
             raise HTTPException(status_code=404, detail=f"PDF '{filename}' not found")
 
         settings = get_settings()
 
-        page_count: Optional[int] = None
+        page_count: int | None = None
         try:
             import fitz
             with fitz.open(str(pdf_path)) as doc:
@@ -436,7 +420,7 @@ class DocumentService:
     def convert_md_to_pdf(self, md_filename: str) -> MdToPdfResponse:
         from backend.utils.md_to_pdf import _convert_file
 
-        md_filename = _safe_filename(md_filename, "Markdown filename")
+        md_filename = safe_filename(md_filename, "Markdown filename")
         md_path = self._mds_dir / md_filename
         if not md_path.exists():
             raise HTTPException(status_code=404, detail=f"MD '{md_filename}' not found")
@@ -456,9 +440,9 @@ class DocumentService:
         )
 
     def delete_document(self, filename: str) -> DeleteResponse:
-        filename = _safe_filename(filename, "document name")
+        filename = safe_filename(filename, "document name")
         ext = Path(filename).suffix.lower()
-        deleted: List[str] = []
+        deleted: list[str] = []
         stem = _stem(filename)
 
         if ext == ".md":
@@ -504,9 +488,9 @@ class DocumentService:
             message=f"Deleted '{filename}' and {associated} associated file(s)",
         )
 
-    def delete_documents(self, filenames: List[str]) -> DeleteResponse:
-        all_deleted: List[str] = []
-        errors: List[str] = []
+    def delete_documents(self, filenames: list[str]) -> DeleteResponse:
+        all_deleted: list[str] = []
+        errors: list[str] = []
 
         for filename in filenames:
             try:

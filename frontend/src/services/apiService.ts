@@ -1,5 +1,6 @@
 import type { Capabilities, EnrichmentSettings } from '../types'
 import { parseSse } from '../utils/parseSse'
+import { DEFAULT_ENRICHMENT_BASE_URL, DEFAULT_ENRICHMENT_TEMPERATURE } from '../hooks/useSettings'
 
 export const API_BASE = '/api'
 
@@ -15,9 +16,9 @@ export function buildEnrichmentBody(
     ...extra,
     settings: {
       model: settings.model,
-      base_url: settings.base_url ?? 'http://localhost:11434/v1',
+      base_url: settings.base_url ?? DEFAULT_ENRICHMENT_BASE_URL,
       api_key: settings.api_key ?? 'ollama',
-      temperature: settings.temperature ?? 0.3,
+      temperature: settings.temperature ?? DEFAULT_ENRICHMENT_TEMPERATURE,
       user_prompt: settings.user_prompt,
     },
   }

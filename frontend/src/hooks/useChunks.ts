@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { ChunkSettings, Chunk, DocumentData } from '../types'
-import { DEFAULT_SETTINGS, loadSettings, saveSettings } from './useSettings'
+import { loadSettings, saveSettings } from './useSettings'
 import { consumeChunkSse } from '../utils/consumeChunkSse'
 import { CONNECTION_LOST_MSG } from '../utils/parseSse'
 import { API_BASE } from '../services/apiService'
@@ -53,17 +53,20 @@ export function useChunks(
   }, [])
 
   const { splitterType, splitterLibrary, chunkSize, chunkOverlap, enableMarkdownSizing } = settings
+  // Use the md_content string (primitive) instead of the documentData object so that
+  // spread-updates to other fields (has_pdf, has_markdown, …) don't re-trigger chunking.
+  const mdContent = documentData?.md_content ?? null
 
   useEffect(() => {
-    if (!chunkingEnabled || !documentData?.md_content) {
+    if (!chunkingEnabled || !mdContent) {
       chunkAbortRef.current?.abort()
       setChunks(null)
       setChunking(false)
       return
     }
-    chunkContent(documentData.md_content, settings)
+    chunkContent(mdContent, settings)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [documentData, splitterType, splitterLibrary, chunkSize, chunkOverlap, enableMarkdownSizing, chunkingEnabled, chunkContent])
+  }, [mdContent, splitterType, splitterLibrary, chunkSize, chunkOverlap, enableMarkdownSizing, chunkingEnabled, chunkContent])
 
   const cancelChunking = useCallback(() => {
     chunkAbortRef.current?.abort()
@@ -84,10 +87,6 @@ export function useChunks(
         ? prev.chunkEnrichment
         : newSettings.chunkEnrichment,
     }))
-  }, [])
-
-  const resetSettings = useCallback(() => {
-    setSettings(DEFAULT_SETTINGS)
   }, [])
 
   const editChunk = useCallback((index: number, content: string) => {
@@ -125,19 +124,25 @@ export function useChunks(
       const toMerge = sorted.map(i => prev[i]).filter(Boolean)
       if (toMerge.length < 2) return prev
 
-      let merged = toMerge[0].content
+      const parts: string[] = [toMerge[0].content]
+      // tail: last 300 chars of accumulated text — enough for overlap detection,
+      // avoids joining the full parts array on every iteration (O(N²) → O(N)).
+      let tail = toMerge[0].content.slice(-300)
       for (let i = 1; i < toMerge.length; i++) {
         const b = toMerge[i].content
-        const maxLen = Math.min(merged.length, b.length, 300)
+        const maxLen = Math.min(tail.length, b.length, 300)
         let overlapLen = 0
         for (let len = maxLen; len > 0; len--) {
-          if (merged.slice(-len) === b.slice(0, len)) {
+          if (tail.slice(-len) === b.slice(0, len)) {
             overlapLen = len
             break
           }
         }
-        merged = overlapLen > 0 ? merged + b.slice(overlapLen) : merged + '\n\n' + b
+        const addition = overlapLen > 0 ? b.slice(overlapLen) : '\n\n' + b
+        parts.push(addition)
+        tail = (tail + addition).slice(-300)
       }
+      const merged = parts.join('')
 
       const sortedSet = new Set(sorted)
       const newChunks: Chunk[] = []
@@ -211,7 +216,7 @@ export function useChunks(
 
   return {
     chunks, settings, saving, chunking,
-    cancelChunking, applySettings, resetSettings,
+    cancelChunking, applySettings,
     editChunk, deleteChunk, deleteChunks, mergeChunks, saveChunks, enrichChunk,
   }
 }

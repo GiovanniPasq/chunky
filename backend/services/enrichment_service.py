@@ -12,9 +12,11 @@ import asyncio
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable
 
 import httpx
+
+from backend.utils.retry import async_retry_with_backoff
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +24,7 @@ logger = logging.getLogger(__name__)
 # JSON repair helpers
 # ---------------------------------------------------------------------------
 
-def _repair_truncated_json(raw: str) -> "dict | None":
+def _repair_truncated_json(raw: str) -> dict | None:
     """Return the last complete JSON object found in *raw*, or None.
 
     Walks the string once tracking string/escape/brace state to find the
@@ -64,7 +66,7 @@ def _repair_truncated_json(raw: str) -> "dict | None":
         return None
 
 
-def _extract_fields_regex(raw: str, original_content: str) -> "dict | None":
+def _extract_fields_regex(raw: str, original_content: str) -> dict | None:
     """Extract individual fields from a truncated JSON string via regex.
 
     Only fields whose value is fully present in *raw* are extracted; the
@@ -158,35 +160,34 @@ class EnrichmentService:
 
     def __init__(
         self,
-        model: str = "qwen3-vl:4b-instruct-q4_K_M",
-        base_url: str = "http://localhost:11434/v1",
-        api_key: str = "ollama",
-        temperature: float = 0.3,
-        user_prompt: Optional[str] = None,
-        http_client: Optional[httpx.AsyncClient] = None,
+        model: str = "",
+        base_url: str = "",
+        api_key: str = "",
+        temperature: float | None = None,
+        user_prompt: str | None = None,
+        http_client: httpx.AsyncClient | None = None,
     ) -> None:
         from openai import AsyncOpenAI
-
-        self._model = model
-        self._temperature = temperature
-        self._user_prompt = user_prompt
-
-        # If a shared client is provided its timeout settings apply.
-        # Otherwise fall back to a per-request timeout sourced from settings.
         from backend.config import get_settings as _get_settings
         _s = _get_settings()
 
+        self._model = model or _s.ENRICHMENT_DEFAULT_MODEL
+        self._temperature = temperature if temperature is not None else _s.ENRICHMENT_DEFAULT_TEMPERATURE
+        self._user_prompt = user_prompt
         self._max_retry_attempts = _s.HTTP_MAX_RETRY_ATTEMPTS
         self._retry_base_delay_s = _s.HTTP_RETRY_BASE_DELAY_S
 
-        client_kwargs: Dict[str, Any] = dict(base_url=base_url, api_key=api_key)
+        client_kwargs: dict[str, Any] = dict(
+            base_url=base_url or _s.ENRICHMENT_DEFAULT_BASE_URL,
+            api_key=api_key or _s.ENRICHMENT_DEFAULT_API_KEY,
+        )
         if http_client is not None:
             client_kwargs["http_client"] = http_client
         else:
             client_kwargs["timeout"] = httpx.Timeout(
                 connect=_s.HTTP_CONNECT_TIMEOUT_S,
                 read=_s.ENRICH_READ_TIMEOUT_S,
-                write=10.0,
+                write=_s.ENRICH_WRITE_TIMEOUT_S,
                 pool=_s.HTTP_POOL_TIMEOUT_S,
             )
 
@@ -196,54 +197,25 @@ class EnrichmentService:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    async def _call_with_retry(self, coro_factory) -> Any:
-        """Call ``coro_factory()`` up to HTTP_MAX_RETRY_ATTEMPTS times.
-
-        Retries on transient errors:
-        - ``APITimeoutError`` / ``APIConnectionError`` — network-level failures
-        - ``APIStatusError`` with status 429 or >= 500 — rate-limit / server error
-
-        4xx errors other than 429 (bad request, invalid auth) are not retried.
-        """
+    def _is_retryable(self, exc: Exception) -> bool:
         from openai import APIConnectionError, APIStatusError, APITimeoutError
+        if isinstance(exc, (APITimeoutError, APIConnectionError)):
+            return True
+        if isinstance(exc, APIStatusError):
+            return exc.status_code >= 500 or exc.status_code == 429
+        return False
 
-        last_exc: Exception | None = None
-        for attempt in range(self._max_retry_attempts):
-            try:
-                return await coro_factory()
-            except (APITimeoutError, APIConnectionError) as exc:
-                last_exc = exc
-            except APIStatusError as exc:
-                # Surface definitive client errors immediately; retry server errors.
-                if exc.status_code < 500 and exc.status_code != 429:
-                    raise
-                last_exc = exc
-
-            if attempt < self._max_retry_attempts - 1:
-                delay = self._retry_base_delay_s * (2 ** attempt)
-                logger.warning(
-                    "LLM call failed (%s) (attempt %d/%d), retrying in %.0fs",
-                    type(last_exc).__name__,
-                    attempt + 1,
-                    self._max_retry_attempts,
-                    delay,
-                    extra={
-                        "model": self._model,
-                        "base_url": self._client.base_url,
-                        "attempt": attempt + 1,
-                    },
-                )
-                await asyncio.sleep(delay)
-            else:
-                logger.error(
-                    "LLM call failed after %d attempts — marking as failed",
-                    self._max_retry_attempts,
-                    extra={
-                        "model": self._model,
-                        "base_url": self._client.base_url,
-                    },
-                )
-        raise last_exc or RuntimeError("All LLM retry attempts exhausted")
+    async def _call_with_retry(self, coro_factory: Callable[[], Any]) -> Any:
+        """Call ``coro_factory()`` up to HTTP_MAX_RETRY_ATTEMPTS times with exponential back-off."""
+        return await async_retry_with_backoff(
+            coro_factory,
+            is_retryable=self._is_retryable,
+            max_attempts=self._max_retry_attempts,
+            base_delay_s=self._retry_base_delay_s,
+            logger=logger,
+            context={"model": self._model, "base_url": str(self._client.base_url)},
+            operation="LLM call",
+        )
 
     async def _complete(self, messages: list) -> Any:
         """Call chat.completions.create with retry, returning the raw response."""
@@ -273,12 +245,14 @@ class EnrichmentService:
             {"role": "system", "content": system_content},
             {"role": "user", "content": content},
         ])
+        if not response.choices:
+            raise ValueError("LLM returned an empty choices list — no content to extract")
         result = (response.choices[0].message.content or "").strip()
         result = re.sub(r"^```(?:markdown)?\n?", "", result)
         result = re.sub(r"\n?```$", "", result)
         return result.strip()
 
-    async def enrich_chunk(self, content: str) -> Dict[str, Any]:
+    async def enrich_chunk(self, content: str) -> dict[str, Any]:
         """Enrich a single chunk and return a dict of enriched fields.
 
         Args:
@@ -298,6 +272,8 @@ class EnrichmentService:
             {"role": "system", "content": system_content},
             {"role": "user", "content": content},
         ])
+        if not response.choices:
+            raise ValueError("LLM returned an empty choices list — no content to extract")
         raw = (response.choices[0].message.content or "").strip()
         raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
         raw = re.sub(r"\s*```$", "", raw).strip()

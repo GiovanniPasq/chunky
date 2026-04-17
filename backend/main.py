@@ -48,11 +48,11 @@ async def lifespan(app: FastAPI):
     # requests both see _semaphore is None and create separate semaphores.
     app.state.conversion_semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_CONVERSIONS)
 
-    # Global semaphore for LLM enrichment calls across ALL concurrent requests.
+    # Global semaphore for chunk enrichment LLM calls across ALL concurrent requests.
     # Without this, each /enrich/chunks request creates its own semaphore, so
-    # N simultaneous requests each get MAX_CONCURRENT_ENRICHMENTS slots —
-    # the real concurrency would be N × MAX_CONCURRENT_ENRICHMENTS.
-    app.state.enrichment_semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_ENRICHMENTS)
+    # N simultaneous requests each get ENRICHMENT_MAX_CONCURRENT_CHUNKS slots —
+    # the real concurrency would be N × ENRICHMENT_MAX_CONCURRENT_CHUNKS.
+    app.state.enrichment_chunks_semaphore = asyncio.Semaphore(settings.ENRICHMENT_MAX_CONCURRENT_CHUNKS)
 
     # Dedicated process pool for all CPU-bound converters (PyMuPDF, Docling,
     # MarkItDown). Each job runs in an isolated process — no shared GIL, no
@@ -77,22 +77,23 @@ async def lifespan(app: FastAPI):
     # Shut down the process pool in a thread so the event loop stays responsive.
     # A 30 s timeout ensures the server can always exit even if a worker is stuck
     # (e.g. inside a C extension ignoring SIGTERM).
+    import logging as _log
     try:
         await asyncio.wait_for(
             asyncio.to_thread(app.state.cpu_converter_executor.shutdown, wait=True),
             timeout=30.0,
         )
     except asyncio.TimeoutError:
-        import logging as _log
         _log.getLogger(__name__).warning(
             "CPU executor did not shut down within 30 s — forcing cancel"
         )
         app.state.cpu_converter_executor.shutdown(wait=False, cancel_futures=True)
+    _retired_log = _log.getLogger(__name__)
     for _ex in app.state.retired_executors:
         try:
             _ex.shutdown(wait=False, cancel_futures=True)
-        except Exception:
-            pass
+        except Exception as _exc:
+            _retired_log.warning("Failed to shut down retired executor: %s", _exc)
     app.state.retired_executors.clear()
 
 

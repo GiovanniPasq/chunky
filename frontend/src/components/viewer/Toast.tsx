@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import './Toast.css'
 
 interface Props {
@@ -9,10 +9,13 @@ interface Props {
 }
 
 export default function Toast({ message, type = 'success', duration = 3000, onClose }: Props) {
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
   useEffect(() => {
-    const timer = setTimeout(onClose, duration)
+    const timer = setTimeout(() => onCloseRef.current(), duration)
     return () => clearTimeout(timer)
-  }, [duration, onClose])
+  }, [duration])
 
   return (
     <div className={`toast toast--${type}`}>

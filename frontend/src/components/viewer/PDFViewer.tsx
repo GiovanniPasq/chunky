@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback, memo } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import workerSrc from 'pdfjs-dist/build/pdf.worker.min.js?url'
+import { clamp, SCROLL_DEBOUNCE_MS } from '../../hooks/useScrollSync'
+import { VIEWER_SCROLL } from '../../utils/viewerEvents'
 import Toast from './Toast'
 import './PDFViewer.css'
 
@@ -274,7 +276,7 @@ function PDFViewer({ filename, scale = 1.0, onScaleChange, scrollSyncEnabled = t
     setRenderRange(prev => (prev[0] === range[0] && prev[1] === range[1] ? prev : range))
   }, [pageDimensions, numPages])
 
-  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const el = e.target as HTMLDivElement
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
     rafRef.current = requestAnimationFrame(() => {
@@ -282,25 +284,12 @@ function PDFViewer({ filename, scale = 1.0, onScaleChange, scrollSyncEnabled = t
       if (isScrollingRef.current || !scrollSyncEnabled) return
       const maxScroll = el.scrollHeight - el.clientHeight
       if (maxScroll <= 0) return
-      window.dispatchEvent(new CustomEvent('viewer-scroll', {
-        detail: { source: 'pdf', percentage: Math.min(1, Math.max(0, el.scrollTop / maxScroll)) }
+      window.dispatchEvent(new CustomEvent(VIEWER_SCROLL, {
+        detail: { source: 'pdf', percentage: clamp(el.scrollTop / maxScroll, 0, 1) }
       }))
     })
-  }
+  }, [updateRenderRange, scrollSyncEnabled])
 
-  const handleMouseUp = () => {
-    if (!scrollSyncEnabled || !containerRef.current) return
-    const sel = window.getSelection()
-    const text = sel?.toString().trim()
-    if (!text || !sel || sel.rangeCount === 0) return
-    const range = sel.getRangeAt(0)
-    const rect = range.getBoundingClientRect()
-    const cRect = containerRef.current.getBoundingClientRect()
-    const relY = (rect.top - cRect.top + containerRef.current.scrollTop) / containerRef.current.scrollHeight
-    window.dispatchEvent(new CustomEvent('viewer-click-sync', {
-      detail: { source: 'pdf', percentage: relY, selectedText: text }
-    }))
-  }
 
   useEffect(() => {
     const onExtScroll = (e: Event) => {
@@ -311,14 +300,14 @@ function PDFViewer({ filename, scale = 1.0, onScaleChange, scrollSyncEnabled = t
       const el = containerRef.current
       const maxScroll = el.scrollHeight - el.clientHeight
       if (maxScroll <= 0) { isScrollingRef.current = false; return }
-      el.scrollTo({ top: Math.round(Math.min(1, Math.max(0, ev.detail.percentage)) * maxScroll), behavior: 'instant' })
+      el.scrollTo({ top: Math.round(clamp(ev.detail.percentage, 0, 1) * maxScroll), behavior: 'instant' })
       scrollTimeoutRef.current = setTimeout(() => {
         isScrollingRef.current = false
         updateRenderRange()
-      }, 50)
+      }, SCROLL_DEBOUNCE_MS)
     }
-    window.addEventListener('viewer-scroll', onExtScroll)
-    return () => window.removeEventListener('viewer-scroll', onExtScroll)
+    window.addEventListener(VIEWER_SCROLL, onExtScroll)
+    return () => window.removeEventListener(VIEWER_SCROLL, onExtScroll)
   }, [scrollSyncEnabled, updateRenderRange])
 
   return (
@@ -349,7 +338,7 @@ function PDFViewer({ filename, scale = 1.0, onScaleChange, scrollSyncEnabled = t
         </div>
       </div>
 
-      <div className="pdf-container" ref={containerRef} onScroll={handleScroll} onMouseUp={handleMouseUp}>
+      <div className="pdf-container" ref={containerRef} onScroll={handleScroll}>
         {Array.from({ length: numPages }, (_, i) => {
           const dims = pageDimensions[i]
           return (

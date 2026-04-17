@@ -1,11 +1,12 @@
-import { useState, useEffect, useRef, useCallback, memo, type ReactNode } from 'react'
+import { useState, useEffect, useRef, memo, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Chunk, EnrichmentSettings } from '../../types'
 import { useChunkEnrichment } from '../../hooks/useChunkEnrichment'
+import { useScrollSync } from '../../hooks/useScrollSync'
+import { isChunkEnriched } from '../../utils/chunkUtils'
 import ChunkEditModal from '../chunks/ChunkEditModal'
 import ProgressModal from '../modals/ProgressModal'
-import { VIEWER_SCROLL } from '../../utils/viewerEvents'
 import './MarkdownViewer.css'
 import './ChunkViewer.css'
 
@@ -69,16 +70,6 @@ const CHUNK_BORDER_COLORS = [
   '#D2691E', '#5A3278', '#146E64', '#A03C1E', '#3C783C',
 ]
 
-function isEnriched(chunk: Chunk): boolean {
-  return !!(
-    chunk.title ||
-    chunk.summary ||
-    chunk.context ||
-    chunk.cleaned_chunk ||
-    chunk.keywords?.length ||
-    chunk.questions?.length
-  )
-}
 
 type PendingOp =
   | { type: 'delete-single'; index: number }
@@ -108,9 +99,6 @@ function ChunkViewer({
   const [pendingOp, setPendingOp] = useState<PendingOp | null>(null)
 
   const containerRef = useRef<HTMLDivElement>(null)
-  const isScrollingRef = useRef(false)
-  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout>>()
-  const rafRef = useRef<number>()
   const prevChunkCountRef = useRef<number | null>(null)
 
   const {
@@ -145,35 +133,12 @@ function ChunkViewer({
 
   // ── Scroll sync ────────────────────────────────────────────────────────────
 
-  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    if (isScrollingRef.current || !scrollSyncEnabled) return
-    if (rafRef.current) cancelAnimationFrame(rafRef.current)
-    rafRef.current = requestAnimationFrame(() => {
-      const el = e.target as HTMLDivElement
-      const maxScroll = el.scrollHeight - el.clientHeight
-      if (maxScroll <= 0) return
-      const pct = Math.min(1, Math.max(0, el.scrollTop / maxScroll))
-      window.dispatchEvent(new CustomEvent(VIEWER_SCROLL, {
-        detail: { source: 'markdown', percentage: pct }
-      }))
-    })
-  }, [scrollSyncEnabled])
-
-  useEffect(() => {
-    const onExtScroll = (e: Event) => {
-      const ev = e as CustomEvent
-      if (ev.detail.source !== 'pdf' || !containerRef.current || !scrollSyncEnabled) return
-      isScrollingRef.current = true
-      clearTimeout(scrollTimeoutRef.current)
-      const el = containerRef.current
-      const maxScroll = el.scrollHeight - el.clientHeight
-      if (maxScroll <= 0) { isScrollingRef.current = false; return }
-      el.scrollTo({ top: Math.round(Math.min(1, Math.max(0, ev.detail.percentage)) * maxScroll), behavior: 'instant' })
-      scrollTimeoutRef.current = setTimeout(() => { isScrollingRef.current = false }, 50)
-    }
-    window.addEventListener(VIEWER_SCROLL, onExtScroll)
-    return () => window.removeEventListener(VIEWER_SCROLL, onExtScroll)
-  }, [scrollSyncEnabled])
+  const { handleScroll } = useScrollSync(
+    scrollSyncEnabled,
+    'markdown',
+    'pdf',
+    containerRef,
+  )
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -357,12 +322,12 @@ function ChunkViewer({
               const isSelected = selectedChunks.has(i)
               const isEnriching = enrichingChunks.has(i)
               const enrichErrMsg = chunkEnrichErrors.get(i)
-              const enriched = isEnriched(chunk)
+              const enriched = isChunkEnriched(chunk)
               // Estimate height from content length so the placeholder approximates
               // the real height and minimises scroll-position jumps on reveal.
               const estimatedHeight = Math.max(100, Math.min(800, chunk.content.length * 0.4))
               return (
-                <LazyChunk key={`${chunk.start}-${chunk.end}`} estimatedHeight={estimatedHeight}>
+                <LazyChunk key={chunk.index} estimatedHeight={estimatedHeight}>
                 <div
                   className={`chunk-block${isSelected ? ' chunk-block--selected' : ''}${enriched ? ' chunk-block--enriched' : ''}`}
                   style={{

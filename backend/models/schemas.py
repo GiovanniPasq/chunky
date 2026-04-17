@@ -6,7 +6,9 @@ from __future__ import annotations
 
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
+
+from backend.config import get_settings as _get_settings
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -74,11 +76,11 @@ class SplitterLibrary(str, Enum):
 class VLMSettings(BaseModel):
     """Optional overrides for the VLM converter."""
 
-    model: Optional[str] = Field(default=None)
-    base_url: Optional[str] = Field(default=None)
-    api_key: Optional[str] = Field(default=None)
-    temperature: Optional[float] = Field(default=None)
-    user_prompt: Optional[str] = Field(default=None)
+    model: str | None = Field(default=None)
+    base_url: str | None = Field(default=None)
+    api_key: str | None = Field(default=None)
+    temperature: float | None = Field(default=None)
+    user_prompt: str | None = Field(default=None)
 
 
 # ---------------------------------------------------------------------------
@@ -89,8 +91,8 @@ class VLMSettings(BaseModel):
 class CloudSettings(BaseModel):
     """Settings for the Cloud converter."""
 
-    base_url: Optional[str] = Field(default=None)
-    bearer_token: Optional[str] = Field(default=None)
+    base_url: str | None = Field(default=None)
+    bearer_token: str | None = Field(default=None)
 
 
 # ---------------------------------------------------------------------------
@@ -101,10 +103,10 @@ class CloudSettings(BaseModel):
 class ConvertRequest(BaseModel):
     """Body for POST /api/convert."""
 
-    filenames: List[str] = Field(..., min_length=1, description="PDF filename(s) to convert.")
+    filenames: list[str] = Field(..., min_length=1, description="PDF filename(s) to convert.")
     converter: ConverterType = Field(default=ConverterType.pymupdf)
-    vlm: Optional[VLMSettings] = Field(default=None)
-    cloud: Optional[CloudSettings] = Field(default=None)
+    vlm: VLMSettings | None = Field(default=None)
+    cloud: CloudSettings | None = Field(default=None)
 
 
 class DocumentInfo(BaseModel):
@@ -130,7 +132,7 @@ class UploadFileResult(BaseModel):
 class MultiUploadResponse(BaseModel):
     uploaded: int
     failed: int
-    results: List[UploadFileResult]
+    results: list[UploadFileResult]
 
 
 class ConvertResponse(BaseModel):
@@ -142,7 +144,7 @@ class ConvertResponse(BaseModel):
 
 class DeleteResponse(BaseModel):
     success: bool
-    deleted: List[str]
+    deleted: list[str]
     message: str
 
 
@@ -194,15 +196,15 @@ class ChunkItem(BaseModel):
     title: str = Field(default="")
     context: str = Field(default="")
     summary: str = Field(default="")
-    keywords: List[str] = Field(default_factory=list)
-    questions: List[str] = Field(default_factory=list)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    keywords: list[str] = Field(default_factory=list)
+    questions: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     start: int = 0
     end: int = 0
 
 
 class ChunkResponse(BaseModel):
-    chunks: List[ChunkItem]
+    chunks: list[ChunkItem]
     total_chunks: int
     splitter_type: str
     splitter_library: str
@@ -215,9 +217,9 @@ class ChunkResponse(BaseModel):
 
 class SaveChunksRequest(BaseModel):
     filename: str = Field(..., min_length=1)
-    chunks: List[Dict[str, Any]]
-    splitter_type: Optional[str] = Field(default=None)
-    splitter_library: Optional[str] = Field(default=None)
+    chunks: list[dict[str, Any]]
+    splitter_type: str | None = Field(default=None)
+    splitter_library: str | None = Field(default=None)
 
 
 class SaveChunksResponse(BaseModel):
@@ -227,7 +229,7 @@ class SaveChunksResponse(BaseModel):
 
 
 class LoadChunksResponse(BaseModel):
-    chunks: List[Dict[str, Any]]
+    chunks: list[dict[str, Any]]
     total_chunks: int
     filename: str
 
@@ -241,10 +243,10 @@ class EnrichmentRequest(BaseModel):
     """OpenAI-compatible connection settings for enrichment."""
 
     model: str
-    base_url: str = "http://localhost:11434/v1"
-    api_key: str = "ollama"
-    temperature: float = 0.3
-    user_prompt: Optional[str] = None
+    base_url: str = Field(default_factory=lambda: _get_settings().ENRICHMENT_DEFAULT_BASE_URL)
+    api_key: str = Field(default_factory=lambda: _get_settings().ENRICHMENT_DEFAULT_API_KEY)
+    temperature: float = Field(default_factory=lambda: _get_settings().ENRICHMENT_DEFAULT_TEMPERATURE)
+    user_prompt: str | None = None
 
 
 class EnrichMarkdownRequest(BaseModel):
@@ -257,9 +259,9 @@ class ChunkToEnrich(BaseModel):
     content: str
     start: int = 0
     end: int = 0
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class EnrichChunksRequest(BaseModel):
-    chunks: List[ChunkToEnrich] = Field(..., min_length=1)
+    chunks: list[ChunkToEnrich] = Field(..., min_length=1)
     settings: EnrichmentRequest

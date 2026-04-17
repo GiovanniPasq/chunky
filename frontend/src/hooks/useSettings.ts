@@ -110,23 +110,28 @@ export const DEFAULT_SETTINGS: ChunkSettings = {
     base_url: DEFAULT_VLM_BASE_URL,
     api_key: DEFAULT_VLM_API_KEY,
     temperature: DEFAULT_VLM_TEMPERATURE,
+    user_prompt: DEFAULT_VLM_PROMPT,
   },
   sectionEnrichment: {
     model: DEFAULT_ENRICHMENT_MODEL,
     base_url: DEFAULT_ENRICHMENT_BASE_URL,
+    api_key: 'ollama',
     temperature: DEFAULT_ENRICHMENT_TEMPERATURE,
+    user_prompt: DEFAULT_SECTION_PROMPT,
   },
   chunkEnrichment: {
     model: DEFAULT_ENRICHMENT_MODEL,
     base_url: DEFAULT_ENRICHMENT_BASE_URL,
+    api_key: 'ollama',
     temperature: DEFAULT_ENRICHMENT_TEMPERATURE,
+    user_prompt: DEFAULT_CHUNK_PROMPT,
   },
 }
 
 export const DEFAULT_SPLIT_PCT = 50
 
 /** Merge two plain objects, keeping only defined values from `stored`. */
-function mergeNested<T extends Record<string, unknown>>(
+function mergeNested<T extends object>(
   defaults: T,
   stored: Partial<T> | undefined,
 ): T {

@@ -94,7 +94,15 @@ export function useBulkOps({
         },
       )
     } catch (err) {
-      if (!(err instanceof DOMException && err.name === 'AbortError')) throw err
+      if (!(err instanceof DOMException && err.name === 'AbortError')) {
+        // Non-abort error (e.g. network failure before the stream starts).
+        // Show a toast and fall through to cleanup — do NOT re-throw so that
+        // setBulkOp(null) always runs and the modal is never left open.
+        showToast(err instanceof Error ? err.message : 'Batch conversion failed', 'error')
+        setBulkOp(null)
+        setBulkConnectionLost(false)
+        return
+      }
     }
 
     setBulkOp(null)

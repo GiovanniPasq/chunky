@@ -29,7 +29,8 @@ export async function consumeChunkSse(
 
   for await (const event of parseSse(res.body, onConnectionLost)) {
     if (event.type === 'done') {
-      const raw = (event.chunks as Chunk[]) ?? []
+      if (!Array.isArray(event.chunks)) throw new Error('Invalid server response: chunks is not an array')
+      const raw = event.chunks as Chunk[]
       return raw.map(c => ({
         index: c.index,
         content: c.content,

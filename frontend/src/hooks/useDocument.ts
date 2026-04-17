@@ -126,8 +126,10 @@ export function useDocument(toast: ToastCallbacks) {
       files.forEach(f => formData.append('files', f))
       const res = await fetch(`${API}/upload`, { method: 'POST', body: formData })
       if (!res.ok) {
-        const data = await res.json().catch(() => null)
-        throw new Error(data?.detail ?? 'Upload failed')
+        const text = await res.text().catch(() => '')
+        let detail = 'Upload failed'
+        try { detail = (JSON.parse(text) as { detail?: string })?.detail ?? (text || detail) } catch { detail = text || detail }
+        throw new Error(detail)
       }
       await fetchDocuments()
       toastRef.current.onSuccess(`Uploaded ${files.length} file${files.length > 1 ? 's' : ''}`)
@@ -246,6 +248,7 @@ export function useDocument(toast: ToastCallbacks) {
       )
       if (!res.ok) throw new Error()
       const data = await res.json()
+      if (typeof data.pdf_filename !== 'string') throw new Error('Invalid response: missing pdf_filename')
       if (selectedDocRef.current === docAtStart) setSelectedDoc(data.pdf_filename)
       setDocumentData(prev => prev ? { ...prev, has_pdf: true, pdf_filename: data.pdf_filename } : prev)
       await fetchDocuments()

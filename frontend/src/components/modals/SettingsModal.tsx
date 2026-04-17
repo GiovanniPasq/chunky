@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { ChunkSettings, Capabilities, CapabilityLibrary, EnrichmentSettings } from '../../types'
 import { capabilityService } from '../../services/apiService'
-import { DEFAULT_SETTINGS, DEFAULT_VLM_PROMPT, DEFAULT_SECTION_PROMPT, DEFAULT_CHUNK_PROMPT, DEFAULT_VLM_MODEL, DEFAULT_VLM_BASE_URL, DEFAULT_VLM_TEMPERATURE } from '../../hooks/useSettings'
+import { DEFAULT_SETTINGS, DEFAULT_VLM_MODEL, DEFAULT_VLM_BASE_URL, DEFAULT_VLM_TEMPERATURE } from '../../hooks/useSettings'
 import EnrichmentSettingsPanel from './EnrichmentSettings'
+import LLMSettingsPanel from './LLMSettingsPanel'
 import './SettingsModal.css'
 
 // Module-level cache — capabilities never change while the backend is running,
@@ -13,7 +14,6 @@ interface Props {
   isOpen: boolean
   onClose: () => void
   onSave: (settings: ChunkSettings) => void
-  onReset?: () => void
   current: ChunkSettings
 }
 
@@ -32,7 +32,7 @@ function resolveStrategy(caps: Capabilities, library: string, current: string): 
 // Chunkers that don't support chunk_overlap per Chonkie docs
 const CHONKIE_NO_OVERLAP = new Set(['recursive', 'fast', 'table', 'code', 'late', 'neural', 'slumber'])
 
-export default function SettingsModal({ isOpen, onClose, onSave, onReset, current }: Props) {
+export default function SettingsModal({ isOpen, onClose, onSave, current }: Props) {
   const [settings, setSettings] = useState<ChunkSettings>(current)
   const [caps, setCaps] = useState<Capabilities | null>(null)
   const [loadState, setLoadState] = useState<LoadState>('loading')
@@ -90,15 +90,6 @@ export default function SettingsModal({ isOpen, onClose, onSave, onReset, curren
   const set = <K extends keyof ChunkSettings>(key: K, value: ChunkSettings[K]) =>
     setSettings(prev => ({ ...prev, [key]: value }))
 
-  const setVlm = (key: 'model' | 'base_url' | 'api_key', value: string) =>
-    setSettings(prev => ({ ...prev, vlm: { ...prev.vlm, [key]: value || undefined } }))
-
-  const setVlmTemperature = (value: number) =>
-    setSettings(prev => ({ ...prev, vlm: { ...prev.vlm, temperature: value } }))
-
-  const setVlmUserPrompt = (value: string) =>
-    setSettings(prev => ({ ...prev, vlm: { ...prev.vlm, user_prompt: value || undefined } }))
-
   const setCloud = (key: 'base_url' | 'bearer_token', value: string) =>
     setSettings(prev => ({ ...prev, cloud: { ...prev.cloud, [key]: value || undefined } }))
 
@@ -125,7 +116,6 @@ export default function SettingsModal({ isOpen, onClose, onSave, onReset, curren
 
   const handleReset = () => {
     setSettings(DEFAULT_SETTINGS)
-    onReset?.()
   }
 
   const availableStrategies = caps ? strategiesFor(caps, settings.splitterLibrary) : []
@@ -235,55 +225,15 @@ export default function SettingsModal({ isOpen, onClose, onSave, onReset, curren
 
                   {settings.converter === 'vlm' && (
                     <div className="vlm-settings">
-                      <div className="form-group">
-                        <label>Model</label>
-                        <input
-                          type="text"
-                          placeholder={DEFAULT_VLM_MODEL}
-                          value={settings.vlm?.model ?? DEFAULT_VLM_MODEL}
-                          onChange={e => setVlm('model', e.target.value)}
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label>Base URL</label>
-                        <input
-                          type="text"
-                          placeholder={DEFAULT_VLM_BASE_URL}
-                          value={settings.vlm?.base_url ?? DEFAULT_VLM_BASE_URL}
-                          onChange={e => setVlm('base_url', e.target.value)}
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label>API Key <span className="label-hint">(leave empty for Ollama)</span></label>
-                        <input
-                          type="password"
-                          placeholder="sk-… / AIza… / (empty for Ollama)"
-                          value={settings.vlm?.api_key ?? ''}
-                          onChange={e => setVlm('api_key', e.target.value)}
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label>Temperature <span className="label-hint">(0 = deterministic, 1 = creative)</span></label>
-                        <div className="temperature-control">
-                          <input
-                            type="range"
-                            min={0} max={1} step={0.01}
-                            value={settings.vlm?.temperature ?? DEFAULT_VLM_TEMPERATURE}
-                            onChange={e => setVlmTemperature(parseFloat(e.target.value))}
-                          />
-                          <span className="temperature-value">{(settings.vlm?.temperature ?? DEFAULT_VLM_TEMPERATURE).toFixed(2)}</span>
-                        </div>
-                      </div>
-                      <div className="form-group">
-                        <label>Prompt <span className="label-hint">(optional — overrides built-in conversion instructions)</span></label>
-                        <textarea
-                          className="enrichment-textarea"
-                          placeholder={DEFAULT_VLM_PROMPT}
-                          value={settings.vlm?.user_prompt ?? DEFAULT_VLM_PROMPT}
-                          onChange={e => setVlmUserPrompt(e.target.value)}
-                          rows={5}
-                        />
-                      </div>
+                      <LLMSettingsPanel
+                        value={settings.vlm ?? {}}
+                        onChange={vlm => setSettings(prev => ({ ...prev, vlm }))}
+                        defaultModel={DEFAULT_VLM_MODEL}
+                        defaultBaseUrl={DEFAULT_VLM_BASE_URL}
+                        defaultTemperature={DEFAULT_VLM_TEMPERATURE}
+                        promptLabel="Prompt"
+                        promptRows={5}
+                      />
                     </div>
                   )}
                 </>
@@ -375,7 +325,6 @@ export default function SettingsModal({ isOpen, onClose, onSave, onReset, curren
                     title="Markdown Enrichment"
                     settings={settings.sectionEnrichment}
                     onChange={setSectionEnrichment}
-                    defaultPrompt={DEFAULT_SECTION_PROMPT}
                     variant="section"
                   />
 
@@ -385,7 +334,6 @@ export default function SettingsModal({ isOpen, onClose, onSave, onReset, curren
                     title="Chunk Enrichment"
                     settings={settings.chunkEnrichment}
                     onChange={setChunkEnrichment}
-                    defaultPrompt={DEFAULT_CHUNK_PROMPT}
                     variant="chunk"
                   />
                 </>

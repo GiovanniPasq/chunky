@@ -4,7 +4,6 @@ Abstract base class for PDF-to-Markdown converters.
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional
 
 
 class PDFConverter(ABC):
@@ -15,7 +14,7 @@ class PDFConverter(ABC):
     """
 
     @abstractmethod
-    def convert(self, pdf_path: Path, total_pages: Optional[int] = None) -> str:
+    def convert(self, pdf_path: Path, total_pages: int | None = None) -> str:
         """Convert a PDF file to Markdown.
 
         Args:

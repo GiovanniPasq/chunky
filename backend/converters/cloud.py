@@ -12,17 +12,15 @@ import asyncio
 import logging
 import threading
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable
 
 import httpx
 
 from backend.registry import register_converter
+from backend.utils.retry import async_retry_with_backoff
 from .base import PDFConverter
 
 logger = logging.getLogger(__name__)
-
-_DEFAULT_BASE_URL = "http://localhost:8080/convert"
-
 
 @register_converter(
     name="cloud",
@@ -56,15 +54,15 @@ class CloudConverter(PDFConverter):
 
     def __init__(
         self,
-        base_url: str = _DEFAULT_BASE_URL,
-        bearer_token: Optional[str] = None,  # sent as Authorization: Bearer <token>
-        on_progress: Optional[Callable[[int, int], None]] = None,
-        stop_event: Optional[threading.Event] = None,
+        base_url: str = "",
+        bearer_token: str | None = None,  # sent as Authorization: Bearer <token>
+        on_progress: Callable[[int, int], None] | None = None,
+        stop_event: threading.Event | None = None,
     ) -> None:
         from backend.config import get_settings as _get_settings
         _s = _get_settings()
 
-        self._base_url = base_url
+        self._base_url = base_url or _s.CLOUD_DEFAULT_BASE_URL
         self._bearer_token = bearer_token
         self._on_progress = on_progress
         self._stop_event = stop_event
@@ -81,7 +79,7 @@ class CloudConverter(PDFConverter):
     # PDFConverter interface
     # ------------------------------------------------------------------
 
-    def convert(self, pdf_path: Path, total_pages: Optional[int] = None) -> str:
+    def convert(self, pdf_path: Path, total_pages: int | None = None) -> str:
         """POST the PDF to the cloud endpoint and return the Markdown body.
 
         Called from a ``ThreadPoolExecutor`` worker via ``asyncio.to_thread()``.
@@ -111,49 +109,32 @@ class CloudConverter(PDFConverter):
     # HTTP helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _is_retryable(exc: Exception) -> bool:
+        if isinstance(exc, httpx.TimeoutException):
+            return True
+        if isinstance(exc, httpx.HTTPStatusError):
+            return exc.response.status_code >= 500
+        return False
+
     async def _call_api_with_retry_async(self, http: httpx.AsyncClient, pdf_path: Path) -> str:
         """POST with exponential back-off on timeout and transient server errors.
 
-        Retries on:
-        - ``httpx.TimeoutException`` — request timed out
-        - ``httpx.HTTPStatusError`` with status >= 500 — transient server error
-
-        4xx responses (bad request, auth failure) are not retried.
         Checks ``stop_event`` before each attempt so no new request is started
         after cancellation has been requested.
         """
-        last_exc: Exception | None = None
+        if self._stop_event and self._stop_event.is_set():
+            raise InterruptedError("Conversion cancelled before retry")
 
-        for attempt in range(self._max_retry_attempts):
-            if self._stop_event and self._stop_event.is_set():
-                raise InterruptedError("Conversion cancelled before retry")
-
-            try:
-                return await self._post_pdf(http, pdf_path)
-            except (httpx.TimeoutException, httpx.HTTPStatusError) as exc:
-                # Do not retry definitive client errors (4xx).
-                if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500:
-                    raise
-                last_exc = exc
-                if attempt < self._max_retry_attempts - 1:
-                    delay = self._retry_base_delay_s * (2 ** attempt)
-                    logger.warning(
-                        "Cloud API error (%s, attempt %d/%d), retrying in %.0fs",
-                        type(exc).__name__,
-                        attempt + 1,
-                        self._max_retry_attempts,
-                        delay,
-                        extra={"base_url": self._base_url},
-                    )
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error(
-                        "Cloud API failed after %d attempts — aborting conversion",
-                        self._max_retry_attempts,
-                        extra={"base_url": self._base_url},
-                    )
-
-        raise last_exc or RuntimeError("No retry attempts configured")
+        return await async_retry_with_backoff(
+            lambda: self._post_pdf(http, pdf_path),
+            is_retryable=self._is_retryable,
+            max_attempts=self._max_retry_attempts,
+            base_delay_s=self._retry_base_delay_s,
+            logger=logger,
+            context={"base_url": self._base_url},
+            operation="Cloud API call",
+        )
 
     async def _post_pdf(self, http: httpx.AsyncClient, pdf_path: Path) -> str:
         """Send one POST request and return the response body as Markdown.

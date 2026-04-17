@@ -10,7 +10,7 @@ import { useDocument } from './hooks/useDocument'
 import { useChunks } from './hooks/useChunks'
 import { useBulkOps } from './hooks/useBulkOps'
 import type { BulkProgressFn, BulkResultFn } from './hooks/useDocument'
-import { loadSplitPct, saveSplitPct, DEFAULT_SPLIT_PCT, clearPersistedSettings } from './hooks/useSettings'
+import { loadSplitPct, saveSplitPct } from './hooks/useSettings'
 import PDFViewer from './components/viewer/PDFViewer'
 import './App.css'
 
@@ -59,7 +59,7 @@ export default function App() {
 
   const {
     chunks, settings, saving: savingChunks, chunking,
-    applySettings, resetSettings, editChunk, deleteChunk, deleteChunks, mergeChunks, saveChunks, cancelChunking,
+    applySettings, editChunk, deleteChunk, deleteChunks, mergeChunks, saveChunks, cancelChunking,
     enrichChunk,
   } = useChunks(documentData, selectedDoc, rightView === 'chunks', toastCallbacks)
 
@@ -91,15 +91,23 @@ export default function App() {
   }
 
   // ── Track which docs have markdown ────────────────────────────
+  // Derive a stable string key so the fetch only fires when the document list
+  // content changes, not when useDocument recreates the array with the same values.
+  const documentsKey = useMemo(() => documents.join(','), [documents])
   useEffect(() => {
-    if (documents.length === 0) { setDocsWithMarkdown(new Set()); return }
-    fetch('/api/documents/metadata')
+    if (documentsKey === '') { setDocsWithMarkdown(new Set()); return }
+    fetch('/api/documents/metadata', { signal: AbortSignal.timeout(5000) })
       .then(r => r.ok ? r.json() : [])
       .then((meta: Array<{ filename: string; has_markdown: boolean }>) => {
         setDocsWithMarkdown(new Set(meta.filter(m => m.has_markdown).map(m => m.filename)))
       })
-      .catch(() => {})
-  }, [documents])
+      .catch((err: unknown) => {
+        const name = (err as { name?: string })?.name
+        if (name !== 'AbortError' && name !== 'TimeoutError') {
+          console.error('Failed to fetch document metadata:', err)
+        }
+      })
+  }, [documentsKey])
 
   // Keep docsWithMarkdown in sync when a single-file conversion or deletion occurs.
   useEffect(() => {
@@ -120,13 +128,6 @@ export default function App() {
   }, [isDragging])
 
   const handleToggleScrollSync = useCallback(() => setScrollSync(v => !v), [])
-
-  // ── Reset to defaults ─────────────────────────────────────────
-  const handleReset = useCallback(() => {
-    clearPersistedSettings()
-    resetSettings()
-    setSplitPct(DEFAULT_SPLIT_PCT)
-  }, [resetSettings])
 
   // ── Divider drag ─────────────────────────────────────────────
   useEffect(() => {
@@ -216,6 +217,38 @@ export default function App() {
     onProgress: BulkProgressFn,
     onResult: BulkResultFn,
   ) => handleBulkChunk(filenames, onProgress, onResult), [handleBulkChunk])
+
+  // ── Markdown panel helper — avoids duplicating MarkdownViewer props ──────
+  const renderMarkdownPanel = (): React.ReactNode => {
+    if (!documentData?.has_markdown) {
+      return (
+        <div className="md-not-found">
+          <span className="static-icon">📄</span>
+          <h2>Markdown not found</h2>
+          <p>This document hasn't been converted yet.</p>
+          <button onClick={handleConvert} disabled={converting}>
+            ✨ Convert with {converterLabel}
+          </button>
+        </div>
+      )
+    }
+    return (
+      <MarkdownViewer
+        content={documentData.md_content}
+        scale={mdScale}
+        onScaleChange={setMdScale}
+        padding={mdPadding}
+        onPaddingChange={setMdPadding}
+        scrollSyncEnabled={scrollSync}
+        onSaveMarkdown={saveMarkdown}
+        onDeleteMarkdown={deleteMarkdown}
+        savingMd={savingMd}
+        sectionEnrichment={settings.sectionEnrichment}
+        onEnrichSuccess={toastCallbacks.onSuccess}
+        onEnrichError={toastCallbacks.onError}
+      />
+    )
+  }
 
   return (
     <div className="app">
@@ -349,31 +382,7 @@ export default function App() {
                       </div>
                     )
                   ) : (
-                    documentData.has_markdown ? (
-                      <MarkdownViewer
-                        content={documentData.md_content}
-                        scale={mdScale}
-                        onScaleChange={setMdScale}
-                        padding={mdPadding}
-                        onPaddingChange={setMdPadding}
-                        scrollSyncEnabled={scrollSync}
-                        onSaveMarkdown={saveMarkdown}
-                        onDeleteMarkdown={deleteMarkdown}
-                        savingMd={savingMd}
-                        sectionEnrichment={settings.sectionEnrichment}
-                        onEnrichSuccess={toastCallbacks.onSuccess}
-                        onEnrichError={toastCallbacks.onError}
-                      />
-                    ) : (
-                      <div className="md-not-found">
-                        <span className="static-icon">📄</span>
-                        <h2>Markdown not found</h2>
-                        <p>This document hasn't been converted yet.</p>
-                        <button onClick={handleConvert} disabled={converting}>
-                          ✨ Convert with {converterLabel}
-                        </button>
-                      </div>
-                    )
+                    renderMarkdownPanel()
                   )}
                 </div>
 
@@ -414,31 +423,7 @@ export default function App() {
                     )}
                   </div>
                   {rightView === 'markdown' ? (
-                    documentData.has_markdown ? (
-                      <MarkdownViewer
-                        content={documentData.md_content}
-                        scale={mdScale}
-                        onScaleChange={setMdScale}
-                        padding={mdPadding}
-                        onPaddingChange={setMdPadding}
-                        scrollSyncEnabled={scrollSync}
-                        onSaveMarkdown={saveMarkdown}
-                        onDeleteMarkdown={deleteMarkdown}
-                        savingMd={savingMd}
-                        sectionEnrichment={settings.sectionEnrichment}
-                        onEnrichSuccess={toastCallbacks.onSuccess}
-                        onEnrichError={toastCallbacks.onError}
-                      />
-                    ) : (
-                      <div className="md-not-found">
-                        <span className="static-icon">📄</span>
-                        <h2>Markdown not found</h2>
-                        <p>This document hasn't been converted yet.</p>
-                        <button onClick={handleConvert} disabled={converting}>
-                          ✨ Convert with {converterLabel}
-                        </button>
-                      </div>
-                    )
+                    renderMarkdownPanel()
                   ) : (
                     <ChunkViewer
                       chunks={chunks}
@@ -468,7 +453,6 @@ export default function App() {
           isOpen={settingsOpen}
           onClose={() => setSettingsOpen(false)}
           onSave={applySettings}
-          onReset={handleReset}
           current={settings}
         />
       </div>
