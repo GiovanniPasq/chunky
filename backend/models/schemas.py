@@ -27,21 +27,23 @@ class ConverterType(str, Enum):
     cloud = "cloud"
 
 
-class SplitterType(str, Enum):
-    """Splitting strategy.
+class ChunkerType(str, Enum):
+    """Chunking strategy.
 
     Strategies shared by both LangChain and Chonkie:
         token, recursive, character, markdown
 
-    Chonkie-only strategies (ignored by LangChainSplitter):
+    Chonkie-only strategies:
         sentence   → SentenceChunker
         fast       → FastChunker
         semantic   → SemanticChunker  (requires chonkie[semantic])
-        late       → LateChunker      (requires chonkie[st])
         neural     → NeuralChunker    (requires chonkie[neural])
-        slumber    → SlumberChunker   (requires chonkie[genie])
         table      → TableChunker
         code       → CodeChunker
+
+    Docling-only strategies:
+        hybrid     → HybridChunker
+        line_based → LineBasedTokenChunker
     """
 
     # Shared
@@ -60,12 +62,17 @@ class SplitterType(str, Enum):
     table = "table"
     code = "code"
 
+    # Docling-only
+    hybrid = "hybrid"
+    line_based = "line_based"
 
-class SplitterLibrary(str, Enum):
-    """Underlying splitting library to use."""
+
+class ChunkerLibrary(str, Enum):
+    """Underlying chunking library to use."""
 
     langchain = "langchain"
     chonkie = "chonkie"
+    docling = "docling"
 
 
 # ---------------------------------------------------------------------------
@@ -154,15 +161,34 @@ class DeleteResponse(BaseModel):
 
 
 class ChunkRequest(BaseModel):
-    """Body for POST /api/chunk."""
+    """Internal chunking request used by chunkers and worker processes."""
 
-    content: str = Field(..., min_length=1, max_length=10_000_000, description="Text content to split.")
-    splitter_type: SplitterType = Field(
-        default=SplitterType.token,
+    content: str = Field(..., min_length=1, max_length=10_000_000, description="Text content to chunk.")
+    chunker_type: ChunkerType = Field(default=ChunkerType.token)
+    chunker_library: ChunkerLibrary = Field(default=ChunkerLibrary.langchain)
+    chunk_size: int = Field(default=512, gt=0)
+    chunk_overlap: int = Field(default=51, ge=0)
+    enable_markdown_sizing: bool = Field(default=False)
+
+    @field_validator("chunk_overlap")
+    @classmethod
+    def overlap_smaller_than_size(cls, v: int, info) -> int:
+        chunk_size = info.data.get("chunk_size")
+        if chunk_size is not None and v >= chunk_size:
+            raise ValueError("chunk_overlap must be less than chunk_size")
+        return v
+
+
+class ChunkFilesRequest(BaseModel):
+    """Body for POST /api/chunk — one or more documents to chunk from disk."""
+
+    filenames: list[str] = Field(..., min_length=1, description="Document filename(s) to chunk.")
+    chunker_type: ChunkerType = Field(
+        default=ChunkerType.token,
         description="Splitting strategy.",
     )
-    splitter_library: SplitterLibrary = Field(
-        default=SplitterLibrary.langchain,
+    chunker_library: ChunkerLibrary = Field(
+        default=ChunkerLibrary.langchain,
         description="Underlying splitting library to use.",
     )
     chunk_size: int = Field(default=512, gt=0, description="Maximum chunk size.")
@@ -170,7 +196,7 @@ class ChunkRequest(BaseModel):
     enable_markdown_sizing: bool = Field(
         default=False,
         description=(
-            "When splitter_type == 'markdown', apply a secondary size-based split "
+            "When chunker_type == 'markdown', apply a secondary size-based split "
             "to cap each section at chunk_size characters."
         ),
     )
@@ -206,8 +232,8 @@ class ChunkItem(BaseModel):
 class ChunkResponse(BaseModel):
     chunks: list[ChunkItem]
     total_chunks: int
-    splitter_type: str
-    splitter_library: str
+    chunker_type: str
+    chunker_library: str
 
 
 # ---------------------------------------------------------------------------
@@ -218,8 +244,8 @@ class ChunkResponse(BaseModel):
 class SaveChunksRequest(BaseModel):
     filename: str = Field(..., min_length=1)
     chunks: list[dict[str, Any]]
-    splitter_type: str | None = Field(default=None)
-    splitter_library: str | None = Field(default=None)
+    chunker_type: str | None = Field(default=None)
+    chunker_library: str | None = Field(default=None)
 
 
 class SaveChunksResponse(BaseModel):

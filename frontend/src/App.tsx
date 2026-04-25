@@ -9,7 +9,6 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { useDocument } from './hooks/useDocument'
 import { useChunks } from './hooks/useChunks'
 import { useBulkOps } from './hooks/useBulkOps'
-import type { BulkProgressFn, BulkResultFn } from './hooks/useDocument'
 import { loadSplitPct, saveSplitPct } from './hooks/useSettings'
 import PDFViewer from './components/viewer/PDFViewer'
 import './App.css'
@@ -45,7 +44,7 @@ export default function App() {
     convertToMarkdown, cancelConversion,
     convertMdToPdf, cancelMdToPdfConversion,
     saveMarkdown, deleteMarkdown,
-    batchConvert, chunkAndSaveFile,
+    batchConvert,
   } = useDocument(toastCallbacks)
 
   // ── UI state ─────────────────────────────────────────────────
@@ -110,15 +109,17 @@ export default function App() {
   }, [documentsKey])
 
   // Keep docsWithMarkdown in sync when a single-file conversion or deletion occurs.
+  // Guard against documentData === null (loading state): we don't know yet whether
+  // the doc has markdown, so don't prematurely remove it from the set.
   useEffect(() => {
-    if (!selectedDoc) return
+    if (!selectedDoc || documentData === null) return
     setDocsWithMarkdown(prev => {
       const next = new Set(prev)
-      if (documentData?.has_markdown) next.add(selectedDoc)
+      if (documentData.has_markdown) next.add(selectedDoc)
       else next.delete(selectedDoc)
       return next
     })
-  }, [selectedDoc, documentData?.has_markdown])
+  }, [selectedDoc, documentData])
 
   // ── Persist split ratio ───────────────────────────────────────
   const splitPctRef = useRef(splitPct)
@@ -188,7 +189,7 @@ export default function App() {
   // Called by useBulkOps after a successful batch convert to refresh metadata
   // and the active document panel.
   const handleConvertSuccess = useCallback(async (succeededFiles: Set<string>) => {
-    const meta: Array<{ filename: string; has_markdown: boolean }> = await fetch('/api/documents/metadata')
+    const meta: Array<{ filename: string; has_markdown: boolean }> = await fetch('/api/documents/metadata', { signal: AbortSignal.timeout(5000) })
       .then(r => r.ok ? r.json() : [])
       .catch(() => [])
     setDocsWithMarkdown(new Set(meta.filter(m => m.has_markdown).map(m => m.filename)))
@@ -199,24 +200,11 @@ export default function App() {
     bulkOp, bulkConnectionLost, interruptBulk, handleBulkConvert, handleBulkChunk,
   } = useBulkOps({
     batchConvert,
-    chunkAndSaveFile,
     settings,
     showToast,
     onConvertSuccess: handleConvertSuccess,
   })
 
-  // Sidebar expects the bulk handlers typed with (filenames, onProgress, onResult).
-  const handleBulkConvertForSidebar = useCallback(async (
-    filenames: string[],
-    onProgress: BulkProgressFn,
-    onResult: BulkResultFn,
-  ) => handleBulkConvert(filenames, onProgress, onResult), [handleBulkConvert])
-
-  const handleBulkChunkForSidebar = useCallback(async (
-    filenames: string[],
-    onProgress: BulkProgressFn,
-    onResult: BulkResultFn,
-  ) => handleBulkChunk(filenames, onProgress, onResult), [handleBulkChunk])
 
   // ── Markdown panel helper — avoids duplicating MarkdownViewer props ──────
   const renderMarkdownPanel = (): React.ReactNode => {
@@ -257,6 +245,7 @@ export default function App() {
           key={toast.id}
           message={toast.message}
           type={toast.type}
+          duration={toast.type === 'error' ? 10000 : 4000}
           onClose={handleToastClose}
         />
       )}
@@ -318,8 +307,8 @@ export default function App() {
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed(v => !v)}
         onDelete={deleteDocuments}
-        onBulkConvert={handleBulkConvertForSidebar}
-        onBulkChunk={handleBulkChunkForSidebar}
+        onBulkConvert={handleBulkConvert}
+        onBulkChunk={handleBulkChunk}
         onOpenSettings={() => setSettingsOpen(true)}
         docsWithMarkdown={docsWithMarkdown}
       />

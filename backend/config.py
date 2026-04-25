@@ -22,10 +22,14 @@ class Settings(BaseSettings):
     MAX_CONCURRENT_CONVERSIONS: int = 2
     """Max PDF→Markdown conversions that may run concurrently (single + batch)."""
 
-    CPU_CONVERTER_MAX_TASKS_PER_CHILD: int = 50
-    """Number of jobs a CPU converter worker process handles before being recycled.
+    CPU_WORKER_MAX_TASKS_PER_CHILD: int = 50
+    """Number of jobs a CPU worker process handles before being recycled.
+    Applies to all ProcessPoolExecutor workers (converter, chunker).
     Recycling forces the OS to reclaim accumulated ML memory (e.g. PyTorch caches
     from Docling). Set to 0 to disable recycling."""
+
+    MAX_CONCURRENT_CHUNKING: int = 2
+    """Max document chunking jobs that may run concurrently (single + batch)."""
 
     # ── Upload / validation ────────────────────────────────────
     MAX_FILE_SIZE_MB: int = 100

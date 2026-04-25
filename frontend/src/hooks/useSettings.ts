@@ -99,8 +99,8 @@ export const DEFAULT_ENRICHMENT_BASE_URL = 'http://localhost:11434/v1'
 export const DEFAULT_ENRICHMENT_TEMPERATURE = 0.3
 
 export const DEFAULT_SETTINGS: ChunkSettings = {
-  splitterType: 'token',
-  splitterLibrary: 'langchain',
+  chunkerType: 'token',
+  chunkerLibrary: 'langchain',
   chunkSize: 512,
   chunkOverlap: 51,
   enableMarkdownSizing: false,

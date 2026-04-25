@@ -31,7 +31,7 @@ export function useChunks(
 
   const chunkAbortRef = useRef<AbortController | null>(null)
 
-  const chunkContent = useCallback(async (content: string, s: ChunkSettings) => {
+  const chunkContent = useCallback(async (filename: string, s: ChunkSettings) => {
     chunkAbortRef.current?.abort()
     const abortCtrl = new AbortController()
     chunkAbortRef.current = abortCtrl
@@ -40,8 +40,8 @@ export function useChunks(
     setChunks(null)
     try {
       const onConnectionLost = () => toastRef.current.onError(CONNECTION_LOST_MSG)
-      const normalised = await consumeChunkSse(content, s, abortCtrl.signal, onConnectionLost)
-      if (chunkAbortRef.current === abortCtrl) setChunks(normalised)
+      const chunks = await consumeChunkSse([filename], s, abortCtrl.signal, onConnectionLost)
+      if (chunkAbortRef.current === abortCtrl) setChunks(chunks)
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return
       toastRef.current.onError('Chunking failed')
@@ -52,21 +52,19 @@ export function useChunks(
     }
   }, [])
 
-  const { splitterType, splitterLibrary, chunkSize, chunkOverlap, enableMarkdownSizing } = settings
-  // Use the md_content string (primitive) instead of the documentData object so that
-  // spread-updates to other fields (has_pdf, has_markdown, …) don't re-trigger chunking.
-  const mdContent = documentData?.md_content ?? null
+  const { chunkerType, chunkerLibrary, chunkSize, chunkOverlap, enableMarkdownSizing } = settings
+  const hasMarkdown = documentData?.has_markdown ?? false
 
   useEffect(() => {
-    if (!chunkingEnabled || !mdContent) {
+    if (!chunkingEnabled || !selectedDoc || !hasMarkdown) {
       chunkAbortRef.current?.abort()
       setChunks(null)
       setChunking(false)
       return
     }
-    chunkContent(mdContent, settings)
+    chunkContent(selectedDoc, settings)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mdContent, splitterType, splitterLibrary, chunkSize, chunkOverlap, enableMarkdownSizing, chunkingEnabled, chunkContent])
+  }, [selectedDoc, hasMarkdown, chunkerType, chunkerLibrary, chunkSize, chunkOverlap, enableMarkdownSizing, chunkingEnabled, chunkContent])
 
   const cancelChunking = useCallback(() => {
     chunkAbortRef.current?.abort()
@@ -179,8 +177,8 @@ export function useChunks(
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           filename: selectedDoc,
-          splitter_type: settings.splitterType,
-          splitter_library: settings.splitterLibrary,
+          chunker_type: settings.chunkerType,
+          chunker_library: settings.chunkerLibrary,
           chunks: chunks.map(c => ({
             index: c.index,
             content: c.content,
@@ -203,7 +201,7 @@ export function useChunks(
     } finally {
       setSaving(false)
     }
-  }, [chunks, selectedDoc, settings.splitterType, settings.splitterLibrary])
+  }, [chunks, selectedDoc, settings.chunkerType, settings.chunkerLibrary])
 
   const enrichChunk = useCallback((index: number, updates: Partial<Chunk>) => {
     setChunks(prev => {

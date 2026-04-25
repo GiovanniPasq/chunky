@@ -2,11 +2,8 @@
 """
 Utility script: convert all Markdown files in docs/mds/ to PDF in docs/pdfs/.
 
-Usage:
-    python -m backend.utils.md_to_pdf
-
 Dependencies:
-    pip install markdown weasyprint
+    pip install markdown-pdf
 """
 
 from __future__ import annotations
@@ -17,19 +14,12 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-import markdown
-from weasyprint import CSS, HTML
-from weasyprint.text.fonts import FontConfiguration
+from markdown_pdf import MarkdownPdf, Section
 
 MDS_DIR = Path("docs/mds")
 PDFS_DIR = Path("docs/pdfs")
 
 _CSS = """
-@page {
-    size: A4;
-    margin: 2cm;
-}
-
 body {
     font-family: 'DejaVu Sans', Arial, sans-serif;
     font-size: 11pt;
@@ -95,7 +85,6 @@ pre {
     background-color: #f6f8fa;
     padding: 16px;
     border-radius: 6px;
-    overflow-x: auto;
     margin: 12px 0;
 }
 
@@ -141,31 +130,14 @@ img {
 """
 
 
-def _md_to_html(md_content: str) -> str:
-    """Convert a Markdown string to a complete HTML document."""
-    md = markdown.Markdown(
-        extensions=["extra", "codehilite", "toc", "nl2br"],
-    )
-    body = md.convert(md_content)
-    return (
-        "<!DOCTYPE html><html><head>"
-        '<meta charset="utf-8"><title>Document</title>'
-        f"</head><body>{body}</body></html>"
-    )
-
-
 def _convert_file(md_path: Path, pdf_path: Path) -> bool:
     """Convert a single Markdown file to PDF. Returns True on success."""
     try:
         md_content = md_path.read_text(encoding="utf-8")
-        html_content = _md_to_html(md_content)
 
-        font_config = FontConfiguration()
-        HTML(string=html_content).write_pdf(
-            pdf_path,
-            stylesheets=[CSS(string=_CSS, font_config=font_config)],
-            font_config=font_config,
-        )
+        pdf = MarkdownPdf(toc_level=0)
+        pdf.add_section(Section(md_content, paper_size="A4"), user_css=_CSS)
+        pdf.save(str(pdf_path))
         return True
     except Exception as exc:
         logger.error("MD→PDF conversion failed for '%s': %s", md_path.name, exc)

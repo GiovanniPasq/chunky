@@ -5,16 +5,6 @@ Supports four strategies: ``token``, ``recursive``, ``character``, ``markdown``.
 
 Install:
     pip install langchain-text-splitters tiktoken
-
-# TODO (PERF): All LangChain split_text() strategies are pure-Python string
-# processing that holds the GIL for their entire duration.  The current
-# ThreadPoolExecutor (via asyncio.to_thread()) therefore provides no
-# parallelism when 2+ chunking requests run simultaneously — the threads
-# serialise on the GIL and effective throughput is no better than serial.
-# If profiling under real load confirms GIL contention, replace
-# asyncio.to_thread() in chunks_router.py with a ProcessPoolExecutor worker
-# for this splitter.  The trade-off is pickling overhead (~few ms) vs. true
-# CPU parallelism.  Only worth doing if concurrent chunking is a bottleneck.
 """
 
 from __future__ import annotations
@@ -30,9 +20,9 @@ from langchain_text_splitters import (
     TokenTextSplitter,
 )
 
-from backend.models.schemas import ChunkItem, ChunkRequest, SplitterType
-from backend.registry import register_splitter
-from .base import TextSplitter
+from backend.models.schemas import ChunkItem, ChunkRequest, ChunkerType
+from backend.registry import register_chunker
+from .base import TextChunker
 
 # Headers recognised by the Markdown splitter (H1 → H3).
 _MARKDOWN_HEADERS = [
@@ -45,10 +35,10 @@ _LIB = "langchain"
 _LIB_LABEL = "LangChain"
 
 
-class LangChainSplitter(TextSplitter):
+class LangChainChunker(TextChunker):
     """Text splitter that delegates to LangChain's text-splitting utilities.
 
-    Strategy is chosen at call time via :attr:`ChunkRequest.splitter_type`.
+    Strategy is chosen at call time via :attr:`ChunkRequest.chunker_type`.
 
     Strategies
     ----------
@@ -69,12 +59,12 @@ class LangChainSplitter(TextSplitter):
         (activated by ``enable_markdown_sizing``).
     """
 
-    def split(self, request: ChunkRequest) -> list[ChunkItem]:
-        handler = self._DISPATCH.get(request.splitter_type)
+    def chunk(self, request: ChunkRequest) -> list[ChunkItem]:
+        handler = self._DISPATCH.get(request.chunker_type)
         if handler is None:
             raise HTTPException(
                 status_code=400,
-                detail=f"LangChainSplitter does not support splitter_type='{request.splitter_type}'",
+                detail=f"LangChainChunker does not support chunker_type='{request.chunker_type}'",
             )
         return handler(self, request)
 
@@ -82,7 +72,7 @@ class LangChainSplitter(TextSplitter):
     # Private strategy methods
     # ------------------------------------------------------------------
 
-    @register_splitter(
+    @register_chunker(
         library=_LIB, library_label=_LIB_LABEL,
         strategy="token", label="Token",
         description="Splits on token boundaries via tiktoken. Ideal for LLM context-window management.",
@@ -99,7 +89,7 @@ class LangChainSplitter(TextSplitter):
         char_overlap = self.measure_char_overlap(splits)
         return self.build_chunks(request.content, splits, char_overlap)
 
-    @register_splitter(
+    @register_chunker(
         library=_LIB, library_label=_LIB_LABEL,
         strategy="recursive", label="Recursive",
         description="Tries paragraph → sentence → word boundaries in order.",
@@ -119,7 +109,7 @@ class LangChainSplitter(TextSplitter):
             request.chunk_overlap,
         )
 
-    @register_splitter(
+    @register_chunker(
         library=_LIB, library_label=_LIB_LABEL,
         strategy="character", label="Character",
         description="Splits on \\n\\n paragraphs, falls back to chunk_size characters.",
@@ -136,7 +126,7 @@ class LangChainSplitter(TextSplitter):
             request.chunk_overlap,
         )
 
-    @register_splitter(
+    @register_chunker(
         library=_LIB, library_label=_LIB_LABEL,
         strategy="markdown", label="Markdown",
         description=(
@@ -190,9 +180,9 @@ class LangChainSplitter(TextSplitter):
     # Dispatch table
     # ------------------------------------------------------------------
 
-    _DISPATCH: dict[SplitterType, Callable[[LangChainSplitter, ChunkRequest], list[ChunkItem]]] = {
-        SplitterType.token: _split_token,
-        SplitterType.recursive: _split_recursive,
-        SplitterType.character: _split_character,
-        SplitterType.markdown: _split_markdown,
+    _DISPATCH: dict[ChunkerType, Callable[[LangChainChunker, ChunkRequest], list[ChunkItem]]] = {
+        ChunkerType.token: _split_token,
+        ChunkerType.recursive: _split_recursive,
+        ChunkerType.character: _split_character,
+        ChunkerType.markdown: _split_markdown,
     }

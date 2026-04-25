@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.config import get_settings
 from backend.logging_config import configure_logging
 from backend.services.document_service import _init_cpu_worker
+from backend.services.chunking_service import _init_chunk_worker
 from backend.routers.documents_router import router as documents_router
 from backend.routers.chunks_router import router as chunks_router
 from backend.routers.capabilities_router import router as capabilities_router
@@ -65,8 +66,16 @@ async def lifespan(app: FastAPI):
     app.state.cpu_converter_executor = ProcessPoolExecutor(
         max_workers=settings.MAX_CONCURRENT_CONVERSIONS,
         initializer=_init_cpu_worker,
-        max_tasks_per_child=settings.CPU_CONVERTER_MAX_TASKS_PER_CHILD or None,
+        max_tasks_per_child=settings.CPU_WORKER_MAX_TASKS_PER_CHILD or None,
     )
+
+    app.state.chunk_semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_CHUNKING)
+    app.state.cpu_chunker_executor = ProcessPoolExecutor(
+        max_workers=settings.MAX_CONCURRENT_CHUNKING,
+        initializer=_init_chunk_worker,
+        max_tasks_per_child=settings.CPU_WORKER_MAX_TASKS_PER_CHILD or None,
+    )
+
     # Executors replaced during cancellation are collected here so the lifespan
     # teardown can clean them up even if their worker processes were already killed.
     app.state.retired_executors: list = []
@@ -74,20 +83,27 @@ async def lifespan(app: FastAPI):
     yield
 
     await app.state.http_client_async.aclose()
-    # Shut down the process pool in a thread so the event loop stays responsive.
+    # Shut down process pools in a thread so the event loop stays responsive.
     # A 30 s timeout ensures the server can always exit even if a worker is stuck
     # (e.g. inside a C extension ignoring SIGTERM).
     import logging as _log
-    try:
-        await asyncio.wait_for(
-            asyncio.to_thread(app.state.cpu_converter_executor.shutdown, wait=True),
-            timeout=30.0,
-        )
-    except asyncio.TimeoutError:
-        _log.getLogger(__name__).warning(
-            "CPU executor did not shut down within 30 s — forcing cancel"
-        )
-        app.state.cpu_converter_executor.shutdown(wait=False, cancel_futures=True)
+    for _exec_attr, _exec_label in (
+        ("cpu_converter_executor", "CPU converter"),
+        ("cpu_chunker_executor", "CPU chunker"),
+    ):
+        _executor = getattr(app.state, _exec_attr, None)
+        if _executor is None:
+            continue
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(_executor.shutdown, wait=True),
+                timeout=30.0,
+            )
+        except asyncio.TimeoutError:
+            _log.getLogger(__name__).warning(
+                "%s executor did not shut down within 30 s — forcing cancel", _exec_label
+            )
+            _executor.shutdown(wait=False, cancel_futures=True)
     _retired_log = _log.getLogger(__name__)
     for _ex in app.state.retired_executors:
         try:

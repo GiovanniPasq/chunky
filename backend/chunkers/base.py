@@ -1,31 +1,30 @@
 """
-Abstract base class for text splitters.
+Abstract base class for text chunkers.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
 
 from backend.models.schemas import ChunkItem, ChunkRequest
 
 
-class TextSplitter(ABC):
-    """Base class for all text splitters.
+class TextChunker(ABC):
+    """Base class for all text chunkers.
 
-    Subclasses must implement :meth:`split`. They receive the full
+    Subclasses must implement :meth:`chunk`. They receive the full
     :class:`~backend.models.schemas.ChunkRequest` so they can access
-    ``chunk_size``, ``chunk_overlap``, ``splitter_type``,
+    ``chunk_size``, ``chunk_overlap``, ``chunker_type``,
     ``enable_markdown_sizing``, and any future fields without a signature change.
     """
 
     @abstractmethod
-    def split(self, request: ChunkRequest) -> list[ChunkItem]:
-        """Split the text in *request* and return a list of :class:`ChunkItem`.
+    def chunk(self, request: ChunkRequest) -> list[ChunkItem]:
+        """Chunk the text in *request* and return a list of :class:`ChunkItem`.
 
         Args:
             request: The validated chunking request, including text content
-                     and all splitting parameters.
+                     and all chunking parameters.
 
         Returns:
             Ordered list of :class:`ChunkItem` objects with ``index``,
@@ -45,11 +44,11 @@ class TextSplitter(ABC):
         """Map raw text splits back to their character positions in *original*.
 
         Args:
-            original:     The source text that was split.
-            splits:       List of text fragments produced by the splitter.
-            char_overlap: Overlap size **in characters** used during splitting.
+            original:     The source text that was chunked.
+            splits:       List of text fragments produced by the chunker.
+            char_overlap: Overlap size **in characters** used during chunking.
                           Controls how far back the search window rewinds before
-                          looking for the next chunk.  For token-based splitters,
+                          looking for the next chunk.  For token-based chunkers,
                           pass the measured character overlap (not the token count)
                           — see :meth:`measure_char_overlap`.
 
@@ -73,7 +72,7 @@ class TextSplitter(ABC):
     def measure_char_overlap(splits: list[str]) -> int:
         """Return the character length of the overlap between the first two splits.
 
-        Token-based splitters report ``chunk_overlap`` in tokens, but
+        Token-based chunkers report ``chunk_overlap`` in tokens, but
         :meth:`build_chunks` needs the equivalent in *characters*.  Measuring
         the longest common suffix/prefix of the first two adjacent chunks gives
         the exact value without any token-to-character estimation.

@@ -21,7 +21,7 @@ type LoadState = 'loading' | 'ok' | 'error'
 type TabId = 'conversion' | 'chunking' | 'enrichment'
 
 function strategiesFor(caps: Capabilities, library: string) {
-  return caps.splitters.find(l => l.library === library)?.strategies ?? []
+  return caps.chunkers.find(l => l.library === library)?.strategies ?? []
 }
 
 function resolveStrategy(caps: Capabilities, library: string, current: string): string {
@@ -45,14 +45,14 @@ export default function SettingsModal({ isOpen, onClose, onSave, current }: Prop
       setCaps(data)
       setLoadState('ok')
       setSettings(prev => {
-        const lib = data.splitters.some(l => l.library === prev.splitterLibrary)
-          ? prev.splitterLibrary
-          : (data.splitters[0]?.library ?? prev.splitterLibrary)
-        const strategy = resolveStrategy(data, lib, prev.splitterType)
+        const lib = data.chunkers.some(l => l.library === prev.chunkerLibrary)
+          ? prev.chunkerLibrary
+          : (data.chunkers[0]?.library ?? prev.chunkerLibrary)
+        const strategy = resolveStrategy(data, lib, prev.chunkerType)
         const converter = data.converters.some(c => c.name === prev.converter)
           ? prev.converter
           : (data.converters[0]?.name ?? prev.converter)
-        return { ...prev, splitterLibrary: lib, splitterType: strategy, converter }
+        return { ...prev, chunkerLibrary: lib, chunkerType: strategy, converter }
       })
       return
     }
@@ -64,14 +64,14 @@ export default function SettingsModal({ isOpen, onClose, onSave, current }: Prop
         setCaps(data)
         setLoadState('ok')
         setSettings(prev => {
-          const lib = data.splitters.some(l => l.library === prev.splitterLibrary)
-            ? prev.splitterLibrary
-            : (data.splitters[0]?.library ?? prev.splitterLibrary)
-          const strategy = resolveStrategy(data, lib, prev.splitterType)
+          const lib = data.chunkers.some(l => l.library === prev.chunkerLibrary)
+            ? prev.chunkerLibrary
+            : (data.chunkers[0]?.library ?? prev.chunkerLibrary)
+          const strategy = resolveStrategy(data, lib, prev.chunkerType)
           const converter = data.converters.some(c => c.name === prev.converter)
             ? prev.converter
             : (data.converters[0]?.name ?? prev.converter)
-          return { ...prev, splitterLibrary: lib, splitterType: strategy, converter }
+          return { ...prev, chunkerLibrary: lib, chunkerType: strategy, converter }
         })
       })
       .catch(() => setLoadState('error'))
@@ -101,8 +101,8 @@ export default function SettingsModal({ isOpen, onClose, onSave, current }: Prop
 
   const handleLibraryChange = (lib: string) => {
     if (!caps) return
-    const strategy = resolveStrategy(caps, lib, settings.splitterType)
-    setSettings(prev => ({ ...prev, splitterLibrary: lib, splitterType: strategy }))
+    const strategy = resolveStrategy(caps, lib, settings.chunkerType)
+    setSettings(prev => ({ ...prev, chunkerLibrary: lib, chunkerType: strategy }))
   }
 
   const handleOverlay = (e: React.MouseEvent) => {
@@ -118,13 +118,16 @@ export default function SettingsModal({ isOpen, onClose, onSave, current }: Prop
     setSettings(DEFAULT_SETTINGS)
   }
 
-  const availableStrategies = caps ? strategiesFor(caps, settings.splitterLibrary) : []
-  const currentStrategy = availableStrategies.find(s => s.strategy === settings.splitterType)
+  const availableStrategies = caps ? strategiesFor(caps, settings.chunkerLibrary) : []
+  const currentStrategy = availableStrategies.find(s => s.strategy === settings.chunkerType)
 
-  const isSizeDisabled = settings.splitterType === 'markdown' && !settings.enableMarkdownSizing
+  const isDocling = settings.chunkerLibrary === 'docling'
+  const isSizeDisabled = settings.chunkerType === 'markdown' && !settings.enableMarkdownSizing
   const isOverlapDisabled =
     isSizeDisabled ||
-    (settings.splitterLibrary === 'chonkie' && CHONKIE_NO_OVERLAP.has(settings.splitterType))
+    isDocling ||
+    (settings.chunkerLibrary === 'chonkie' && CHONKIE_NO_OVERLAP.has(settings.chunkerType))
+  const isSizeInTokens = settings.chunkerType === 'token' || isDocling
 
   return (
     <div className="modal-overlay" onClick={handleOverlay}>
@@ -245,12 +248,12 @@ export default function SettingsModal({ isOpen, onClose, onSave, current }: Prop
                   <div className="modal-section-title">Chunking</div>
 
                   <div className="form-group">
-                    <label>Splitter Library</label>
+                    <label>Chunker Library</label>
                     <div className="library-toggle">
-                      {caps.splitters.map((lib: CapabilityLibrary) => (
+                      {caps.chunkers.map((lib: CapabilityLibrary) => (
                         <button
                           key={lib.library}
-                          className={`library-option${settings.splitterLibrary === lib.library ? ' selected' : ''}`}
+                          className={`library-option${settings.chunkerLibrary === lib.library ? ' selected' : ''}`}
                           onClick={() => handleLibraryChange(lib.library)}
                         >
                           <span className="library-label">{lib.label}</span>
@@ -261,10 +264,10 @@ export default function SettingsModal({ isOpen, onClose, onSave, current }: Prop
                   </div>
 
                   <div className="form-group">
-                    <label>Splitter Type</label>
+                    <label>Chunker Type</label>
                     <select
-                      value={settings.splitterType}
-                      onChange={e => set('splitterType', e.target.value)}
+                      value={settings.chunkerType}
+                      onChange={e => set('chunkerType', e.target.value)}
                     >
                       {availableStrategies.map(s => (
                         <option key={s.strategy} value={s.strategy}>{s.label}</option>
@@ -273,7 +276,7 @@ export default function SettingsModal({ isOpen, onClose, onSave, current }: Prop
                     {currentStrategy && <small>{currentStrategy.description}</small>}
                   </div>
 
-                  {settings.splitterType === 'markdown' && (
+                  {settings.chunkerType === 'markdown' && (
                     <div className="form-group checkbox-group">
                       <label>
                         <input
@@ -288,7 +291,7 @@ export default function SettingsModal({ isOpen, onClose, onSave, current }: Prop
 
                   <div className="form-row">
                     <div className="form-group">
-                      <label>Chunk Size <span className="label-hint">({settings.splitterType === 'token' ? 'tokens' : 'chars'})</span></label>
+                      <label>Chunk Size <span className="label-hint">({isSizeInTokens ? 'tokens' : 'chars'})</span></label>
                       <input
                         type="number"
                         value={settings.chunkSize}
@@ -298,7 +301,7 @@ export default function SettingsModal({ isOpen, onClose, onSave, current }: Prop
                       />
                     </div>
                     <div className="form-group">
-                      <label>Overlap <span className="label-hint">({settings.splitterType === 'token' ? 'tokens' : 'chars'})</span></label>
+                      <label>Overlap <span className="label-hint">({isSizeInTokens ? 'tokens' : 'chars'})</span></label>
                       <input
                         type="number"
                         value={settings.chunkOverlap}

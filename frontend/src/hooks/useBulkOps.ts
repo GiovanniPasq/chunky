@@ -1,6 +1,8 @@
 import { useState, useRef, useCallback } from 'react'
 import type { ChunkSettings, ConverterType, VLMSettings, CloudSettings } from '../types'
 import type { BulkProgressFn, BulkResultFn } from './useDocument'
+import { consumeChunkSse } from '../utils/consumeChunkSse'
+import { CONNECTION_LOST_MSG } from '../utils/parseSse'
 
 export interface BulkOp {
   title: string
@@ -22,16 +24,13 @@ interface Options {
     onConnectionLost?: () => void,
     onPageProgress?: (filename: string, page: number, totalPages: number, fileIndex: number, fileTotal: number) => void,
   ) => Promise<void>
-  chunkAndSaveFile: (filename: string, s: ChunkSettings, signal?: AbortSignal) => Promise<void>
   settings: ChunkSettings
   showToast: (message: string, type: 'success' | 'error') => void
-  /** Called after a successful batch convert so the caller can refresh metadata and the active document. */
   onConvertSuccess: (succeededFiles: Set<string>) => Promise<void>
 }
 
 export function useBulkOps({
   batchConvert,
-  chunkAndSaveFile,
   settings,
   showToast,
   onConvertSuccess,
@@ -95,9 +94,6 @@ export function useBulkOps({
       )
     } catch (err) {
       if (!(err instanceof DOMException && err.name === 'AbortError')) {
-        // Non-abort error (e.g. network failure before the stream starts).
-        // Show a toast and fall through to cleanup — do NOT re-throw so that
-        // setBulkOp(null) always runs and the modal is never left open.
         showToast(err instanceof Error ? err.message : 'Batch conversion failed', 'error')
         setBulkOp(null)
         setBulkConnectionLost(false)
@@ -127,30 +123,40 @@ export function useBulkOps({
     let succeeded = 0
     let failed = 0
 
-    for (let i = 0; i < filenames.length; i++) {
-      if (signal.aborted) break
-
-      const filename = filenames[i]
-      onProgress(i + 1, filenames.length, filename)
+    const onFileStart = (filename: string, index: number, total: number) => {
+      onProgress(index, total, filename)
       setBulkOp(prev => prev
-        ? { ...prev, detail: `File ${i + 1} of ${filenames.length} — ${filename}`, current: i + 1 }
+        ? { ...prev, detail: `File ${index} of ${total} — ${filename}`, current: index }
         : null
       )
+    }
 
-      try {
-        await chunkAndSaveFile(filename, settings, signal)
-        onResult(filename, true)
-        succeeded++
-      } catch {
-        onResult(filename, false)
-        failed++
+    const onFileDone = (filename: string, success: boolean) => {
+      onResult(filename, success)
+      if (success) succeeded++
+      else failed++
+    }
+
+    try {
+      await consumeChunkSse(
+        filenames,
+        settings,
+        signal,
+        () => setBulkConnectionLost(true),
+        onFileStart,
+        onFileDone,
+      )
+    } catch (err) {
+      if (!(err instanceof DOMException && err.name === 'AbortError')) {
+        showToast(err instanceof Error ? err.message : 'Batch chunking failed', 'error')
       }
     }
 
     setBulkOp(null)
+    setBulkConnectionLost(false)
     if (succeeded > 0) showToast(`Chunked ${succeeded} file${succeeded > 1 ? 's' : ''} ✓`, 'success')
     if (failed > 0) showToast(`${failed} file${failed > 1 ? 's' : ''} failed to chunk`, 'error')
-  }, [chunkAndSaveFile, settings, showToast])
+  }, [settings, showToast])
 
   return { bulkOp, bulkConnectionLost, interruptBulk, handleBulkConvert, handleBulkChunk }
 }

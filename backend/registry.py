@@ -1,16 +1,16 @@
 """
-Central capability registry for splitters and converters.
+Central capability registry for chunkers and converters.
 
 Usage
 -----
-Decorate each splitter method with @register_splitter and each converter
+Decorate each chunker method with @register_chunker and each converter
 class with @register_converter. The registry then exposes get_capabilities()
 which is served by the /api/capabilities endpoint — no frontend changes
 needed when new strategies or libraries are added.
 
 Example
 -------
-    @register_splitter(library="langchain", strategy="token", label="Token")
+    @register_chunker(library="langchain", library_label="LangChain", strategy="token", label="Token")
     def _split_token(self, request): ...
 
     @register_converter(name="pymupdf", label="PyMuPDF", description="Fast, lightweight")
@@ -29,17 +29,17 @@ from typing import Any
 
 
 @dataclass
-class SplitterStrategyMeta:
+class ChunkerStrategyMeta:
     strategy: str          # enum value, e.g. "token"
     label: str             # human-readable, e.g. "Token"
     description: str = ""
 
 
 @dataclass
-class SplitterLibraryMeta:
+class ChunkerLibraryMeta:
     library: str           # enum value, e.g. "langchain"
     label: str             # human-readable, e.g. "LangChain"
-    strategies: list[SplitterStrategyMeta] = field(default_factory=list)
+    strategies: list[ChunkerStrategyMeta] = field(default_factory=list)
 
 
 @dataclass
@@ -55,11 +55,11 @@ class ConverterMeta:
 
 
 class _CapabilityRegistry:
-    """Singleton that accumulates registered splitters and converters."""
+    """Singleton that accumulates registered chunkers and converters."""
 
     def __init__(self) -> None:
-        # library_key → SplitterLibraryMeta
-        self._splitters: dict[str, SplitterLibraryMeta] = {}
+        # library_key → ChunkerLibraryMeta
+        self._chunkers: dict[str, ChunkerLibraryMeta] = {}
         # converter_name → ConverterMeta
         self._converters: dict[str, ConverterMeta] = {}
 
@@ -67,7 +67,7 @@ class _CapabilityRegistry:
     # Registration API
     # ------------------------------------------------------------------
 
-    def add_splitter_strategy(
+    def add_chunker_strategy(
         self,
         library: str,
         library_label: str,
@@ -75,15 +75,15 @@ class _CapabilityRegistry:
         label: str,
         description: str = "",
     ) -> None:
-        if library not in self._splitters:
-            self._splitters[library] = SplitterLibraryMeta(
+        if library not in self._chunkers:
+            self._chunkers[library] = ChunkerLibraryMeta(
                 library=library, label=library_label
             )
-        lib_meta = self._splitters[library]
+        lib_meta = self._chunkers[library]
         # Avoid duplicates
         if not any(s.strategy == strategy for s in lib_meta.strategies):
             lib_meta.strategies.append(
-                SplitterStrategyMeta(strategy=strategy, label=label, description=description)
+                ChunkerStrategyMeta(strategy=strategy, label=label, description=description)
             )
 
     def add_converter(
@@ -104,7 +104,7 @@ class _CapabilityRegistry:
     def get_capabilities(self) -> dict[str, Any]:
         """Return the full capabilities dict served to the frontend."""
         return {
-            "splitters": [
+            "chunkers": [
                 {
                     "library": lib.library,
                     "label": lib.label,
@@ -117,7 +117,7 @@ class _CapabilityRegistry:
                         for s in lib.strategies
                     ],
                 }
-                for lib in self._splitters.values()
+                for lib in self._chunkers.values()
             ],
             "converters": [
                 {
@@ -139,18 +139,18 @@ registry = _CapabilityRegistry()
 # ---------------------------------------------------------------------------
 
 
-def register_splitter(
+def register_chunker(
     library: str,
     library_label: str,
     strategy: str,
     label: str,
     description: str = "",
 ):
-    """Decorator for splitter *methods* — registers the strategy on import.
+    """Decorator for chunker *methods* — registers the strategy on import.
 
-    Apply to the individual strategy methods inside a TextSplitter subclass::
+    Apply to the individual strategy methods inside a TextChunker subclass::
 
-        @register_splitter(
+        @register_chunker(
             library="langchain", library_label="LangChain",
             strategy="token", label="Token",
             description="Splits on token boundaries via tiktoken.",
@@ -159,7 +159,7 @@ def register_splitter(
             ...
     """
     def decorator(fn):
-        registry.add_splitter_strategy(
+        registry.add_chunker_strategy(
             library=library,
             library_label=library_label,
             strategy=strategy,

@@ -22,7 +22,13 @@ BACKEND_PID=$!
 echo "Backend started (PID: $BACKEND_PID) at http://localhost:8000"
 echo ""
 
-sleep 2
+# Wait for backend to be ready
+echo "Waiting for backend to be ready..."
+until curl -s http://localhost:8000/health > /dev/null 2>&1; do
+    sleep 1
+done
+echo "Backend is ready!"
+echo ""
 
 # Start frontend
 echo "Starting React frontend..."

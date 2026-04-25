@@ -11,16 +11,6 @@ Install
     pip install chonkie[neural]      # + NeuralChunker
     pip install "chonkie[code]"      # + CodeChunker (tree-sitter; requires Rust toolchain for installation)
 
-# TODO (PERF): Token-based chunkers (TokenChunker, FastChunker, etc.) are
-# pure-Python and hold the GIL, so concurrent requests via ThreadPoolExecutor
-# serialise on the GIL.  SemanticChunker / NeuralChunker use PyTorch — the
-# C/CUDA kernels release the GIL but Python orchestration does not, so
-# parallelism is partial.  If profiling under 3+ simultaneous chunking
-# requests confirms GIL contention as a bottleneck, switch the pure-Python
-# strategies to a ProcessPoolExecutor in chunks_router.py.  ML-backed
-# strategies may benefit from a dedicated worker process with the model
-# pre-loaded to amortise initialisation cost.
-
 Supported strategies (SplitterType enum values)
 ------------------------------------------------
     token     → TokenChunker
@@ -31,13 +21,6 @@ Supported strategies (SplitterType enum values)
     code      → CodeChunker          (AST-based code split)
     semantic  → SemanticChunker      (embedding similarity; requires chonkie[semantic])
     neural    → NeuralChunker        (fine-tuned BERT; requires chonkie[neural])
-
-Notes
------
-- RecursiveChunker does NOT accept chunk_overlap. This is a Chonkie API
-  constraint; use OverlapRefinery post-processing if overlap is required.
-- SemanticChunker and NeuralChunker download ML models on first use.
-  They may be slow to initialise.
 """
 
 from __future__ import annotations
@@ -46,29 +29,29 @@ from typing import Callable
 
 from fastapi import HTTPException
 
-from backend.models.schemas import ChunkItem, ChunkRequest, SplitterType
-from backend.registry import register_splitter
-from .base import TextSplitter
+from backend.models.schemas import ChunkItem, ChunkRequest, ChunkerType
+from backend.registry import register_chunker
+from .base import TextChunker
 
 _LIB = "chonkie"
 _LIB_LABEL = "Chonkie"
 
 
-class ChonkieSplitter(TextSplitter):
+class ChonkieChunker(TextChunker):
     """Text splitter delegating to the Chonkie library.
 
     Chunkers are instantiated fresh per request so that chunk_size and
     chunk_overlap are always respected without stale state.
     """
 
-    def split(self, request: ChunkRequest) -> list[ChunkItem]:
-        handler = self._DISPATCH.get(request.splitter_type)
+    def chunk(self, request: ChunkRequest) -> list[ChunkItem]:
+        handler = self._DISPATCH.get(request.chunker_type)
         if handler is None:
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"ChonkieSplitter does not support "
-                    f"splitter_type='{request.splitter_type}'"
+                    f"ChonkieChunker does not support "
+                    f"chunker_type='{request.chunker_type}'"
                 ),
             )
         return handler(self, request)
@@ -77,7 +60,7 @@ class ChonkieSplitter(TextSplitter):
     # Strategies
     # ------------------------------------------------------------------
 
-    @register_splitter(
+    @register_chunker(
         library=_LIB, library_label=_LIB_LABEL,
         strategy="token", label="Token",
         description="Splits on token boundaries. Fast, no external tokeniser needed.",
@@ -97,7 +80,7 @@ class ChonkieSplitter(TextSplitter):
         )
         return self._chunks_from_chonkie(chunker, request.content)
 
-    @register_splitter(
+    @register_chunker(
         library=_LIB, library_label=_LIB_LABEL,
         strategy="fast", label="Fast",
         description=(
@@ -114,7 +97,7 @@ class ChonkieSplitter(TextSplitter):
         )
         return self._chunks_from_chonkie(chunker, request.content)
 
-    @register_splitter(
+    @register_chunker(
         library=_LIB, library_label=_LIB_LABEL,
         strategy="sentence", label="Sentence",
         description="Splits at sentence boundaries. Preserves semantic completeness.",
@@ -128,7 +111,7 @@ class ChonkieSplitter(TextSplitter):
         )
         return self._chunks_from_chonkie(chunker, request.content)
 
-    @register_splitter(
+    @register_chunker(
         library=_LIB, library_label=_LIB_LABEL,
         strategy="recursive", label="Recursive",
         description=(
@@ -147,7 +130,7 @@ class ChonkieSplitter(TextSplitter):
         )
         return self._chunks_from_chonkie(chunker, request.content)
 
-    @register_splitter(
+    @register_chunker(
         library=_LIB, library_label=_LIB_LABEL,
         strategy="table", label="Table",
         description=(
@@ -165,7 +148,7 @@ class ChonkieSplitter(TextSplitter):
         chunker = TableChunker()
         return self._chunks_from_chonkie(chunker, request.content)
 
-    @register_splitter(
+    @register_chunker(
         library=_LIB, library_label=_LIB_LABEL,
         strategy="code", label="Code",
         description=(
@@ -183,7 +166,7 @@ class ChonkieSplitter(TextSplitter):
         )
         return self._chunks_from_chonkie(chunker, request.content)
 
-    @register_splitter(
+    @register_chunker(
         library=_LIB, library_label=_LIB_LABEL,
         strategy="semantic", label="Semantic",
         description=(
@@ -203,7 +186,7 @@ class ChonkieSplitter(TextSplitter):
         )
         return self._chunks_from_chonkie(chunker, request.content)
 
-    @register_splitter(
+    @register_chunker(
         library=_LIB, library_label=_LIB_LABEL,
         strategy="neural", label="Neural",
         description=(
@@ -250,13 +233,13 @@ class ChonkieSplitter(TextSplitter):
     # Dispatch table
     # ------------------------------------------------------------------
 
-    _DISPATCH: dict[SplitterType, Callable[[ChonkieSplitter, ChunkRequest], list[ChunkItem]]] = {
-        SplitterType.token: _split_token,
-        SplitterType.fast: _split_fast,
-        SplitterType.sentence: _split_sentence,
-        SplitterType.recursive: _split_recursive,
-        SplitterType.table: _split_table,
-        SplitterType.code: _split_code,
-        SplitterType.semantic: _split_semantic,
-        SplitterType.neural: _split_neural,
+    _DISPATCH: dict[ChunkerType, Callable[[ChonkieChunker, ChunkRequest], list[ChunkItem]]] = {
+        ChunkerType.token: _split_token,
+        ChunkerType.fast: _split_fast,
+        ChunkerType.sentence: _split_sentence,
+        ChunkerType.recursive: _split_recursive,
+        ChunkerType.table: _split_table,
+        ChunkerType.code: _split_code,
+        ChunkerType.semantic: _split_semantic,
+        ChunkerType.neural: _split_neural,
     }

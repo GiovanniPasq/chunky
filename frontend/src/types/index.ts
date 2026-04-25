@@ -55,15 +55,15 @@ export interface EnrichmentSettings {
 }
 
 // ---------------------------------------------------------------------------
-// Splitter types — open strings; the authoritative list comes from
+// Chunker types — open strings; the authoritative list comes from
 // GET /api/capabilities so new strategies appear automatically.
 // ---------------------------------------------------------------------------
-export type SplitterType = string
-export type SplitterLibrary = string
+export type ChunkerType = string
+export type ChunkerLibrary = string
 
 export interface ChunkSettings {
-  splitterType: SplitterType
-  splitterLibrary: SplitterLibrary
+  chunkerType: ChunkerType
+  chunkerLibrary: ChunkerLibrary
   chunkSize: number
   chunkOverlap: number
   enableMarkdownSizing: boolean
@@ -96,7 +96,7 @@ export interface CapabilityConverter {
 }
 
 export interface Capabilities {
-  splitters: CapabilityLibrary[]
+  chunkers: CapabilityLibrary[]
   converters: CapabilityConverter[]
 }
 

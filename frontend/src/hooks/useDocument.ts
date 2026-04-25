@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import type { ChunkSettings, DocumentData, ConverterType, VLMSettings, CloudSettings } from '../types'
+import type { DocumentData, ConverterType, VLMSettings, CloudSettings } from '../types'
 import { parseSse, CONNECTION_LOST_MSG } from '../utils/parseSse'
-import { consumeChunkSse } from '../utils/consumeChunkSse'
 import { API_BASE } from '../services/apiService'
 
 export type BulkProgressFn = (current: number, total: number, filename: string) => void
@@ -202,6 +201,7 @@ export function useDocument(toast: ToastCallbacks) {
         } else if (event.type === 'file_done') {
           if (!event.success) { fileError = String(event.error ?? 'Conversion failed'); break }
           mdContent = event.md_content as string
+          break
         } else if (event.type === 'error') {
           throw new Error(String(event.message ?? 'Conversion error'))
         } else if (event.type === 'cancelled') {
@@ -367,33 +367,6 @@ export function useDocument(toast: ToastCallbacks) {
     }
   }, [])
 
-  /** Chunk and save a specific file without changing the selected document. */
-  const chunkAndSaveFile = useCallback(async (
-    filename: string,
-    s: ChunkSettings,
-    signal?: AbortSignal,
-  ): Promise<void> => {
-    const docRes = await fetch(`${API}/document/${encodeURIComponent(filename)}`, { signal })
-    if (!docRes.ok) throw new Error('Failed to load document')
-    const docData: DocumentData = await docRes.json()
-    if (!docData.has_markdown) throw new Error('No markdown available')
-
-    const chunks = await consumeChunkSse(docData.md_content, s, signal)
-
-    const saveRes = await fetch(`${API}/chunks/save`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal,
-      body: JSON.stringify({
-        filename,
-        splitter_type: s.splitterType,
-        splitter_library: s.splitterLibrary,
-        chunks,
-      }),
-    })
-    if (!saveRes.ok) throw new Error('Save failed')
-  }, [])
-
   return {
     documents, selectedDoc, documentData, loading, uploading, converting, convertingToPdf, savingMd,
     conversionProgress, conversionErrorMessage,
@@ -401,6 +374,6 @@ export function useDocument(toast: ToastCallbacks) {
     convertToMarkdown, cancelConversion,
     convertMdToPdf, cancelMdToPdfConversion,
     saveMarkdown, deleteMarkdown,
-    batchConvert, chunkAndSaveFile,
+    batchConvert,
   }
 }

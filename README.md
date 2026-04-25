@@ -45,7 +45,7 @@ As [NVIDIA's research](https://developer.nvidia.com/blog/finding-the-best-chunki
 | ✨ **Six PDF → Markdown converters** | PyMuPDF, Docling, MarkItDown, LiteParse, VLM, Cloud API |
 | 🔄 **Re-convert on the fly** | Switch converter and regenerate without restarting the pipeline |
 | 📦 **Bulk PDF conversion** | Convert multiple PDFs to Markdown in a single batch operation |
-| ✂️ **12 chunking strategies** | LangChain (4 strategies) and Chonkie (8 strategies) |
+| ✂️ **14 chunking strategies** | LangChain (4 strategies), Chonkie (8 strategies) and Docling (2 strategies) |
 | 📚 **Bulk chunking** | Chunk multiple Markdown files at once with the same configuration |
 | 🧠 **Markdown enrichment** *(beta)* | Clean conversion artifacts before chunking |
 | ✨ **Chunk enrichment** *(beta)* | LLM-generated titles, summaries, keywords, and questions per chunk |
@@ -62,7 +62,7 @@ Two ways to run Chunky: locally or with Docker.
 ```bash
 git clone https://github.com/GiovanniPasq/chunky.git
 cd chunky
-python -m venv venv
+python -m venv .venv
 source venv/bin/activate
 pip install -r requirements.txt
 npm install -g @llamaindex/liteparse  # optional — only needed for the LiteParse converter
@@ -139,6 +139,15 @@ Chunky supports two splitting libraries, each exposing multiple strategies. The 
 
 > **Note:** The **Semantic** and **Neural** strategies download ML models on first use and may be slow to initialise.
 
+### Docling (`docling`)
+
+| Strategy | Description |
+|----------|-------------|
+| **Hybrid** | Hierarchical document-aware chunking with tokenization-aware refinements. Merges undersized chunks and supports header repetition across table splits. |
+| **Line-Based** | Preserves line boundaries with optional repeated prefix per chunk (e.g. table headers). Best for tables, code, and logs where line integrity matters. |
+
+> **Note:** Both **Docling** strategies operate on `DoclingDocument` objects and require the `docling` library. The **Hybrid** strategy downloads a tokenizer model on first use.
+
 ---
 
 ## Enrichment *(beta)*
@@ -172,7 +181,7 @@ The `questions` field addresses a complementary problem: pre-generating the ques
 
 ## Extending Chunky
 
-The converter and splitter layers use a **decorator-based registry**: adding a new converter or splitter automatically exposes it through the `/api/capabilities` endpoint and the UI — no frontend changes needed.
+The converter and chunker layers use a **decorator-based registry**: adding a new converter or chunker automatically exposes it through the `/api/capabilities` endpoint and the UI — no frontend changes needed.
 
 ### Adding a new converter
 
@@ -223,24 +232,24 @@ import backend.converters.my_converter  # noqa: F401 — side-effect import
 
 Done. The new converter appears automatically in `/api/capabilities` and the UI.
 
-### Adding a new splitter strategy
+### Adding a new chunker strategy
 
 ```python
-from backend.registry import register_splitter
+from backend.registry import register_chunker
 
-@register_splitter(
+@register_chunker(
     library="my_lib",
     library_label="My Library",
     strategy="my_strategy",
     label="My Strategy",
     description="Short description shown in the UI.",
 )
-def _split_my_strategy(self, request: ChunkRequest) -> List[ChunkItem]:
-    splits = my_splitter.split(request.content, request.chunk_size)
+def _chunk_my_strategy(self, request: ChunkRequest) -> list[ChunkItem]:
+    splits = my_chunker.split(request.content, request.chunk_size)
     return self.build_chunks(request.content, splits, request.chunk_overlap)
 ```
 
-Import the module in `capabilities_router.py` and add the strategy to the splitter's `_DISPATCH` table. The strategy appears in the UI automatically.
+Import the module in `capabilities_router.py` and add the strategy to the chunker's `_DISPATCH` table. The strategy appears in the UI automatically.
 
 ---
 

@@ -42,7 +42,7 @@ from backend.models.schemas import (
     EnrichMarkdownRequest,
 )
 from backend.services.enrichment_service import EnrichmentService
-from backend.utils.sse import sse_error as _sse_error, sse_event as _sse
+from backend.utils.sse import sse_error as _sse_error, sse_event as _sse, sse_timeout_tick
 
 router = APIRouter(prefix="/api/enrich", tags=["enrichment"])
 
@@ -111,17 +111,12 @@ async def enrich_markdown(http_request: Request, body: EnrichMarkdownRequest):
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=0.5)
                 except asyncio.TimeoutError:
-                    # Emit a keepalive comment every 30 s so the frontend's
-                    # connection-lost timer doesn't fire during slow LLM responses.
-                    if time.monotonic() - last_heartbeat >= get_settings().SSE_HEARTBEAT_INTERVAL_S:
+                    last_heartbeat, do_heartbeat, watchdog_fired = sse_timeout_tick(
+                        last_event, last_heartbeat, watchdog_s
+                    )
+                    if do_heartbeat:
                         yield ": heartbeat\n\n"
-                        last_heartbeat = time.monotonic()
-                        # Do NOT reset last_event here — last_event tracks real
-                        # progress; a heartbeat is only a connection keepalive.
-
-                    # Watchdog: if no event has arrived for watchdog_s seconds,
-                    # something is stuck — cancel and report.
-                    if watchdog_s > 0 and time.monotonic() - last_event > watchdog_s:
+                    if watchdog_fired:
                         logger.error(
                             "Markdown enrichment watchdog fired: no response for %.0fs — aborting",
                             watchdog_s,
@@ -263,17 +258,12 @@ async def enrich_chunks(http_request: Request, body: EnrichChunksRequest):
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=0.5)
                 except asyncio.TimeoutError:
-                    # Emit a keepalive comment every 30 s so the frontend's
-                    # connection-lost timer doesn't fire between slow chunks.
-                    if time.monotonic() - last_heartbeat >= get_settings().SSE_HEARTBEAT_INTERVAL_S:
+                    last_heartbeat, do_heartbeat, watchdog_fired = sse_timeout_tick(
+                        last_event, last_heartbeat, watchdog_s
+                    )
+                    if do_heartbeat:
                         yield ": heartbeat\n\n"
-                        last_heartbeat = time.monotonic()
-                        # Do NOT reset last_event here — last_event tracks real
-                        # progress; a heartbeat is only a connection keepalive.
-
-                    # Watchdog: if no chunk event has arrived for watchdog_s seconds,
-                    # something is stuck — cancel all in-flight chunks.
-                    if watchdog_s > 0 and time.monotonic() - last_event > watchdog_s:
+                    if watchdog_fired:
                         logger.error(
                             "Chunk enrichment watchdog fired: no event for %.0fs — cancelling all chunks",
                             watchdog_s,

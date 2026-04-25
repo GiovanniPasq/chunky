@@ -418,7 +418,7 @@ class DocumentService:
     # ------------------------------------------------------------------
 
     def convert_md_to_pdf(self, md_filename: str) -> MdToPdfResponse:
-        from backend.utils.md_to_pdf import _convert_file
+        from backend.scripts.md_to_pdf import _convert_file
 
         md_filename = safe_filename(md_filename, "Markdown filename")
         md_path = self._mds_dir / md_filename

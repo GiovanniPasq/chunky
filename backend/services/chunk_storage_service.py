@@ -62,7 +62,7 @@ class ChunkStorageService:
 
             chunks/<stem>/<documentName>_<chunkType>_<HH-MM-SS>.json
 
-        The ``<chunkType>`` is ``<library>-<splitter_type>`` when provided,
+        The ``<chunkType>`` is ``<library>-<chunker_type>`` when provided,
         otherwise ``chunks``.  The timestamp is ``HH-MM-SS`` in UTC.
         All components are sanitised (spaces and special characters replaced
         with hyphens) so the filename is safe on all operating systems.
@@ -81,11 +81,11 @@ class ChunkStorageService:
         dest_dir = self._chunks_dir / stem
         dest_dir.mkdir(parents=True, exist_ok=True)
 
-        # Build the chunk-type segment from splitter info when available.
-        if request.splitter_library and request.splitter_type:
-            chunk_type = _sanitise(f"{request.splitter_library}-{request.splitter_type}")
-        elif request.splitter_type:
-            chunk_type = _sanitise(request.splitter_type)
+        # Build the chunk-type segment from chunker info when available.
+        if request.chunker_library and request.chunker_type:
+            chunk_type = _sanitise(f"{request.chunker_library}-{request.chunker_type}")
+        elif request.chunker_type:
+            chunk_type = _sanitise(request.chunker_type)
         else:
             chunk_type = "chunks"
 

@@ -41,7 +41,6 @@ import asyncio
 import logging
 import threading
 import time
-from concurrent.futures import ProcessPoolExecutor
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
@@ -63,23 +62,13 @@ from backend.services.document_service import (
     convert_in_process,
     convert_md_to_pdf_in_process,
 )
-from backend.utils.sse import sse_error as _sse_error, sse_event as _sse, sse_watchdog_timeout as _watchdog_timeout
+from backend.utils.executor import cancel_cpu_executor
+from backend.utils.sse import sse_error as _sse_error, sse_event as _sse, sse_timeout_tick
 
 router = APIRouter(prefix="/api", tags=["documents"])
 _svc = DocumentService()
 logger = logging.getLogger(__name__)
 
-
-async def _escalate_kill(procs: list) -> None:
-    """Send SIGKILL to any worker that is still alive 3 s after SIGTERM."""
-    await asyncio.sleep(3.0)
-    for p in procs:
-        if p.is_alive():
-            try:
-                p.kill()
-                logger.warning("Worker process %d ignored SIGTERM — sent SIGKILL", p.pid)
-            except Exception as exc:
-                logger.debug("Failed to SIGKILL worker %d: %s", p.pid, exc)
 
 # Converters that run in a per-batch ProcessPoolExecutor (CPU-bound).
 # VLM and Cloud are excluded — they are I/O-bound (HTTP calls) and run in threads.
@@ -278,52 +267,20 @@ async def convert_pdfs(
                 for se in _stop_events:
                     se.set()
 
-            # 2. Cancel queued CPU-bound futures.
-            #    Future.cancel() returns True only for futures not yet picked up
-            #    by a worker.  Futures already running in a worker return False.
-            still_running: list = []
-            for f in list(_cpu_futures):
-                if not f.cancel():
-                    still_running.append(f)
-
-            # 3. Terminate worker processes that are executing in-flight jobs.
-            #    The only way to stop a running ProcessPoolExecutor job is to
-            #    kill the worker process itself.  After termination the pool is
-            #    broken, so we atomically replace it in app.state so that the
-            #    next batch can use CPU converters without restarting the server.
-            if is_cpu_bound and still_running:
-                old_executor = http_request.app.state.cpu_converter_executor
-                worker_procs = list(getattr(old_executor, '_processes', {}).values())
-
-                for proc in worker_procs:
-                    try:
-                        proc.terminate()
-                    except Exception as exc:
-                        logger.debug("Failed to send SIGTERM to worker %d: %s", proc.pid, exc)
-
+            # 2. Cancel CPU-bound futures; SIGTERM workers; swap executor.
+            if is_cpu_bound:
                 s = get_settings()
-                # Replace executor first so concurrent requests get the new one.
-                # Rebuild is inside try/finally so old_executor is always retired.
-                try:
-                    http_request.app.state.cpu_converter_executor = ProcessPoolExecutor(
-                        max_workers=s.MAX_CONCURRENT_CONVERSIONS,
-                        initializer=_init_cpu_worker,
-                        max_tasks_per_child=s.CPU_CONVERTER_MAX_TASKS_PER_CHILD or None,
-                    )
-                finally:
-                    # Register the retired executor for clean teardown at app shutdown.
-                    try:
-                        http_request.app.state.retired_executors.append(old_executor)
-                        old_executor.shutdown(wait=False, cancel_futures=True)
-                    except Exception as _exc:
-                        logger.warning("Failed to retire old CPU executor: %s", _exc)
+                await cancel_cpu_executor(
+                    _cpu_futures,
+                    http_request.app.state,
+                    "cpu_converter_executor",
+                    s.MAX_CONCURRENT_CONVERSIONS,
+                    _init_cpu_worker,
+                    "converter worker",
+                    logger,
+                )
 
-                # Escalate to SIGKILL in background for any worker that ignores SIGTERM
-                # (e.g. stuck inside a C extension).  Runs asynchronously so cancellation
-                # returns to the user immediately without waiting.
-                asyncio.create_task(_escalate_kill(worker_procs))
-
-            # 4. Cancel the asyncio runner task.
+            # 3. Cancel the asyncio runner task.
             runner.cancel()
             try:
                 await asyncio.wait_for(asyncio.shield(runner), timeout=10.0)
@@ -348,20 +305,19 @@ async def convert_pdfs(
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=0.5)
                 except asyncio.TimeoutError:
-                    if time.monotonic() - last_heartbeat >= get_settings().SSE_HEARTBEAT_INTERVAL_S:
+                    last_heartbeat, do_heartbeat, watchdog_fired = sse_timeout_tick(
+                        last_event, last_heartbeat, watchdog_s
+                    )
+                    if do_heartbeat:
                         yield ": heartbeat\n\n"
-                        last_heartbeat = time.monotonic()
-                        # Do NOT reset last_event here — last_event tracks real
-                        # progress; a heartbeat is only a connection keepalive.
-
-                    if watchdog_s > 0 and time.monotonic() - last_event > watchdog_s:
+                    if watchdog_fired:
                         logger.error(
                             "SSE watchdog fired: no event for %.0fs — cancelling all conversions",
                             watchdog_s,
                             extra={"operation": "convert"},
                         )
                         await _cancel_all()
-                        yield _sse_error(504, f"No progress for {watchdog_s}s — operation timed out")
+                        yield _sse_error(504, f"No progress for {watchdog_s:.0f}s — operation timed out")
                         return
                     continue
 
@@ -391,21 +347,14 @@ async def convert_pdfs(
 
 @router.post("/md-to-pdf/{filename}", response_model=MdToPdfResponse)
 async def convert_md_to_pdf(filename: str, http_request: Request):
-    """Convert a stored Markdown file to PDF using weasyprint."""
+    """Convert a stored Markdown file to PDF using markdown-pdf."""
     try:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            http_request.app.state.cpu_converter_executor,
-            convert_md_to_pdf_in_process,
-            filename,
-        )
+        return await asyncio.to_thread(_svc.convert_md_to_pdf, filename)
     except HTTPException:
         raise
     except Exception:
         logger.exception("Unexpected error in MD→PDF conversion of '%s'", filename)
         raise HTTPException(status_code=500, detail="MD to PDF conversion failed due to an internal error")
-
-
 # ── Delete ────────────────────────────────────────────────────────────────────
 
 @router.delete("/documents", response_model=DeleteResponse)

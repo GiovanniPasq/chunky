@@ -1,9 +1,14 @@
 """
-Standalone utility scripts for the  backend.
+Shared utility modules for the backend.
 
-Scripts
+Modules
 -------
-md_to_pdf
-    Batch-convert all Markdown files in ``docs/mds/`` to PDF in ``docs/pdfs/``.
-    Run with: ``python -m backend.utils.md_to_pdf``
+sse
+    SSE frame formatting helpers and watchdog/heartbeat tick.
+executor
+    ProcessPoolExecutor cancellation and SIGKILL escalation.
+retry
+    Async retry-with-exponential-backoff helper.
+path
+    Filename sanitisation utilities.
 """
