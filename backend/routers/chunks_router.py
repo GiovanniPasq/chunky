@@ -5,12 +5,14 @@ Prefix: /api
 
 POST /api/chunk
     Accepts one or more filenames. Loads each document's saved Markdown from
-    disk, splits it using the requested strategy and library, saves the resulting
-    chunks, and streams progress via Server-Sent Events.
+    disk, splits it using the requested strategy and library, and streams
+    progress via Server-Sent Events.  The generated chunks are returned to the
+    caller but are not persisted; saving is an explicit follow-up call to
+    POST /api/chunks/save.
 
-    Runs in a dedicated ProcessPoolExecutor (cpu_chunker_executor) so that
-    CPU-bound splitting work runs in isolated processes — no shared GIL, true
-    parallelism when multiple documents are chunked concurrently.
+    Runs in a request-owned ProcessPoolExecutor so CPU-bound splitting work
+    runs in isolated processes and the whole batch can be hard-cancelled
+    without affecting another request.
 
     SSE event types (consistent for 1 or N files):
         {"type": "file_start",  "filename": "...", "index": 1, "total": N}
@@ -23,9 +25,8 @@ POST /api/chunk
         {"type": "error",       "status": 4xx/5xx, "message": "..."}
         {"type": "cancelled"}
 
-GET  /api/chunks/load/{filename}
 POST /api/chunks/save
-    Standard JSON endpoints for persisting and retrieving chunk sets.
+    Persists a chunk set after validating its Markdown source revision.
 """
 
 from __future__ import annotations
@@ -33,7 +34,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from concurrent.futures import ProcessPoolExecutor
-from concurrent.futures.process import BrokenProcessPool
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, Request
@@ -51,7 +51,7 @@ from backend.models.schemas import (
 )
 from backend.services.chunk_storage_service import ChunkStorageService
 from backend.services.chunking_service import _init_chunk_worker, chunk_file_in_process
-from backend.utils.executor import cancel_cpu_executor
+from backend.utils.executor import terminate_process_pool
 from backend.utils.sse import (
     run_sse_event_loop,
     sse_event as _sse,
@@ -66,7 +66,8 @@ async def chunk_documents(http_request: Request, request: ChunkFilesRequest):
     """Chunk one or more documents, streaming progress via SSE.
 
     Each document's Markdown is loaded from disk, split with the requested
-    strategy and library, saved, and its result streamed as SSE events.
+    strategy and library, and streamed as SSE events. Persistence is an
+    explicit follow-up request.
     Jobs run concurrently in a ProcessPoolExecutor (up to MAX_CONCURRENT_CHUNKING).
 
     SSE events: ``file_start`` → ``file_done`` × N → ``batch_done``
@@ -97,46 +98,31 @@ async def chunk_documents(http_request: Request, request: ChunkFilesRequest):
         watchdog_s = _settings.SSE_WATCHDOG_TIMEOUT_S
         queue_timeout_s = _settings.SSE_QUEUE_GET_TIMEOUT_S
         cancel_wait_s = _settings.SSE_CANCEL_WAIT_TIMEOUT_S
-        # The executor is now read freshly inside _submit_with_retry below,
-        # so a sibling cancellation that retires the pool doesn't strand us
-        # holding a reference to the dead one.
         semaphore = http_request.app.state.chunk_semaphore
         _cpu_futures: list = []
+        batch_executor = ProcessPoolExecutor(
+            max_workers=min(_settings.MAX_CONCURRENT_CHUNKING, total),
+            initializer=_init_chunk_worker,
+            max_tasks_per_child=_settings.CPU_WORKER_MAX_TASKS_PER_CHILD or None,
+        )
+        executor_terminated = False
+        cancel_lock = asyncio.Lock()
 
         if await http_request.is_disconnected():
+            batch_executor.shutdown(wait=False, cancel_futures=True)
             yield _sse({"type": "cancelled"})
             return
 
-        async def _submit_with_retry(fn: str) -> dict:
-            """Submit a chunk job and tolerate one BrokenProcessPool.
-
-            When the user switches documents quickly, the disconnect on
-            the abandoned request triggers `_cancel_all` which SIGTERMs
-            every worker in the pool — including any worker about to pick
-            up *this* request.  ``cancel_cpu_executor`` swaps the executor
-            on app.state in the same teardown, so a single retry against
-            the fresh pool succeeds.
-            """
-            last_exc: Exception | None = None
-            for attempt in range(2):
-                cur_executor: ProcessPoolExecutor = http_request.app.state.cpu_chunker_executor
-                cf_local = cur_executor.submit(chunk_file_in_process, fn, settings_dict)
-                _cpu_futures.append(cf_local)
+        async def _submit(fn: str) -> dict:
+            future = batch_executor.submit(chunk_file_in_process, fn, settings_dict)
+            _cpu_futures.append(future)
+            try:
+                return await asyncio.wrap_future(future)
+            finally:
                 try:
-                    return await asyncio.wrap_future(cf_local)
-                except BrokenProcessPool as exc:
-                    last_exc = exc
-                    logger.info(
-                        "Chunk worker pool was retired mid-request for '%s' (attempt %d) — retrying on fresh pool",
-                        fn, attempt + 1,
-                    )
-                finally:
-                    try:
-                        _cpu_futures.remove(cf_local)
-                    except ValueError:
-                        pass
-            assert last_exc is not None
-            raise last_exc
+                    _cpu_futures.remove(future)
+                except ValueError:
+                    pass
 
         async def chunk_one(idx: int, fn: str) -> None:
             nonlocal succeeded, failed
@@ -149,7 +135,7 @@ async def chunk_documents(http_request: Request, request: ChunkFilesRequest):
 
                 _done = 0
                 try:
-                    result = await _submit_with_retry(fn)
+                    result = await _submit(fn)
 
                     async with _lock:
                         if result.get("success"):
@@ -188,16 +174,16 @@ async def chunk_documents(http_request: Request, request: ChunkFilesRequest):
         runner = asyncio.create_task(run_all())
 
         async def _cancel_all() -> None:
-            s = get_settings()
-            await cancel_cpu_executor(
-                _cpu_futures,
-                http_request.app.state,
-                "cpu_chunker_executor",
-                s.MAX_CONCURRENT_CHUNKING,
-                _init_chunk_worker,
-                "chunk worker",
-                logger,
-            )
+            nonlocal executor_terminated
+            async with cancel_lock:
+                if not executor_terminated:
+                    executor_terminated = True
+                    await terminate_process_pool(
+                        batch_executor,
+                        _cpu_futures,
+                        label="chunk worker",
+                        logger=logger,
+                    )
             runner.cancel()
             try:
                 await asyncio.wait_for(asyncio.shield(runner), timeout=cancel_wait_s)
@@ -205,10 +191,7 @@ async def chunk_documents(http_request: Request, request: ChunkFilesRequest):
                 pass
 
         async def _safe_cancel() -> None:
-            # Idempotent wrapper: skip the (potentially expensive) executor
-            # swap when the runner has already finished.  This matches the
-            # original "finally only runs if not runner.done()" safety-net
-            # semantics now that the helper invokes on_cancel in finally.
+            # Idempotent wrapper: skip cancellation after clean completion.
             if not runner.done():
                 await _cancel_all()
 
@@ -218,31 +201,29 @@ async def chunk_documents(http_request: Request, request: ChunkFilesRequest):
         def _on_complete():
             return [_sse({"type": "batch_done", "succeeded": succeeded, "failed": failed})]
 
-        async for frame in run_sse_event_loop(
-            queue=queue,
-            http_request=http_request,
-            on_cancel=_safe_cancel,
-            handle_event=_handle,
-            watchdog_s=watchdog_s,
-            queue_timeout_s=queue_timeout_s,
-            log_name=f"chunking ({total} job(s))",
-            on_complete=_on_complete,
-        ):
-            yield frame
+        try:
+            async for frame in run_sse_event_loop(
+                queue=queue,
+                http_request=http_request,
+                on_cancel=_safe_cancel,
+                handle_event=_handle,
+                watchdog_s=watchdog_s,
+                queue_timeout_s=queue_timeout_s,
+                log_name=f"chunking ({total} job(s))",
+                on_complete=_on_complete,
+            ):
+                yield frame
+        finally:
+            if not executor_terminated:
+                await asyncio.to_thread(batch_executor.shutdown, wait=True)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.post("/chunks/save", response_model=SaveChunksResponse)
 async def save_chunks(request: SaveChunksRequest):
-    """Persist a chunk set to a timestamped JSON file on disk."""
+    """Persist a chunk set to a source- and configuration-keyed JSON file."""
     return await asyncio.to_thread(_storage.save_chunks, request)
-
-
-@router.get("/chunks/load/{filename}", response_model=LoadChunksResponse)
-async def load_chunks(filename: str):
-    """Load the most recently saved chunk set for a document."""
-    return await asyncio.to_thread(_storage.load_chunks, filename)
 
 
 @router.get(
@@ -252,8 +233,8 @@ async def load_chunks(filename: str):
 async def list_chunks_versions(document_name: str):
     """Return every saved chunks JSON file for a document, newest first.
 
-    Each entry has its ``algorithm`` and ``timestamp`` parsed from the
-    filename so the frontend can render a human-readable picker.  Legacy
+    Each entry has its source and chunking configuration parsed from the
+    filename so the frontend can render a human-readable picker. Legacy
     files that pre-date the new naming scheme appear with
     ``algorithm = "unknown"``.
     """

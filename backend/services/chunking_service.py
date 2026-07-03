@@ -9,6 +9,7 @@ the actual chunking to the chosen implementation.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 
 from fastapi import HTTPException
@@ -33,15 +34,13 @@ class ChunkingService:
     *library* (langchain, chonkie, docling) are both specified on the request,
     giving callers full control over the chunking pipeline.
 
-    Chunker instances are created once and reused across calls — they are
-    stateless (all chunking parameters come from the request, not from
-    instance state), except DoclingChunker which caches the DocumentConverter.
+    Chunker instances are created lazily and reused across calls.  This keeps
+    basic LangChain / Chonkie chunking independent from Docling's heavyweight
+    model and tokenizer initialisation (which may require a first-run download).
     """
 
     def __init__(self) -> None:
-        self._chunkers: dict[ChunkerLibrary, TextChunker] = {
-            lib: cls() for lib, cls in _LIBRARY_MAP.items()
-        }
+        self._chunkers: dict[ChunkerLibrary, TextChunker] = {}
 
     def chunk_text(self, request: ChunkRequest) -> ChunkResponse:
         """Chunk text and return a :class:`ChunkResponse`.
@@ -56,12 +55,16 @@ class ChunkingService:
         Raises:
             HTTPException 400: If the requested library is not registered.
         """
-        chunker = self._chunkers.get(request.chunker_library)
-        if chunker is None:
+        chunker_cls = _LIBRARY_MAP.get(request.chunker_library)
+        if chunker_cls is None:
             raise HTTPException(
                 status_code=400,
                 detail=f"Unknown chunker library '{request.chunker_library}'",
             )
+        chunker = self._chunkers.get(request.chunker_library)
+        if chunker is None:
+            chunker = chunker_cls()
+            self._chunkers[request.chunker_library] = chunker
         chunks = chunker.chunk(request)
 
         avg_chars = int(sum(len(c.content) for c in chunks) / len(chunks)) if chunks else 0
@@ -106,12 +109,11 @@ def _init_chunk_worker() -> None:
 
 
 def chunk_file_in_process(filename: str, settings_dict: dict) -> dict:
-    """Chunk a document's markdown file in a worker process and save the result.
+    """Chunk a document's markdown file in a worker process.
 
     Args:
         filename:      Document filename (e.g. ``report.pdf``). Used to locate
-                       the corresponding ``.md`` file in ``MDS_DIR`` and as the
-                       key for the saved chunk file.
+                       the corresponding ``.md`` file in ``MDS_DIR``.
         settings_dict: Splitting parameters (chunker_type, chunker_library,
                        chunk_size, chunk_overlap, enable_markdown_sizing).
 
@@ -128,7 +130,7 @@ def chunk_file_in_process(filename: str, settings_dict: dict) -> dict:
 
     from pathlib import Path
     from backend.config import get_settings
-    from backend.services.document_service import find_markdown_for_document
+    from backend.services.document_files import find_markdown_for_document
 
     # md_filename is a transport-only field (it tells the worker which MD
     # variant to read); strip it before forwarding the rest into ChunkRequest.
@@ -166,5 +168,6 @@ def chunk_file_in_process(filename: str, settings_dict: dict) -> dict:
         "chunker_type": result.chunker_type,
         "chunker_library": result.chunker_library,
         "md_filename": md_path.name,
+        "source_hash": hashlib.sha256(content.encode("utf-8")).hexdigest(),
         "chunks": [c.model_dump() for c in result.chunks],
     }

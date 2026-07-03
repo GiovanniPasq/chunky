@@ -117,18 +117,12 @@ class _PageResult:
 class VLMConverter(PDFConverter):
     """PDF-to-Markdown converter using any OpenAI-compatible VLM.
 
-    Each page is rasterised at :data:`_RENDER_DPI` DPI and sent to the model
-    as a base64-encoded PNG embedded in a ``data:`` URI.
+    Each page is rasterised at the configured ``VLM_RENDER_DPI`` and sent to
+    the model as a base64-encoded PNG embedded in a ``data:`` URI.
 
-    Pages are transcribed concurrently (up to :data:`_MAX_CONCURRENT_PAGES`
-    in flight at once) using ``AsyncOpenAI``.  The synchronous ``convert()``
-    entry point bootstraps a private event loop via ``asyncio.run()`` so it
-    can be called from a ``ThreadPoolExecutor`` worker without blocking the
-    main asyncio event loop.
-
-    The ``http_client`` parameter is accepted for API compatibility but is
-    no longer used: ``AsyncOpenAI`` creates its own ``httpx.AsyncClient``
-    inside ``_async_convert()`` so it stays bound to the correct event loop.
+    Pages are transcribed concurrently up to ``VLM_MAX_CONCURRENT_PAGES``.
+    The synchronous ``convert()`` entry point runs in ``asyncio.to_thread()``
+    and creates a private event loop via ``asyncio.run()``.
 
     Resilience features (see ``vlm_checkpoint.py`` for the on-disk format):
 
@@ -231,8 +225,8 @@ class VLMConverter(PDFConverter):
         """Async core: render pages on-demand and transcribe concurrently.
 
         Rendering and the API call share the same semaphore slot, so at most
-        ``_MAX_CONCURRENT_PAGES`` page PNGs exist in memory at any one time.
-        Peak memory is bounded to ``_MAX_CONCURRENT_PAGES × (one page PNG)``
+        ``VLM_MAX_CONCURRENT_PAGES`` page PNGs exist in memory at once.
+        Peak memory is bounded to that concurrency × one page PNG
         instead of ``total_pages × (one page PNG)``, which for a 100-page
         document at 300 DPI can be the difference between ~30 MB and ~1.5 GB.
 

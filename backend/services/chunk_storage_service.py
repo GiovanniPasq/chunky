@@ -30,6 +30,8 @@ Re-saving with the same configuration overwrites in place.
 from __future__ import annotations
 
 import json
+import logging
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -37,6 +39,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from backend.config import get_settings
+from backend.services.document_files import document_stem_for_markdown
 from backend.models.schemas import (
     ChunksVersion,
     LoadChunksResponse,
@@ -53,6 +56,9 @@ from backend.utils.naming import (
     sanitise_token,
 )
 from backend.utils.path import safe_child_path, safe_stem as _safe_stem
+from backend.utils.files import atomic_write_text
+
+logger = logging.getLogger(__name__)
 
 
 def _build_chunk_filename(
@@ -185,11 +191,70 @@ def _md_filename_for_source(stem: str, md_source: str | None) -> str | None:
     return f"{stem}_{md_source}.md"
 
 
+def _sha256_markdown(path: Path) -> str | None:
+    try:
+        content = path.read_text(encoding="utf-8")
+        return hashlib.sha256(content.encode("utf-8")).hexdigest()
+    except OSError:
+        return None
+
+
+def delete_chunks_for_markdown(
+    chunks_dir: Path,
+    md_filename: str,
+    *,
+    document_name: str | None = None,
+) -> list[Path]:
+    """Delete saved chunk files generated from one Markdown variant.
+
+    Chunk files are stored under the source document stem, even for converted
+    Markdown variants (``chunks/report/...report_vlm...``).  Deleting
+    ``report_vlm.md`` therefore must remove only ``md_source=vlm`` files from
+    ``chunks/report`` while preserving chunks for sibling variants.
+    """
+    from backend.services.document_files import document_stem_for_markdown
+
+    try:
+        doc_stem = document_stem_for_markdown(document_name, md_filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    md_source = md_source_token(md_filename, doc_stem)
+    dest_dir = chunks_dir / doc_stem
+    if not dest_dir.exists():
+        return []
+
+    deleted: list[Path] = []
+    for chunk_file in dest_dir.glob("*.json"):
+        file_md_source, _, _, _, _ = _parse_chunk_filename(chunk_file.name)
+        matches_source = file_md_source == md_source or (
+            md_source == "uploaded" and file_md_source is None
+        )
+        if not matches_source:
+            continue
+        try:
+            chunk_file.unlink()
+            deleted.append(chunk_file)
+        except OSError as exc:
+            logger.warning("Failed to delete chunks file '%s': %s", chunk_file, exc)
+            continue
+
+    try:
+        if not any(dest_dir.iterdir()):
+            dest_dir.rmdir()
+            deleted.append(dest_dir)
+    except OSError as exc:
+        logger.debug("Failed to remove empty chunks directory '%s': %s", dest_dir, exc)
+
+    return deleted
+
+
 class ChunkStorageService:
     """Saves enriched chunk sets to deterministic, configuration-keyed files."""
 
     def __init__(self) -> None:
-        self._chunks_dir = Path(get_settings().CHUNKS_DIR)
+        settings = get_settings()
+        self._chunks_dir = Path(settings.CHUNKS_DIR)
+        self._mds_dir = Path(settings.MDS_DIR)
 
     def save_chunks(self, request: SaveChunksRequest) -> SaveChunksResponse:
         """Persist *request.chunks* to a configuration-keyed JSON file.
@@ -199,10 +264,42 @@ class ChunkStorageService:
         """
         stem = _safe_stem(request.filename)
         doc_name = sanitise_token(stem) or "doc"
-        dest_dir = self._chunks_dir / stem
-        dest_dir.mkdir(parents=True, exist_ok=True)
 
         md_source = md_source_token(request.md_filename, stem)
+        source_md_filename = request.md_filename or _md_filename_for_source(stem, md_source)
+        if source_md_filename is not None:
+            try:
+                document_stem_for_markdown(request.filename, source_md_filename)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        current_source_hash = None
+        if source_md_filename:
+            source_path = safe_child_path(
+                self._mds_dir,
+                source_md_filename,
+                description="Markdown filename",
+            )
+            if source_path.is_file():
+                current_source_hash = _sha256_markdown(source_path)
+        if request.source_hash is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Chunks have no source revision; re-chunk before saving.",
+            )
+        if current_source_hash is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Source Markdown is missing; chunks cannot be saved.",
+            )
+        if request.source_hash != current_source_hash:
+            raise HTTPException(
+                status_code=409,
+                detail="Source Markdown changed after these chunks were created; re-chunk before saving.",
+            )
+
+        dest_dir = self._chunks_dir / stem
+        dest_dir.mkdir(parents=True, exist_ok=True)
         dest_path = dest_dir / _build_chunk_filename(
             doc_name=doc_name,
             md_source=md_source,
@@ -212,11 +309,11 @@ class ChunkStorageService:
             chunk_overlap=request.chunk_overlap,
             enable_markdown_sizing=request.enable_markdown_sizing,
         )
-
         normalised_chunks = [_normalise_chunk(c) for c in request.chunks]
         payload: dict[str, Any] = {
             "filename": request.filename,
             "md_source": md_source,
+            "source_hash": request.source_hash,
             "chunker_type": request.chunker_type,
             "chunker_library": request.chunker_library,
             "chunk_size": request.chunk_size,
@@ -226,9 +323,9 @@ class ChunkStorageService:
             "total_chunks": len(normalised_chunks),
             "chunks": normalised_chunks,
         }
-        dest_path.write_text(
+        atomic_write_text(
+            dest_path,
             json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
         )
 
         return SaveChunksResponse(
@@ -236,23 +333,6 @@ class ChunkStorageService:
             message=f"Saved {len(normalised_chunks)} chunks for '{request.filename}'",
             path=str(dest_path),
         )
-
-    def load_chunks(self, filename: str) -> LoadChunksResponse:
-        """Load the most recently *modified* saved chunk file for *filename*."""
-        stem = _safe_stem(filename)
-        dest_dir = self._chunks_dir / stem
-        try:
-            json_files = list(dest_dir.glob("*.json"))
-        except (FileNotFoundError, OSError):
-            json_files = []
-
-        if not json_files:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No saved chunks found for '{filename}'",
-            )
-        json_files.sort(key=lambda p: p.stat().st_mtime)
-        return self._read_chunk_file(json_files[-1])
 
     def load_chunks_by_filename(self, filename: str, chunks_filename: str) -> LoadChunksResponse:
         """Load a specific saved-chunks JSON file by its filename."""
@@ -280,15 +360,33 @@ class ChunkStorageService:
         versions: list[ChunksVersion] = []
         for f in json_files:
             md_source, library, algorithm, size, overlap = _parse_chunk_filename(f.name)
+            md_filename = _md_filename_for_source(stem, md_source)
+            source_hash = None
+            try:
+                payload = json.loads(f.read_text(encoding="utf-8"))
+                raw_hash = payload.get("source_hash")
+                if isinstance(raw_hash, str) and raw_hash:
+                    source_hash = raw_hash
+            except (OSError, json.JSONDecodeError):
+                pass
+            current_hash = (
+                _sha256_markdown(self._mds_dir / md_filename)
+                if md_filename is not None else None
+            )
             versions.append(ChunksVersion(
                 filename=f.name,
-                md_filename=_md_filename_for_source(stem, md_source),
+                md_filename=md_filename,
                 md_source=md_source,
                 library=library,
                 algorithm=algorithm,
                 chunk_size=size,
                 chunk_overlap=overlap,
-                file_path=str(f),
+                source_hash=source_hash,
+                is_stale=(
+                    source_hash is None
+                    or current_hash is None
+                    or source_hash != current_hash
+                ),
             ))
         return versions
 
@@ -300,6 +398,11 @@ class ChunkStorageService:
                 chunks=normalised,
                 total_chunks=payload["total_chunks"],
                 filename=payload["filename"],
+                source_hash=(
+                    payload.get("source_hash")
+                    if isinstance(payload.get("source_hash"), str)
+                    else None
+                ),
             )
         except (json.JSONDecodeError, OSError) as exc:
             raise HTTPException(status_code=500, detail=f"Saved chunk file is corrupt: {exc}")

@@ -58,18 +58,11 @@ _FAILED_MARKER_RE = re.compile(r"<!--\s*page\s+\d+\s+failed:")
 #   "Page 47"
 #   "Page 47 of 200"
 #   "47 / 200"
-_PAGE_NUMBER_LINE_RE = re.compile(
-    r"""
-    ^\s*                            # leading whitespace
-    (?:                             # alternatives:
-        -\s*\d+\s*-                 # "- 47 -"
-      | Page\s+\d+(?:\s+of\s+\d+)?  # "Page 47" / "Page 47 of 200"
-      | \d+\s*/\s*\d+               # "47 / 200"
-      | \d{1,4}                     # bare integer (cap at 4 digits — 5+ is likely content)
-    )\s*$                           # trailing whitespace, end of line
-    """,
-    re.VERBOSE | re.IGNORECASE,
+_DECORATED_PAGE_NUMBER_LINE_RE = re.compile(
+    r"^\s*(?:-\s*\d+\s*-|Page\s+\d+(?:\s+of\s+\d+)?|\d+\s*/\s*\d+)\s*$",
+    re.IGNORECASE,
 )
+_BARE_PAGE_NUMBER_LINE_RE = re.compile(r"^\s*\d{1,4}\s*$")
 
 # Soft hyphens, zero-width spaces, BOMs — invisible characters that survive
 # conversion and confuse both humans and tokenisers.
@@ -196,28 +189,67 @@ def _join_page_regions(regions: list[str]) -> str:
 # Individual cleanup steps
 # ---------------------------------------------------------------------------
 
+def _transform_outside_fences(md: str, transform) -> tuple[str, int]:
+    """Apply a text transform only outside fenced code blocks."""
+    output: list[str] = []
+    buffer: list[str] = []
+    count = 0
+    in_fence = False
+
+    def _flush() -> None:
+        nonlocal count
+        if not buffer:
+            return
+        transformed, changed = transform("".join(buffer))
+        output.append(transformed)
+        count += changed
+        buffer.clear()
+
+    for line in md.splitlines(keepends=True):
+        if _CODE_FENCE_RE.match(line):
+            _flush()
+            output.append(line)
+            in_fence = not in_fence
+        elif in_fence:
+            output.append(line)
+        else:
+            buffer.append(line)
+
+    _flush()
+    return "".join(output), count
+
+
 def _strip_invisible_chars(md: str, report: CleanupReport) -> str:
-    """Remove soft hyphens, zero-width spaces, BOMs."""
-    new_md, count = _INVISIBLE_CHARS_RE.subn("", md)
+    """Remove invisible conversion artefacts outside fenced code."""
+    new_md, count = _transform_outside_fences(
+        md,
+        lambda text: _INVISIBLE_CHARS_RE.subn("", text),
+    )
     report.soft_hyphens_removed += count
     return new_md
 
 
 def _fix_mojibake(md: str, report: CleanupReport) -> str:
-    """Apply the small set of unambiguous UTF-8-as-CP1252 fixes."""
-    count = 0
-    for bad, good in _MOJIBAKE_FIXES:
-        if bad in md:
-            n = md.count(bad)
-            md = md.replace(bad, good)
-            count += n
+    """Apply unambiguous UTF-8-as-CP1252 fixes outside fenced code."""
+    def _replace(text: str) -> tuple[str, int]:
+        changed = 0
+        for bad, good in _MOJIBAKE_FIXES:
+            if bad in text:
+                changed += text.count(bad)
+                text = text.replace(bad, good)
+        return text, changed
+
+    md, count = _transform_outside_fences(md, _replace)
     report.mojibake_fixed += count
     return md
 
 
 def _join_hyphen_wraps(md: str, report: CleanupReport) -> str:
-    """Join ``foo-\\nbar`` → ``foobar`` (lowercase continuation only)."""
-    new_md, count = _HYPHEN_WRAP_RE.subn(r"\1", md)
+    """Join prose hyphen wraps without modifying fenced code."""
+    new_md, count = _transform_outside_fences(
+        md,
+        lambda text: _HYPHEN_WRAP_RE.subn(r"\1", text),
+    )
     report.hyphen_wraps_joined += count
     return new_md
 
@@ -225,19 +257,47 @@ def _join_hyphen_wraps(md: str, report: CleanupReport) -> str:
 def _strip_page_numbers(md: str, report: CleanupReport) -> str:
     """Remove standalone page-number lines.
 
-    Only fires on lines whose *entire* content (after strip) matches one of
-    the page-number patterns.  Embedded numbers ("...as shown in 47...")
-    are never touched.
+    Decorated labels are removed outside code. Bare integers are ambiguous,
+    so they are removed only at a page-region edge when page markers exist.
     """
-    out_lines: list[str] = []
     stripped = 0
-    for line in md.split("\n"):
-        if _PAGE_NUMBER_LINE_RE.match(line):
-            stripped += 1
-            continue
-        out_lines.append(line)
+    has_page_markers = _PAGE_MARKER_RE.search(md) is not None
+    new_regions: list[str] = []
+    for region in _split_into_page_regions(md):
+        lines = region.split("\n")
+        eligible: list[int] = []
+        in_fence = False
+        for i, line in enumerate(lines):
+            if _CODE_FENCE_RE.match(line):
+                in_fence = not in_fence
+                continue
+            value = line.strip()
+            if (
+                in_fence
+                or not value
+                or _PAGE_MARKER_RE.fullmatch(value)
+                or _FAILED_MARKER_RE.match(value)
+            ):
+                continue
+            eligible.append(i)
+
+        edge_indices = {eligible[0], eligible[-1]} if eligible else set()
+        for i in eligible:
+            line = lines[i]
+            if _DECORATED_PAGE_NUMBER_LINE_RE.match(line):
+                lines[i] = ""
+                stripped += 1
+            elif (
+                has_page_markers
+                and i in edge_indices
+                and _BARE_PAGE_NUMBER_LINE_RE.match(line)
+            ):
+                lines[i] = ""
+                stripped += 1
+        new_regions.append("\n".join(lines))
+
     report.page_numbers_stripped += stripped
-    return "\n".join(out_lines)
+    return _join_page_regions(new_regions)
 
 
 def _strip_repeated_headers_footers(md: str, report: CleanupReport) -> str:
@@ -260,25 +320,25 @@ def _strip_repeated_headers_footers(md: str, report: CleanupReport) -> str:
 
     def _candidate_lines(region: str) -> tuple[str | None, str | None]:
         lines = region.split("\n")
-        head: str | None = None
-        tail: str | None = None
+        candidates: list[str] = []
+        in_fence = False
         for line in lines:
+            if _CODE_FENCE_RE.match(line):
+                in_fence = not in_fence
+                continue
             stripped = line.strip()
-            if not stripped:
+            if (
+                in_fence
+                or not stripped
+                or _PAGE_MARKER_RE.fullmatch(stripped)
+                or _FAILED_MARKER_RE.match(stripped)
+            ):
                 continue
-            if _PAGE_MARKER_RE.fullmatch(stripped) or _FAILED_MARKER_RE.match(stripped):
-                continue
-            head = stripped
-            break
-        for line in reversed(lines):
-            stripped = line.strip()
-            if not stripped:
-                continue
-            if _PAGE_MARKER_RE.fullmatch(stripped) or _FAILED_MARKER_RE.match(stripped):
-                continue
-            tail = stripped
-            break
-        return head, tail
+            candidates.append(stripped)
+        return (
+            candidates[0] if candidates else None,
+            candidates[-1] if candidates else None,
+        )
 
     heads: list[str | None] = []
     tails: list[str | None] = []
@@ -287,7 +347,7 @@ def _strip_repeated_headers_footers(md: str, report: CleanupReport) -> str:
         heads.append(h)
         tails.append(t)
 
-    threshold = max(2, (len(regions) * 6) // 10)
+    threshold = max(2, (len(regions) * 6 + 9) // 10)
     head_counts = Counter(h for h in heads if h)
     tail_counts = Counter(t for t in tails if t)
     repeated_heads = {line for line, n in head_counts.items() if n >= threshold}
@@ -301,28 +361,45 @@ def _strip_repeated_headers_footers(md: str, report: CleanupReport) -> str:
     stripped_foot_total = 0
     for region in regions:
         lines = region.split("\n")
+        in_fence = False
         # Strip first repeating head (one occurrence per region).
         for i, line in enumerate(lines):
-            stripped = line.strip()
-            if not stripped:
+            if _CODE_FENCE_RE.match(line):
+                in_fence = not in_fence
                 continue
-            if _PAGE_MARKER_RE.fullmatch(stripped) or _FAILED_MARKER_RE.match(stripped):
+            stripped = line.strip()
+            if (
+                in_fence
+                or not stripped
+                or _PAGE_MARKER_RE.fullmatch(stripped)
+                or _FAILED_MARKER_RE.match(stripped)
+            ):
                 continue
             if stripped in repeated_heads:
                 lines[i] = ""
                 stripped_head_total += 1
             break
         # Strip last repeating tail.
-        for i in range(len(lines) - 1, -1, -1):
-            stripped = lines[i].strip()
-            if not stripped:
+        candidates: list[int] = []
+        in_fence = False
+        for i, line in enumerate(lines):
+            if _CODE_FENCE_RE.match(line):
+                in_fence = not in_fence
                 continue
-            if _PAGE_MARKER_RE.fullmatch(stripped) or _FAILED_MARKER_RE.match(stripped):
+            stripped = line.strip()
+            if (
+                in_fence
+                or not stripped
+                or _PAGE_MARKER_RE.fullmatch(stripped)
+                or _FAILED_MARKER_RE.match(stripped)
+            ):
                 continue
-            if stripped in repeated_tails:
+            candidates.append(i)
+        if candidates:
+            i = candidates[-1]
+            if lines[i].strip() in repeated_tails:
                 lines[i] = ""
                 stripped_foot_total += 1
-            break
         new_regions.append("\n".join(lines))
 
     report.repeated_headers_stripped += stripped_head_total
@@ -390,8 +467,11 @@ def _join_split_sentences(md: str, report: CleanupReport) -> str:
 
 
 def _collapse_blank_runs(md: str, report: CleanupReport) -> str:
-    """Collapse 3+ consecutive blank lines down to exactly 2."""
-    new_md, count = re.subn(r"\n{3,}", "\n\n", md)
+    """Collapse prose blank runs without modifying fenced code."""
+    new_md, count = _transform_outside_fences(
+        md,
+        lambda text: re.subn(r"\n{3,}", "\n\n", text),
+    )
     report.blank_runs_collapsed += count
     return new_md
 

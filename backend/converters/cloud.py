@@ -98,7 +98,32 @@ class CloudConverter(PDFConverter):
             raise InterruptedError("Conversion cancelled before start")
 
         async with httpx.AsyncClient(timeout=self._timeout) as http:
-            markdown = await self._call_api_with_retry_async(http, pdf_path)
+            request_task = asyncio.create_task(self._call_api_with_retry_async(http, pdf_path))
+            watcher_task: asyncio.Task | None = None
+
+            if self._stop_event is not None:
+                async def _watch_stop_event() -> None:
+                    while not request_task.done():
+                        if self._stop_event and self._stop_event.is_set():
+                            request_task.cancel()
+                            return
+                        await asyncio.sleep(0.25)
+
+                watcher_task = asyncio.create_task(_watch_stop_event())
+
+            try:
+                markdown = await request_task
+            except asyncio.CancelledError:
+                if self._stop_event and self._stop_event.is_set():
+                    raise InterruptedError("Conversion cancelled")
+                raise
+            finally:
+                if watcher_task is not None:
+                    watcher_task.cancel()
+                    await asyncio.gather(watcher_task, return_exceptions=True)
+
+        if self._stop_event and self._stop_event.is_set():
+            raise InterruptedError("Conversion cancelled")
 
         if self._on_progress:
             self._on_progress(1, 1)

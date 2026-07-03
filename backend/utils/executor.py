@@ -1,89 +1,48 @@
-"""
-Shared ProcessPoolExecutor cancellation utility.
-
-Handles the cancel-futures → SIGTERM → swap-executor → SIGKILL escalation
-pattern that is common to every CPU-bound SSE endpoint.
-"""
+"""Lifecycle helpers for request-owned process pools."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from concurrent.futures import ProcessPoolExecutor
-from typing import Any, Callable
+import time
+from concurrent.futures import Future, ProcessPoolExecutor
 
 from backend.config import get_settings
 
 
-async def escalate_kill(procs: list, label: str = "Worker process") -> None:
-    """Send SIGKILL to any worker still alive after the configured grace period."""
-    await asyncio.sleep(get_settings().WORKER_SIGKILL_DELAY_S)
-    for p in procs:
-        if p.is_alive():
-            try:
-                p.kill()
-                logging.getLogger(__name__).warning(
-                    "%s %d ignored SIGTERM — sent SIGKILL", label, p.pid
-                )
-            except Exception as exc:
-                logging.getLogger(__name__).debug(
-                    "Failed to SIGKILL %s %d: %s", label, p.pid, exc
-                )
-
-
-async def cancel_cpu_executor(
-    cpu_futures: list,
-    app_state: Any,
-    executor_attr: str,
-    max_workers: int,
-    initializer: Callable,
+async def terminate_process_pool(
+    executor: ProcessPoolExecutor,
+    futures: list[Future],
+    *,
     label: str,
     logger: logging.Logger,
 ) -> None:
-    """Cancel in-flight ProcessPoolExecutor futures, SIGTERM worker processes,
-    and atomically replace the broken executor on app_state.
+    """Hard-stop one request-owned pool and wait for its workers to exit."""
+    for future in list(futures):
+        future.cancel()
 
-    Queued futures (not yet picked up by a worker) are cancelled via
-    Future.cancel(). Futures already running in a worker cannot be cancelled
-    without killing the process; those workers receive SIGTERM, with SIGKILL
-    escalated after 3 s if they do not exit.
-
-    The old executor is immediately replaced on app_state so concurrent
-    requests get a fresh pool without waiting for teardown.
-    """
-    still_running: list = []
-    for f in list(cpu_futures):
-        if not f.cancel():
-            still_running.append(f)
-
-    if not still_running:
-        return
-
-    old_executor: ProcessPoolExecutor = getattr(app_state, executor_attr)
-    worker_procs = list(getattr(old_executor, "_processes", {}).values())
-
-    for proc in worker_procs:
+    processes = list(getattr(executor, "_processes", {}).values())
+    for process in processes:
         try:
-            proc.terminate()
+            process.terminate()
         except Exception as exc:
-            logger.debug("Failed to send SIGTERM to %s %d: %s", label, proc.pid, exc)
+            logger.debug("Failed to terminate %s %d: %s", label, process.pid, exc)
 
-    s = get_settings()
-    try:
-        setattr(
-            app_state,
-            executor_attr,
-            ProcessPoolExecutor(
-                max_workers=max_workers,
-                initializer=initializer,
-                max_tasks_per_child=s.CPU_WORKER_MAX_TASKS_PER_CHILD or None,
-            ),
-        )
-    finally:
+    executor.shutdown(wait=False, cancel_futures=True)
+
+    deadline = time.monotonic() + max(0.0, get_settings().WORKER_SIGKILL_DELAY_S)
+    while any(process.is_alive() for process in processes) and time.monotonic() < deadline:
+        await asyncio.sleep(0.05)
+
+    for process in processes:
+        if not process.is_alive():
+            continue
         try:
-            app_state.retired_executors.append(old_executor)
-            old_executor.shutdown(wait=False, cancel_futures=True)
+            process.kill()
+            logger.warning("%s %d ignored SIGTERM — sent SIGKILL", label, process.pid)
         except Exception as exc:
-            logger.warning("Failed to retire old %s executor: %s", label, exc)
+            logger.debug("Failed to kill %s %d: %s", label, process.pid, exc)
 
-    asyncio.create_task(escalate_kill(worker_procs, label))
+    await asyncio.gather(
+        *(asyncio.to_thread(process.join, 1.0) for process in processes),
+    )

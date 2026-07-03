@@ -2,8 +2,8 @@
 Document-level summary store + map-reduce orchestrator.
 
 The summary is the "what is this document about" reference block that gets
-attached to every per-piece correction prompt (and every chunk-enrichment
-prompt — see Phase B).  Generating it once and caching it keeps the marginal
+attached to every per-piece correction prompt and chunk-enrichment prompt.
+Generating it once and caching it keeps the marginal
 cost of a re-run negligible: ``topic_hints`` are unioned across pieces in
 pure Python, and a single LLM reduce call picks a final ``topic`` and
 synthesises a ~200-word ``narrative``.
@@ -81,7 +81,6 @@ import asyncio
 import hashlib
 import json
 import logging
-import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -92,6 +91,8 @@ if TYPE_CHECKING:
     from backend.utils.markdown import Piece
 
 logger = logging.getLogger(__name__)
+
+from backend.utils.files import atomic_write_text
 
 
 # Threshold above which the reduce step is tiered (group-of-N partials
@@ -248,9 +249,10 @@ def summary_path_for(doc_stem: str, mds_dir: Path) -> Path:
 class DocumentSummaryStore:
     """Filesystem-backed cache for one ``(document)`` pair.
 
-    Single-writer assumption matches the rest of the enrichment subsystem —
-    the existing per-document conversion semaphore ensures we never have
-    two enrichment runs touching the same stem at once.
+    Single-writer assumption matches the rest of the enrichment subsystem:
+    callers should avoid launching two summary-generation runs for the same
+    document at once. Atomic writes protect the JSON file from corruption, but
+    this store does not implement its own per-document lock.
     """
 
     def __init__(self, doc_stem: str, mds_dir: Path) -> None:
@@ -287,13 +289,10 @@ class DocumentSummaryStore:
         a crash mid-write leaves either the previous record intact or no
         file at all — never a truncated JSON document.
         """
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self._path.with_suffix(self._path.suffix + ".tmp")
-        tmp.write_text(
+        atomic_write_text(
+            self._path,
             json.dumps(record.as_dict(), ensure_ascii=False, indent=2),
-            encoding="utf-8",
         )
-        os.replace(tmp, self._path)
 
     def discard(self) -> None:
         """Remove the on-disk record.  Safe when the file does not exist."""
@@ -396,7 +395,7 @@ async def get_or_generate_summary(
     The summary is keyed on the SOURCE PDF (not the cleaned markdown), so
     re-running enrichment against a different converter variant of the
     same document reuses the cached summary with zero LLM calls.  When
-    no PDF exists on disk (legacy bare-``.md`` upload) the cleaned
+    no PDF exists on disk (standalone ``.md`` upload) the cleaned
     markdown's hash is used instead — that path is degraded but still
     correct.
 
@@ -528,6 +527,12 @@ async def get_or_generate_summary(
         stop_check=stop_check,
     )
 
+    # Give a queued cancellation a chance to run before publishing the final
+    # durable record, then re-check the cooperative flag.
+    await asyncio.sleep(0)
+    if stop_check and stop_check():
+        raise InterruptedError("Summary cancelled before saving")
+
     record = StoredSummary(
         source_hash=source_hash,
         summary=summary,
@@ -549,18 +554,15 @@ def save_user_edit(
     mds_dir: Path,
     edited_summary: DocumentSummary,
 ) -> StoredSummary:
-    """Persist a user-edited summary while preserving the existing
-    piece-extraction cache.
+    """Persist a user-edited summary while preserving its source revision.
 
-    The piece extractions, source hash, generation timestamp, and model
-    metadata are carried over from the stored record so a future
-    Regenerate can still benefit from the per-piece cache.  Only the
-    summary content changes, and ``user_edited`` flips to ``True`` so
-    subsequent enrichment runs treat the edit as authoritative.
+    The source hash is carried over from the stored record. The summary
+    content changes and ``user_edited`` flips to ``True`` so subsequent
+    enrichment runs treat the edit as authoritative.
 
     If no prior record exists (the user shouldn't reach this path
     because the modal can only save what it loaded, but be defensive)
-    we create a fresh record with empty extractions.
+    we create a fresh record with an empty source hash.
     """
     store = DocumentSummaryStore(doc_stem, mds_dir)
     existing = store.load()

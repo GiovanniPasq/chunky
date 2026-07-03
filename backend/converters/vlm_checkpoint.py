@@ -26,9 +26,10 @@ Design notes:
 from __future__ import annotations
 
 import logging
-import os
 import shutil
 from pathlib import Path
+
+from backend.utils.files import atomic_write_text
 
 logger = logging.getLogger(__name__)
 
@@ -54,11 +55,8 @@ class CheckpointStore:
     """Filesystem-backed per-page cache for one ``(document, vlm)`` pair.
 
     Each instance is bound to a specific document stem and is safe to use
-    from a single conversion at a time.  Concurrent conversions of the same
-    document would race on the same directory — the application-level
-    ``MAX_CONCURRENT_CONVERSIONS`` semaphore (combined with FastAPI's
-    request handling) already serialises this at a higher level, so no
-    locking is implemented here.
+    from a single conversion at a time. The local UI exposes one blocking
+    conversion workflow, so no per-document filesystem lock is implemented.
     """
 
     def __init__(self, stem: str, mds_dir: Path) -> None:
@@ -101,11 +99,8 @@ class CheckpointStore:
         into place, so a crash mid-write leaves either the previous version
         on disk (if any) or no file at all — never a truncated one.
         """
-        self._dir.mkdir(parents=True, exist_ok=True)
         target = self._dir / _page_filename(page_num)
-        tmp = target.with_suffix(target.suffix + ".tmp")
-        tmp.write_text(markdown, encoding="utf-8")
-        os.replace(tmp, target)
+        atomic_write_text(target, markdown)
 
     def completed_pages(self) -> list[int]:
         """Return the sorted 0-indexed list of pages already cached on disk.

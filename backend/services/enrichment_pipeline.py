@@ -14,8 +14,7 @@ The whole pipeline runs concurrently (up to ``concurrency`` pieces in
 flight at once).  Cancellation is respected at every await point.
 Per-piece failures are surfaced via the progress callback but never
 abort the entire run: failed pieces fall back to the original
-post-cleanup text, the way Phase 1's VLM converter falls back to a
-placeholder.  The caller decides whether to retry.
+post-cleanup text. The caller decides whether to retry.
 
 Why piece-level checkpointing here:
     A 200-piece enrichment is 200 LLM calls.  Re-running after a network
@@ -183,6 +182,7 @@ async def run_enrichment_pipeline(
     # Together they invalidate the per-piece cache exactly when the LLM
     # would produce different output and never spuriously.
     model = service.model_name
+    base_url = service.base_url
     prompt_for_hash = service.effective_piece_system_prompt(
         with_summary=summary_for_prompt is not None,
     )
@@ -242,6 +242,8 @@ async def run_enrichment_pipeline(
             model,
             temperature_for_hash,
             document_summary_hash,
+            base_url,
+            ctx,
         )
         if checkpoint_store is not None:
             cached = checkpoint_store.get(piece.index, key)

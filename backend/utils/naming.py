@@ -55,6 +55,7 @@ KNOWN_LIBRARIES: frozenset[str] = frozenset({"langchain", "chonkie", "docling"})
 _CHONKIE_NO_OVERLAP: frozenset[str] = frozenset({
     "recursive", "fast", "table", "code", "late", "neural", "slumber",
 })
+_CHONKIE_NO_SIZE: frozenset[str] = frozenset({"table", "neural"})
 
 
 def algo_to_filename_token(chunker_type: str | None) -> str:
@@ -92,7 +93,8 @@ def params_used_by(
     if lib == "docling":
         return (True, False)
     if lib == "chonkie":
-        return (True, algo not in _CHONKIE_NO_OVERLAP)
+        uses_size = algo not in _CHONKIE_NO_SIZE
+        return (uses_size, uses_size and algo not in _CHONKIE_NO_OVERLAP)
     return (True, True)
 
 

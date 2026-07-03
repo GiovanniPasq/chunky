@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     MAX_PAGE_COUNT: int = 0
     """Maximum PDF page count accepted for conversion. 0 = unlimited."""
 
+    CONVERSION_PREVIEW_MAX_PAGES: int = 20
+    """Maximum number of pages allowed in one converter comparison preview."""
+
     # ── Storage ────────────────────────────────────────────────
     PDFS_DIR: str = "docs/pdfs"
     MDS_DIR: str = "docs/mds"
@@ -87,7 +90,7 @@ class Settings(BaseSettings):
     Each subsequent retry doubles the delay (1 s, 2 s, 4 s, …)."""
 
     # ── VLM concurrency ───────────────────────────────
-    VLM_MAX_CONCURRENT_PAGES: int = 1
+    VLM_MAX_CONCURRENT_PAGES: int = 2
     """Max VLM page-transcription API calls in flight at once per conversion.
     Increase for fast remote endpoints; decrease for single-GPU local models."""
 
@@ -169,12 +172,8 @@ class Settings(BaseSettings):
 
     # ── Worker lifecycle ──────────────────────────────
     WORKER_SIGKILL_DELAY_S: float = 3.0
-    """Seconds to wait after SIGTERM before escalating to SIGKILL on a worker
-    process that ignores graceful termination."""
-
-    EXECUTOR_SHUTDOWN_TIMEOUT_S: float = 30.0
-    """Seconds allowed for ProcessPoolExecutor.shutdown() at app exit before
-    the executor is force-cancelled."""
+    """Seconds to wait after SIGTERM before escalating a cancelled batch
+    worker to SIGKILL."""
 
     # ── Upload ────────────────────────────────────────
     UPLOAD_READ_CHUNK_BYTES: int = 65_536
@@ -193,7 +192,7 @@ class Settings(BaseSettings):
     omits the field."""
 
     # ── App ────────────────────────────────────────────────────
-    APP_VERSION: str = "0.6.0"
+    APP_VERSION: str = "0.7.0"
 
 
 @lru_cache

@@ -15,10 +15,10 @@ from .base import PDFConverter
 @register_converter(
     name="liteparse",
     label="LiteParse",
-    description="LlamaIndex LiteParse — high-performance parsing engine.",
+    description="LlamaIndex LiteParse — fast, model-free PDF-to-Markdown parsing.",
 )
 class LiteParseConverter(PDFConverter):
-    """PDF-to-Markdown converter using the LiteParse  engine.
+    """PDF-to-Markdown converter using the LiteParse engine.
 
     Install:
         pip install liteparse
@@ -28,6 +28,6 @@ class LiteParseConverter(PDFConverter):
         self.validate_path(pdf_path)
         from liteparse import LiteParse  # local import — optional dependency
 
-        parser = LiteParse()
+        parser = LiteParse(output_format="markdown")
         result = parser.parse(str(pdf_path))
         return result.text

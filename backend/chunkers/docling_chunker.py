@@ -32,9 +32,9 @@ _LIB_LABEL = "Docling"
 class DoclingChunker(TextChunker):
     """Text splitter delegating to Docling chunkers.
 
-    DocumentConverter and AutoTokenizer are created once at instantiation time.
-    ChunkingService holds a single DoclingSplitter instance, so the heavy
-    initialisation cost is paid once at startup, not per request.
+    DocumentConverter and AutoTokenizer are created once per worker instance.
+    ChunkingService reuses that instance for every Docling job handled by the
+    worker.
     """
 
     def __init__(self) -> None:

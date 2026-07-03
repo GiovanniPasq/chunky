@@ -62,12 +62,17 @@ from backend.services.document_summary import (
     save_user_edit,
 )
 from backend.services.chunk_context import build_chunk_surrounding_context
+from backend.services.enrichment_context import (
+    build_enrichment_service,
+    load_cached_summary_for_markdown,
+    load_chunk_enrichment_context,
+    load_markdown_source,
+)
 from backend.services.enrichment_checkpoint import EnrichmentCheckpointStore
 from backend.services.enrichment_pipeline import run_enrichment_pipeline
-from backend.services.enrichment_service import EnrichmentService
 from backend.utils.markdown import clean_markdown, split_markdown
-from backend.utils.naming import doc_stem_from_md
-from backend.utils.path import safe_child_path, safe_filename
+from backend.services.document_files import document_stem_for_markdown
+from backend.utils.path import safe_filename
 from backend.utils.sse import (
     run_sse_event_loop,
     sse_error as _sse_error,
@@ -107,48 +112,23 @@ async def enrich_chunks(http_request: Request, body: EnrichChunksRequest):
             return
 
         http_client = http_request.app.state.http_client_async
-        s = body.settings
-        svc = EnrichmentService(
-            model=s.model, base_url=s.base_url, api_key=s.api_key,
-            temperature=s.temperature, user_prompt=s.user_prompt, http_client=http_client,
-        )
+        svc = build_enrichment_service(body.settings, http_client)
         chunks = [c.model_dump() for c in body.chunks]
         total = len(chunks)
 
-        # Silent summary attachment (Phase B): if the caller passed
-        # ``md_filename`` AND a per-PDF summary exists on disk, attach
+        # If the caller passed ``md_filename`` and a document summary exists,
+        # attach
         # it to every chunk-enrichment prompt as document-level context.
         # Chunk enrichment never generates a summary on its own — the
         # user owns that decision via the markdown enrichment flow's
         # review modal.  Failures here degrade silently (chunks proceed
         # without context); never abort the whole batch.
-        document_summary = None
-        source_markdown = ""
-        md_name = None
-        if body.md_filename:
-            try:
-                md_name = safe_filename(body.md_filename, "Markdown filename")
-                doc_stem = doc_stem_from_md(md_name)
-                stored = DocumentSummaryStore(doc_stem, _doc_svc._mds_dir).load()
-                if stored is not None and not stored.summary.is_empty():
-                    document_summary = stored.summary
-            except Exception as exc:  # noqa: BLE001 — silent degradation
-                logger.warning(
-                    "Chunk enrichment: failed to load summary for %r — continuing without: %s",
-                    body.md_filename, exc,
-                )
-
+        context = load_chunk_enrichment_context(
+            mds_dir=_doc_svc._mds_dir,
+            md_filename=body.md_filename,
+            document_name=body.document_name,
+        )
         _settings = get_settings()
-        if md_name:
-            try:
-                md_path = safe_child_path(_doc_svc._mds_dir, md_name, description="Markdown filename")
-                if md_path.is_file():
-                    source_markdown = md_path.read_text(encoding="utf-8")
-            except Exception as exc:  # noqa: BLE001 — silent degradation
-                logger.warning(
-                    "Chunk enrichment: failed to load source markdown for %r — continuing without surrounding context: %s",
-                    body.md_filename, exc,
-                )
 
         watchdog_s = _settings.SSE_WATCHDOG_TIMEOUT_S
         queue_timeout_s = _settings.SSE_QUEUE_GET_TIMEOUT_S
@@ -167,18 +147,18 @@ async def enrich_chunks(http_request: Request, body: EnrichChunksRequest):
                 try:
                     surrounding_context = (
                         build_chunk_surrounding_context(
-                            source_markdown,
+                            context.source_markdown,
                             content=content,
                             start=int(chunk.get("start", 0) or 0),
                             end=int(chunk.get("end", 0) or 0),
                             before_chars=_settings.ENRICHMENT_CHUNK_CONTEXT_BEFORE_CHARS,
                             after_chars=_settings.ENRICHMENT_CHUNK_CONTEXT_AFTER_CHARS,
                         )
-                        if source_markdown else None
+                        if context.source_markdown else None
                     )
                     enriched = await svc.enrich_chunk(
                         content,
-                        document_summary=document_summary,
+                        document_summary=context.document_summary,
                         surrounding_context=surrounding_context,
                     )
                     _kw = enriched.get("keywords", [])
@@ -320,25 +300,14 @@ async def enrich_markdown_pipeline(http_request: Request, body: EnrichPipelineRe
         # Validate filename + load source content up-front so file errors
         # surface before we start the LLM dance.
         try:
-            md_name = safe_filename(body.filename, "Markdown filename")
+            source = load_markdown_source(
+                mds_dir=_doc_svc._mds_dir,
+                filename=body.filename,
+                empty_action="enrich",
+                document_name=body.document_name,
+            )
         except HTTPException as exc:
             yield _sse_error(exc.status_code, exc.detail)
-            return
-
-        md_path = _doc_svc._mds_dir / md_name
-        if not md_path.exists():
-            yield _sse_error(404, f"Markdown file '{md_name}' not found")
-            return
-
-        try:
-            source_markdown = md_path.read_text(encoding="utf-8")
-        except OSError as exc:
-            logger.exception("Failed to read source markdown for pipeline")
-            yield _sse_error(500, f"Could not read '{md_name}': {exc}")
-            return
-
-        if not source_markdown.strip():
-            yield _sse_error(422, f"'{md_name}' is empty — nothing to enrich")
             return
 
         yield _sse({"type": "start", "operation": "enrich_pipeline"})
@@ -347,8 +316,9 @@ async def enrich_markdown_pipeline(http_request: Request, body: EnrichPipelineRe
         # variant — corrections are not portable across converters).
         # ``use_checkpoint=False`` wipes any stale cache before starting
         # so a "rerun from scratch" toggle in the UI behaves predictably.
-        from pathlib import Path as _Path
-        stem = _Path(md_name).stem
+        md_name = source.name
+        source_markdown = source.content
+        stem = source.path.stem
         store = EnrichmentCheckpointStore(stem, _doc_svc._mds_dir)
         if not body.use_checkpoint:
             store.discard()
@@ -367,19 +337,17 @@ async def enrich_markdown_pipeline(http_request: Request, body: EnrichPipelineRe
         # modal's Skip button and the Settings → "Skip document summary"
         # toggle actually do something when the user already has a
         # cached summary they want to bypass for this one run.
-        doc_stem = doc_stem_from_md(md_name)
         document_summary = None
         if body.use_summary:
-            summary_store = DocumentSummaryStore(doc_stem, _doc_svc._mds_dir)
-            loaded_summary = summary_store.load()
-            document_summary = loaded_summary.summary if loaded_summary is not None else None
+            document_summary = load_cached_summary_for_markdown(
+                mds_dir=_doc_svc._mds_dir,
+                md_name=md_name,
+                document_name=body.document_name,
+                include_empty=True,
+            )
 
         http_client = http_request.app.state.http_client_async
-        s = body.settings
-        svc = EnrichmentService(
-            model=s.model, base_url=s.base_url, api_key=s.api_key,
-            temperature=s.temperature, user_prompt=s.user_prompt, http_client=http_client,
-        )
+        svc = build_enrichment_service(body.settings, http_client)
 
         _settings = get_settings()
         watchdog_s = _settings.SSE_WATCHDOG_TIMEOUT_S
@@ -387,7 +355,6 @@ async def enrich_markdown_pipeline(http_request: Request, body: EnrichPipelineRe
         concurrency = _settings.ENRICHMENT_MAX_CONCURRENT_CHUNKS
 
         queue: asyncio.Queue[dict | None] = asyncio.Queue()
-        loop = asyncio.get_running_loop()
         cancelled_flag = {"v": False}
 
         def _on_progress(event: dict) -> None:
@@ -504,7 +471,7 @@ def _stored_to_response(filename: str, doc_stem: str, stored: StoredSummary) -> 
 
 
 @router.get("/summary", response_model=DocumentSummaryResponse)
-async def get_summary(filename: str):
+async def get_summary(filename: str, document_name: str | None = None):
     """Return the cached document summary for the markdown variant.
 
     Resolves the per-PDF stem from the markdown filename and reads the
@@ -516,7 +483,10 @@ async def get_summary(filename: str):
         md_name = safe_filename(filename, "Markdown filename")
     except HTTPException:
         raise
-    doc_stem = doc_stem_from_md(md_name)
+    try:
+        doc_stem = document_stem_for_markdown(document_name, md_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     store = DocumentSummaryStore(doc_stem, _doc_svc._mds_dir)
     stored = store.load()
     if stored is None:
@@ -529,15 +499,16 @@ async def put_summary(body: SummaryUpdateRequest):
     """Persist a user-edited summary.
 
     Sets ``user_edited=True`` so future enrichment runs treat the edited
-    content as authoritative.  Preserves the existing piece-extraction
-    cache and source-hash metadata so a later Regenerate can still
-    benefit from per-piece reuse.
+    content as authoritative. Preserves the existing source revision.
     """
     try:
         md_name = safe_filename(body.filename, "Markdown filename")
     except HTTPException:
         raise
-    doc_stem = doc_stem_from_md(md_name)
+    try:
+        doc_stem = document_stem_for_markdown(body.document_name, md_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     edited = _payload_to_document_summary(body.summary)
     stored = save_user_edit(
         doc_stem=doc_stem,
@@ -576,48 +547,29 @@ async def generate_summary(http_request: Request, body: SummaryGenerateRequest):
             return
 
         try:
-            md_name = safe_filename(body.filename, "Markdown filename")
+            source = load_markdown_source(
+                mds_dir=_doc_svc._mds_dir,
+                filename=body.filename,
+                empty_action="summarise",
+                document_name=body.document_name,
+            )
         except HTTPException as exc:
             yield _sse_error(exc.status_code, exc.detail)
             return
 
-        md_path = _doc_svc._mds_dir / md_name
-        if not md_path.exists():
-            yield _sse_error(404, f"Markdown file '{md_name}' not found")
-            return
-
-        try:
-            source_markdown = md_path.read_text(encoding="utf-8")
-        except OSError as exc:
-            logger.exception("Failed to read source markdown for summary generation")
-            yield _sse_error(500, f"Could not read '{md_name}': {exc}")
-            return
-
-        if not source_markdown.strip():
-            yield _sse_error(422, f"'{md_name}' is empty — nothing to summarise")
-            return
-
-        doc_stem = doc_stem_from_md(md_name)
+        md_name = source.name
+        source_markdown = source.content
+        doc_stem = source.stem
         pdf_candidate = _doc_svc._pdfs_dir / f"{doc_stem}.pdf"
         pdf_path = pdf_candidate if pdf_candidate.is_file() else None
 
         yield _sse({"type": "start", "operation": "generate_summary"})
 
-        # Wipe stale record up-front when forcing regeneration so the
-        # builder doesn't try to reuse prior extractions.  The builder
-        # itself handles ``force_regenerate`` semantics on cache hit;
-        # we discard here so user-edited summaries are also overwritten
-        # on Regenerate (their ``user_edited`` flag would otherwise win).
         store = DocumentSummaryStore(doc_stem, _doc_svc._mds_dir)
-        if body.force:
-            store.discard()
+        previous_stored = store.load() if body.force else None
 
         http_client = http_request.app.state.http_client_async
-        s = body.settings
-        svc = EnrichmentService(
-            model=s.model, base_url=s.base_url, api_key=s.api_key,
-            temperature=s.temperature, user_prompt=s.user_prompt, http_client=http_client,
-        )
+        svc = build_enrichment_service(body.settings, http_client)
 
         _settings = get_settings()
         watchdog_s = _settings.SSE_WATCHDOG_TIMEOUT_S
@@ -646,7 +598,7 @@ async def generate_summary(http_request: Request, body: SummaryGenerateRequest):
                 pieces = split_markdown(cleaned)
                 _on_progress({"type": "split_done", "pieces": len(pieces)})
 
-                await get_or_generate_summary(
+                generated = await get_or_generate_summary(
                     pieces=pieces,
                     cleaned_source=cleaned,
                     doc_stem=doc_stem,
@@ -658,6 +610,12 @@ async def generate_summary(http_request: Request, body: SummaryGenerateRequest):
                     concurrency=concurrency,
                     force_regenerate=body.force,
                 )
+                if body.force and generated.is_empty() and previous_stored is not None:
+                    store.save(previous_stored)
+                    raise RuntimeError(
+                        "Summary regeneration produced no usable content; "
+                        "the previous summary was preserved"
+                    )
 
                 # Re-load so we serialise the same record the pipeline
                 # would see — the builder's return value is just the

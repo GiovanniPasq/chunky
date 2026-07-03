@@ -31,7 +31,10 @@ class ChunkerType(str, Enum):
     """Chunking strategy.
 
     Strategies shared by both LangChain and Chonkie:
-        token, recursive, character, markdown
+        token, recursive
+
+    LangChain-only strategies:
+        character, markdown
 
     Chonkie-only strategies:
         sentence   → SentenceChunker
@@ -50,7 +53,7 @@ class ChunkerType(str, Enum):
     token = "token"
     recursive = "recursive"
 
-    #LangChain-only
+    # LangChain-only
     markdown = "markdown"
     character = "character"
 
@@ -120,6 +123,25 @@ class ConvertRequest(BaseModel):
 
     filenames: list[str] = Field(..., min_length=1, description="PDF filename(s) to convert.")
     converter: ConverterType = Field(default=ConverterType.pymupdf)
+    force: bool = Field(
+        default=False,
+        description="When true, replace an existing Markdown variant instead of reusing it.",
+    )
+    vlm: VLMSettings | None = Field(default=None)
+    cloud: CloudSettings | None = Field(default=None)
+
+
+class ConvertPreviewRequest(BaseModel):
+    """Body for POST /api/convert/preview."""
+
+    filename: str = Field(..., min_length=1, description="PDF filename to preview.")
+    converter: ConverterType = Field(default=ConverterType.pymupdf)
+    start_page: int = Field(default=1, ge=1, description="1-indexed first page to include.")
+    end_page: int = Field(default=1, ge=1, description="1-indexed last page to include.")
+    preview_id: str | None = Field(
+        default=None,
+        description="Optional client-generated id used to explicitly cancel an in-flight preview.",
+    )
     vlm: VLMSettings | None = Field(default=None)
     cloud: CloudSettings | None = Field(default=None)
 
@@ -174,9 +196,21 @@ class ConvertResponse(BaseModel):
     )
 
 
+class ConvertPreviewResponse(BaseModel):
+    success: bool = True
+    filename: str
+    converter: ConverterType
+    start_page: int
+    end_page: int
+    page_count: int
+    md_content: str
+
+
 class DeleteResponse(BaseModel):
     success: bool
     deleted: list[str]
+    deleted_documents: list[str] = Field(default_factory=list)
+    failed: dict[str, str] = Field(default_factory=dict)
     message: str
 
 
@@ -224,8 +258,16 @@ class ChunkFilesRequest(BaseModel):
         default=ChunkerLibrary.langchain,
         description="Underlying splitting library to use.",
     )
-    chunk_size: int = Field(default_factory=lambda: _get_settings().DEFAULT_CHUNK_SIZE, gt=0, description="Maximum chunk size.")
-    chunk_overlap: int = Field(default_factory=lambda: _get_settings().DEFAULT_CHUNK_OVERLAP, ge=0, description="Overlap between chunks.")
+    chunk_size: int = Field(
+        default_factory=lambda: _get_settings().DEFAULT_CHUNK_SIZE,
+        gt=0,
+        description="Strategy-specific size target; ignored by Chonkie Table and Neural.",
+    )
+    chunk_overlap: int = Field(
+        default_factory=lambda: _get_settings().DEFAULT_CHUNK_OVERLAP,
+        ge=0,
+        description="Requested overlap; unsupported strategies ignore it.",
+    )
     enable_markdown_sizing: bool = Field(
         default=False,
         description=(
@@ -267,6 +309,7 @@ class ChunkResponse(BaseModel):
     total_chunks: int
     chunker_type: str
     chunker_library: str
+    source_hash: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -282,6 +325,10 @@ class SaveChunksRequest(BaseModel):
                     "(e.g. 'report_pymupdf4llm.md').  Encoded into the saved "
                     "chunk filename so chunks from different MD variants "
                     "stay distinguishable.",
+    )
+    source_hash: str | None = Field(
+        default=None,
+        description="SHA-256 of the Markdown content that produced these chunks.",
     )
     chunks: list[dict[str, Any]]
     chunker_type: str | None = Field(default=None)
@@ -301,6 +348,7 @@ class LoadChunksResponse(BaseModel):
     chunks: list[dict[str, Any]]
     total_chunks: int
     filename: str
+    source_hash: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -323,7 +371,6 @@ class MarkdownVersion(BaseModel):
         default=None,
         description="Normalised converter name when source is 'converted'.",
     )
-    file_path: str
     has_failures: bool = Field(
         default=False,
         description=(
@@ -345,6 +392,10 @@ class MarkdownContentResponse(BaseModel):
     source: str
     converter: str | None = None
     content: str
+
+
+class SaveMarkdownRequest(BaseModel):
+    content: str = Field(..., max_length=10_000_000)
 
 
 class CheckpointInfoResponse(BaseModel):
@@ -391,7 +442,14 @@ class ChunksVersion(BaseModel):
         default=None,
         description="Chunk overlap encoded in the filename, or null when the algorithm doesn't use it.",
     )
-    file_path: str
+    source_hash: str | None = Field(
+        default=None,
+        description="SHA-256 of the Markdown bytes used to generate this saved chunk set.",
+    )
+    is_stale: bool = Field(
+        default=True,
+        description="True when the saved source hash is missing or differs from the current Markdown.",
+    )
 
 
 class ChunksVersionsResponse(BaseModel):
@@ -418,13 +476,16 @@ class EnrichPipelineRequest(BaseModel):
     """Body for POST /api/enrich/markdown/pipeline.
 
     Drives the full regex-cleanup → structure-aware-split → per-piece-LLM
-    pipeline (see :mod:`backend.services.enrichment_pipeline`).  ``filename``
-    must reference a stored Markdown file; the pipeline pulls the source
-    content from disk so the checkpoint key stays stable across requests
-    that re-send identical content as ``content``.
+    pipeline (see :mod:`backend.services.enrichment_pipeline`). ``filename``
+    must reference a stored Markdown file; the pipeline reads its source
+    content from disk.
     """
 
     filename: str = Field(..., description="Stored markdown filename (e.g. 'report_vlm.md').")
+    document_name: str | None = Field(
+        default=None,
+        description="Owning PDF or standalone Markdown document name.",
+    )
     settings: EnrichmentRequest
     use_checkpoint: bool = Field(
         default=True,
@@ -458,12 +519,16 @@ class ChunkToEnrich(BaseModel):
 class EnrichChunksRequest(BaseModel):
     chunks: list[ChunkToEnrich] = Field(..., min_length=1)
     settings: EnrichmentRequest
+    document_name: str | None = Field(
+        default=None,
+        description="Owning PDF or standalone Markdown document name.",
+    )
     md_filename: str | None = Field(
         default=None,
         description=(
             "Optional markdown variant filename (e.g. 'report_vlm.md'). "
             "When provided AND a document-level summary exists on disk "
-            "for the corresponding PDF, that summary is attached to "
+            "for the owning document, that summary is attached to "
             "every chunk-enrichment prompt as document-level context. "
             "Absent: chunk enrichment runs without context (the prior "
             "behaviour).  Chunk enrichment never generates a summary "
@@ -519,6 +584,10 @@ class SummaryGenerateRequest(BaseModel):
     """
 
     filename: str = Field(..., description="Stored markdown filename (e.g. 'report_vlm.md').")
+    document_name: str | None = Field(
+        default=None,
+        description="Owning PDF or standalone Markdown document name.",
+    )
     settings: EnrichmentRequest
     force: bool = Field(default=False)
 
@@ -527,10 +596,13 @@ class SummaryUpdateRequest(BaseModel):
     """Body of ``PUT /api/enrich/summary``.
 
     Persists the user-edited summary with ``user_edited=True`` so future
-    enrichment runs treat the edit as authoritative.  Piece extractions
-    and source-hash metadata are carried over from the existing record
-    so a later Regenerate can still benefit from the per-piece cache.
+    enrichment runs treat the edit as authoritative. Source-hash metadata
+    is carried over from the existing record.
     """
 
     filename: str = Field(..., description="Stored markdown filename (e.g. 'report_vlm.md').")
+    document_name: str | None = Field(
+        default=None,
+        description="Owning PDF or standalone Markdown document name.",
+    )
     summary: DocumentSummaryPayload

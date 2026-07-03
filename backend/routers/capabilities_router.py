@@ -65,7 +65,9 @@ async def get_capabilities():
             {"name": "pymupdf",    "label": "PyMuPDF",    "description": "..."},
             {"name": "markitdown", "label": "MarkItDown", "description": "..."},
             {"name": "docling",    "label": "Docling",    "description": "..."},
-            {"name": "vlm",        "label": "VLM (Vision-Language Model)", "description": "..."}
+            {"name": "vlm",        "label": "VLM (Vision-Language Model)", "description": "..."},
+            {"name": "cloud",    "label": "Cloud API", "description": "..."},
+            {"name": "liteparse", "label": "LiteParse", "description": "..."}
           ]
         }
     """

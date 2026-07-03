@@ -11,8 +11,9 @@ Differences from :mod:`backend.converters.vlm_checkpoint`:
 
     * The on-disk record stores BOTH the corrected content AND a content
       hash, so the cache is invalidated automatically when *any* input
-      that determines the LLM output changes (piece content, prompt,
-      model).  No external manifest to keep in sync.
+      that determines the LLM output changes (piece content, context,
+      prompt, model, base URL, temperature, or document summary).  No
+      external manifest to keep in sync.
     * Stored as JSON ``{"hash": "...", "content": "..."}``, not bare
       markdown — the hash keeps every cache hit byte-for-byte correct.
 
@@ -26,9 +27,10 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 import shutil
 from pathlib import Path
+
+from backend.utils.files import atomic_write_text
 
 logger = logging.getLogger(__name__)
 
@@ -42,16 +44,17 @@ def hash_key(
     model: str,
     temperature: float,
     document_summary_hash: str = "",
+    base_url: str = "",
+    previous_context: str = "",
 ) -> str:
     """Compute the cache key for one piece-correction call.
 
     The hash covers every input that determines the LLM's output for a
-    single piece.  Anything outside this tuple (e.g. unrelated parts of
-    the document, settings unrelated to enrichment, base_url, api_key)
-    cannot invalidate the cache — those don't change what the model
-    produces — so common changes preserve all valid hits.  Temperature
-    is included because it directly affects sampling and therefore the
-    corrected output.
+    single piece. The base URL is included because two OpenAI-compatible
+    servers may expose the same model name while producing different results.
+    The rolling previous context is included because it is part of the actual
+    user message sent for this piece. Temperature is included because it
+    directly affects sampling and therefore the corrected output.
 
     ``document_summary_hash`` is the SHA-256 of the canonical encoding
     of the :class:`DocumentSummary` passed alongside the piece (see
@@ -75,16 +78,20 @@ def hash_key(
     h.update(f"{temperature:.6f}".encode("utf-8"))
     h.update(b"\x1e")
     h.update(document_summary_hash.encode("utf-8"))
+    h.update(b"\x1e")
+    h.update(base_url.encode("utf-8"))
+    h.update(b"\x1e")
+    h.update(previous_context.encode("utf-8"))
     return h.hexdigest()
 
 
 class EnrichmentCheckpointStore:
     """Filesystem-backed per-piece cache for one ``(document, enrichment)`` pair.
 
-    Single-writer assumption: at most one enrichment pipeline at a time
-    operates on a given document stem.  Concurrency at this granularity
-    is enforced by the existing ``MAX_CONCURRENT_CONVERSIONS`` semaphore
-    in ``app.state``, so no in-process locking is implemented here.
+    Single-writer assumption: callers should avoid launching two enrichment
+    pipelines for the same Markdown variant at the same time.  Atomic writes
+    keep individual cache files from being corrupted, but no per-document lock
+    is implemented here.
     """
 
     def __init__(self, stem: str, mds_dir: Path) -> None:
@@ -130,14 +137,11 @@ class EnrichmentCheckpointStore:
         a crash mid-write either leaves the previous record intact or no
         file at all — never a truncated/corrupt JSON document.
         """
-        self._dir.mkdir(parents=True, exist_ok=True)
         target = self._dir / self._piece_filename(piece_index)
-        tmp = target.with_suffix(target.suffix + ".tmp")
-        tmp.write_text(
+        atomic_write_text(
+            target,
             json.dumps({"hash": key, "content": content}, ensure_ascii=False),
-            encoding="utf-8",
         )
-        os.replace(tmp, target)
 
     def discard(self) -> None:
         """Delete every cached piece for this document.

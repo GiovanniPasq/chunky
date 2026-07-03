@@ -380,6 +380,11 @@ class EnrichmentService:
         """The sampling temperature used for every LLM call."""
         return self._temperature
 
+    @property
+    def base_url(self) -> str:
+        """Normalized LLM base URL used to scope persisted results."""
+        return str(self._client.base_url).rstrip("/")
+
     def effective_chunk_system_prompt(self, *, with_summary: bool) -> str:
         """Return the system prompt that ``enrich_chunk`` will use for
         the given ``with_summary`` flag.  Same precedence rules as the

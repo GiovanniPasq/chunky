@@ -63,7 +63,7 @@ class ChonkieChunker(TextChunker):
     @register_chunker(
         library=_LIB, library_label=_LIB_LABEL,
         strategy="token", label="Token",
-        description="Splits on token boundaries. Fast, no external tokeniser needed.",
+        description="Splits on GPT-2 token boundaries via tiktoken.",
     )
     def _split_token(self, request: ChunkRequest) -> list[ChunkItem]:
         from chonkie import TokenChunker
@@ -84,8 +84,8 @@ class ChonkieChunker(TextChunker):
         library=_LIB, library_label=_LIB_LABEL,
         strategy="fast", label="Fast",
         description=(
-            "SIMD-accelerated byte-based chunking at 100+ GB/s. "
-            "Best for high-throughput pipelines where byte-size limits are acceptable."
+            "SIMD-accelerated byte-based chunking. chunk_size is a byte target; "
+            "chunk_overlap is not supported."
         ),
     )
     def _split_fast(self, request: ChunkRequest) -> list[ChunkItem]:
@@ -134,8 +134,8 @@ class ChonkieChunker(TextChunker):
         library=_LIB, library_label=_LIB_LABEL,
         strategy="table", label="Table",
         description=(
-            "Splits large Markdown tables by row while preserving headers. "
-            "Ideal for tabular data in RAG pipelines."
+            "Splits Markdown tables using Chonkie's row-based defaults. "
+            "chunk_size and chunk_overlap are not used."
         ),
     )
     def _split_table(self, request: ChunkRequest) -> list[ChunkItem]:
@@ -152,8 +152,8 @@ class ChonkieChunker(TextChunker):
         library=_LIB, library_label=_LIB_LABEL,
         strategy="code", label="Code",
         description=(
-            "Splits source code using AST-based structural analysis. "
-            "Ideal for chunking code files across multiple languages."
+            "Splits source code using AST-based structural analysis and chunk_size. "
+            "chunk_overlap is not supported."
         ),
     )
     def _split_code(self, request: ChunkRequest) -> list[ChunkItem]:
@@ -170,8 +170,8 @@ class ChonkieChunker(TextChunker):
         library=_LIB, library_label=_LIB_LABEL,
         strategy="semantic", label="Semantic",
         description=(
-            "Groups content by embedding similarity. "
-            "Best for preserving topical coherence. "
+            "Groups content by embedding similarity using chunk_size as a target. "
+            "chunk_overlap is not supported."
         ),
     )
     def _split_semantic(self, request: ChunkRequest) -> list[ChunkItem]:
@@ -191,7 +191,7 @@ class ChonkieChunker(TextChunker):
         strategy="neural", label="Neural",
         description=(
             "Uses a fine-tuned BERT model to detect semantic shifts. "
-            "Great for topic-coherent chunks. "
+            "chunk_size and chunk_overlap are not used."
         ),
     )
     def _split_neural(self, request: ChunkRequest) -> list[ChunkItem]:

@@ -4,7 +4,6 @@ Entry point: uvicorn backend.main:app --reload
 """
 
 import asyncio
-from concurrent.futures import ProcessPoolExecutor
 from contextlib import asynccontextmanager
 
 import httpx
@@ -13,8 +12,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config import get_settings
 from backend.logging_config import configure_logging
-from backend.services.document_service import _init_cpu_worker
-from backend.services.chunking_service import _init_chunk_worker
 from backend.routers.documents_router import router as documents_router
 from backend.routers.chunks_router import router as chunks_router
 from backend.routers.capabilities_router import router as capabilities_router
@@ -38,7 +35,7 @@ async def lifespan(app: FastAPI):
         timeout=httpx.Timeout(
             connect=settings.HTTP_CONNECT_TIMEOUT_S,
             read=settings.ENRICH_READ_TIMEOUT_S,
-            write=10.0,
+            write=settings.ENRICH_WRITE_TIMEOUT_S,
             pool=settings.HTTP_POOL_TIMEOUT_S,
         )
     )
@@ -55,73 +52,19 @@ async def lifespan(app: FastAPI):
     # the real concurrency would be N × ENRICHMENT_MAX_CONCURRENT_CHUNKS.
     app.state.enrichment_chunks_semaphore = asyncio.Semaphore(settings.ENRICHMENT_MAX_CONCURRENT_CHUNKS)
 
-    # Dedicated process pool for all CPU-bound converters (PyMuPDF, Docling,
-    # MarkItDown). Each job runs in an isolated process — no shared GIL, no
-    # thread-safety issues, full memory isolation.
-    # initializer: loads DocumentService + Docling models once per worker so
-    #              jobs don't pay the model-load cost on every call.
-    # max_tasks_per_child: recycles workers after N jobs to reclaim accumulated
-    #                      ML memory (PyTorch caches, heap fragmentation).
-    #                      None means never recycle (when setting is 0).
-    app.state.cpu_converter_executor = ProcessPoolExecutor(
-        max_workers=settings.MAX_CONCURRENT_CONVERSIONS,
-        initializer=_init_cpu_worker,
-        max_tasks_per_child=settings.CPU_WORKER_MAX_TASKS_PER_CHILD or None,
-    )
-
     app.state.chunk_semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_CHUNKING)
-    app.state.cpu_chunker_executor = ProcessPoolExecutor(
-        max_workers=settings.MAX_CONCURRENT_CHUNKING,
-        initializer=_init_chunk_worker,
-        max_tasks_per_child=settings.CPU_WORKER_MAX_TASKS_PER_CHILD or None,
-    )
-
-    # Executors replaced during cancellation are collected here so the lifespan
-    # teardown can clean them up even if their worker processes were already killed.
-    app.state.retired_executors: list = []
 
     yield
 
     await app.state.http_client_async.aclose()
-    # Shut down process pools in a thread so the event loop stays responsive.
-    # The configured timeout ensures the server can always exit even if a
-    # worker is stuck (e.g. inside a C extension ignoring SIGTERM).
-    import logging as _log
-    _shutdown_timeout = get_settings().EXECUTOR_SHUTDOWN_TIMEOUT_S
-    for _exec_attr, _exec_label in (
-        ("cpu_converter_executor", "CPU converter"),
-        ("cpu_chunker_executor", "CPU chunker"),
-    ):
-        _executor = getattr(app.state, _exec_attr, None)
-        if _executor is None:
-            continue
-        try:
-            await asyncio.wait_for(
-                asyncio.to_thread(_executor.shutdown, wait=True),
-                timeout=_shutdown_timeout,
-            )
-        except asyncio.TimeoutError:
-            _log.getLogger(__name__).warning(
-                "%s executor did not shut down within %.0f s — forcing cancel",
-                _exec_label,
-                _shutdown_timeout,
-            )
-            _executor.shutdown(wait=False, cancel_futures=True)
-    _retired_log = _log.getLogger(__name__)
-    for _ex in app.state.retired_executors:
-        try:
-            _ex.shutdown(wait=False, cancel_futures=True)
-        except Exception as _exc:
-            _retired_log.warning("Failed to shut down retired executor: %s", _exc)
-    app.state.retired_executors.clear()
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
 
     app = FastAPI(
-        title="PDF to Markdown API",
-        description="PDF to Markdown conversion and text chunking service.",
+        title="Chunky API",
+        description="Document conversion, Markdown enrichment, and text chunking service.",
         version=settings.APP_VERSION,
         lifespan=lifespan,
     )
