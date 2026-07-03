@@ -7,11 +7,11 @@ services:
       - "8000:8000"
     volumes:
       - ./docs:/app/docs
-      - ./chunks:/app/chunks
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
       - OLLAMA_BASE_URL=http://host.docker.internal:11434/v1
+      - ENRICHMENT_DEFAULT_BASE_URL=http://host.docker.internal:11434/v1
 
   frontend:
     build:
@@ -21,5 +21,6 @@ services:
       - "5173:5173"
     environment:
       - VITE_API_URL=http://backend:8000
+      - VITE_DEFAULT_MODEL_BASE_URL=http://host.docker.internal:11434/v1
     depends_on:
       - backend
