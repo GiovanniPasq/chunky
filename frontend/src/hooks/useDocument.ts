@@ -9,6 +9,16 @@ import type {
 } from '../types'
 import { parseSse, CONNECTION_LOST_MSG } from '../utils/parseSse'
 import { API_BASE } from '../services/apiService'
+import {
+  convertMarkdownToPdf,
+  deleteMarkdownVariant,
+  deleteDocumentsByName,
+  getDocument,
+  listDocuments,
+  saveMarkdownFile,
+  summariseUploadResponse,
+  uploadDocumentFiles,
+} from '../services/documentsApi'
 import { listMarkdownVersions, getMarkdownContent } from '../services/markdownsApi'
 import { listChunksVersions } from '../services/chunksApi'
 
@@ -23,7 +33,6 @@ export interface ToastCallbacks {
 }
 
 export interface ConversionProgress {
-  active: boolean
   current: number
   total: number
 }
@@ -66,15 +75,22 @@ export function useDocument(toast: ToastCallbacks) {
 
   // AbortControllers for in-flight requests
   const fetchDocAbortRef = useRef<AbortController | null>(null)
+  const markdownVersionAbortRef = useRef<AbortController | null>(null)
   const convertAbortRef = useRef<AbortController | null>(null)
   const convertToPdfAbortRef = useRef<AbortController | null>(null)
+  const versionsRequestRef = useRef(0)
+  const markdownSelectionRef = useRef(0)
+
+  useEffect(() => () => {
+    fetchDocAbortRef.current?.abort()
+    markdownVersionAbortRef.current?.abort()
+    convertAbortRef.current?.abort()
+    convertToPdfAbortRef.current?.abort()
+  }, [])
 
   const fetchDocuments = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/documents`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data: string[] = await res.json()
-      setDocuments(data)
+      setDocuments(await listDocuments())
     } catch {
       toastRef.current.onError('Failed to fetch document list')
     }
@@ -89,25 +105,75 @@ export function useDocument(toast: ToastCallbacks) {
    * ``GET /document/{filename}``).
    */
   const fetchVersions = useCallback(async (filename: string): Promise<MarkdownVersion[]> => {
-    const [mdVersions, chunkVersions] = await Promise.all([
-      listMarkdownVersions(filename).catch(() => []),
-      listChunksVersions(filename).catch(() => []),
+    const requestId = ++versionsRequestRef.current
+    const [markdownResult, chunksResult] = await Promise.allSettled([
+      listMarkdownVersions(filename),
+      listChunksVersions(filename),
     ])
-    setAvailableMarkdowns(mdVersions)
-    setAvailableChunks(chunkVersions)
+    if (markdownResult.status === 'rejected') throw markdownResult.reason
+    const mdVersions = markdownResult.value
+    if (
+      selectedDocRef.current === filename &&
+      versionsRequestRef.current === requestId
+    ) {
+      setAvailableMarkdowns(mdVersions)
+      if (chunksResult.status === 'fulfilled') {
+        setAvailableChunks(chunksResult.value)
+      }
+    }
     return mdVersions
   }, [])
+
+  const syncSelectedMarkdownFromVersions = useCallback(async (
+    filename: string,
+    preferredFilename: string,
+    fallback: 'first' | 'preferred' = 'first',
+  ) => {
+    const selectionId = ++markdownSelectionRef.current
+    try {
+      const versions = await fetchVersions(filename)
+      if (
+        selectedDocRef.current !== filename ||
+        markdownSelectionRef.current !== selectionId
+      ) return
+      const match = versions.find(v => v.filename === preferredFilename)
+      setSelectedMarkdown(
+        match?.filename ??
+        (fallback === 'preferred' ? preferredFilename : versions[0]?.filename ?? null),
+      )
+    } catch {
+      // Version lists are advisory UI state; failed refreshes should not break
+      // the document load/conversion flow that already succeeded.
+    }
+  }, [fetchVersions])
 
   /** Replace the currently displayed Markdown with another available version. */
   const selectMarkdownVersion = useCallback(async (identifier: string) => {
     const filename = selectedDocRef.current
     if (!filename) return
+
+    fetchDocAbortRef.current?.abort()
+    markdownVersionAbortRef.current?.abort()
+    const selectionId = ++markdownSelectionRef.current
+    const abortCtrl = new AbortController()
+    markdownVersionAbortRef.current = abortCtrl
+
     try {
-      const data = await getMarkdownContent(filename, identifier)
+      const data = await getMarkdownContent(filename, identifier, abortCtrl.signal)
+      if (
+        markdownVersionAbortRef.current !== abortCtrl ||
+        selectedDocRef.current !== filename ||
+        markdownSelectionRef.current !== selectionId
+      ) return
       setSelectedMarkdown(data.filename)
       setDocumentData(prev => prev ? { ...prev, md_filename: data.filename, md_content: data.content, has_markdown: true } : prev)
-    } catch {
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
       toastRef.current.onError('Failed to load Markdown version')
+    } finally {
+      if (markdownVersionAbortRef.current === abortCtrl) {
+        markdownVersionAbortRef.current = null
+      }
     }
   }, [])
 
@@ -117,40 +183,37 @@ export function useDocument(toast: ToastCallbacks) {
     if (!filename) return
 
     fetchDocAbortRef.current?.abort()
+    markdownVersionAbortRef.current?.abort()
     const abortCtrl = new AbortController()
     fetchDocAbortRef.current = abortCtrl
 
     setLoading(true)
     try {
-      const res = await fetch(
-        `${API}/document/${encodeURIComponent(filename)}`,
-        { signal: abortCtrl.signal },
-      )
-      if (!res.ok) throw new Error()
-      const data: DocumentData = await res.json()
+      const data = await getDocument(filename, abortCtrl.signal)
       if (fetchDocAbortRef.current !== abortCtrl || selectedDocRef.current !== filename) return
       setDocumentData(data)
-      fetchVersions(filename).then(versions => {
-        if (selectedDocRef.current !== filename) return
-        const match = versions.find(v => v.filename === data.md_filename)
-        setSelectedMarkdown(match?.filename ?? versions[0]?.filename ?? null)
-      }).catch(() => {})
+      void syncSelectedMarkdownFromVersions(filename, data.md_filename)
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return
     } finally {
       if (fetchDocAbortRef.current === abortCtrl) setLoading(false)
     }
-  }, [fetchVersions])
+  }, [syncSelectedMarkdownFromVersions])
 
   const selectDocument = useCallback(async (filename: string) => {
     if (filename === selectedDocRef.current) return
 
     fetchDocAbortRef.current?.abort()
+    markdownVersionAbortRef.current?.abort()
+    versionsRequestRef.current += 1
+    markdownSelectionRef.current += 1
     const abortCtrl = new AbortController()
     fetchDocAbortRef.current = abortCtrl
 
     convertAbortRef.current?.abort()
+    convertToPdfAbortRef.current?.abort()
     setConverting(false)
+    setConvertingToPdf(false)
     setConversionErrorMessage(null)
 
     setSelectedDoc(filename)
@@ -161,43 +224,31 @@ export function useDocument(toast: ToastCallbacks) {
     setSelectedChunks(null)
     setLoading(true)
     try {
-      const res = await fetch(
-        `${API}/document/${encodeURIComponent(filename)}`,
-        { signal: abortCtrl.signal },
-      )
-      if (!res.ok) throw new Error()
-      const data: DocumentData = await res.json()
+      const data = await getDocument(filename, abortCtrl.signal)
       if (fetchDocAbortRef.current !== abortCtrl || selectedDocRef.current !== filename) return
       setDocumentData(data)
       // Kick off the version-list fetch in parallel; doesn't block first paint.
-      fetchVersions(filename).then(versions => {
-        if (selectedDocRef.current !== filename) return
-        const match = versions.find(v => v.filename === data.md_filename)
-        setSelectedMarkdown(match?.filename ?? versions[0]?.filename ?? null)
-      }).catch(() => {})
+      void syncSelectedMarkdownFromVersions(filename, data.md_filename)
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return
       toastRef.current.onError(`Failed to load "${filename}"`)
     } finally {
       if (fetchDocAbortRef.current === abortCtrl) setLoading(false)
     }
-  }, [fetchVersions])
+  }, [syncSelectedMarkdownFromVersions])
 
   const uploadFiles = useCallback(async (files: File[]) => {
     if (files.length === 0) return
     setUploading(true)
     try {
-      const formData = new FormData()
-      files.forEach(f => formData.append('files', f))
-      const res = await fetch(`${API}/upload`, { method: 'POST', body: formData })
-      if (!res.ok) {
-        const text = await res.text().catch(() => '')
-        let detail = 'Upload failed'
-        try { detail = (JSON.parse(text) as { detail?: string })?.detail ?? (text || detail) } catch { detail = text || detail }
-        throw new Error(detail)
+      const response = await uploadDocumentFiles(files)
+      if (response.uploaded > 0) await fetchDocuments()
+      const message = summariseUploadResponse(response)
+      if (response.failed > 0) {
+        toastRef.current.onError(message)
+      } else {
+        toastRef.current.onSuccess(message)
       }
-      await fetchDocuments()
-      toastRef.current.onSuccess(`Uploaded ${files.length} file${files.length > 1 ? 's' : ''}`)
     } catch (err) {
       toastRef.current.onError(err instanceof Error ? err.message : 'Upload failed')
     } finally {
@@ -206,22 +257,51 @@ export function useDocument(toast: ToastCallbacks) {
   }, [fetchDocuments])
 
   const deleteDocuments = useCallback(async (filenames: string[]) => {
-    if (filenames.length === 0) return
+    if (filenames.length === 0) {
+      return { success: true, deleted: [], deleted_documents: [], failed: {}, message: '' }
+    }
     try {
-      const res = await fetch(`${API}/documents`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(filenames),
-      })
-      if (!res.ok) throw new Error()
-      if (selectedDocRef.current && filenames.includes(selectedDocRef.current)) {
+      const result = await deleteDocumentsByName(filenames)
+      if (
+        selectedDocRef.current &&
+        result.deleted_documents.includes(selectedDocRef.current)
+      ) {
+        fetchDocAbortRef.current?.abort()
+        markdownVersionAbortRef.current?.abort()
+        convertAbortRef.current?.abort()
+        convertToPdfAbortRef.current?.abort()
+        setConverting(false)
+        setConvertingToPdf(false)
         setSelectedDoc(null)
         setDocumentData(null)
+        setAvailableMarkdowns([])
+        setAvailableChunks([])
+        setSelectedMarkdown(null)
+        setSelectedChunks(null)
       }
       await fetchDocuments()
-      toastRef.current.onSuccess(`Deleted ${filenames.length} document${filenames.length > 1 ? 's' : ''}`)
+      const deletedCount = result.deleted_documents.length
+      const failedCount = Object.keys(result.failed).length
+      if (deletedCount > 0) {
+        toastRef.current.onSuccess(
+          `Deleted ${deletedCount} document${deletedCount === 1 ? '' : 's'}`,
+        )
+      }
+      if (failedCount > 0) {
+        toastRef.current.onError(
+          `${failedCount} document${failedCount === 1 ? '' : 's'} could not be deleted`,
+        )
+      }
+      return result
     } catch {
       toastRef.current.onError('Delete failed')
+      return {
+        success: false,
+        deleted: [],
+        deleted_documents: [],
+        failed: Object.fromEntries(filenames.map(filename => [filename, 'Delete failed'])),
+        message: 'Delete failed',
+      }
     }
   }, [fetchDocuments])
 
@@ -230,19 +310,21 @@ export function useDocument(toast: ToastCallbacks) {
     vlm?: VLMSettings,
     cloud?: CloudSettings,
   ) => {
-    if (!selectedDocRef.current) return
+    const docAtStart = selectedDocRef.current
+    if (!docAtStart) return
 
     convertAbortRef.current?.abort()
     const abortCtrl = new AbortController()
     convertAbortRef.current = abortCtrl
 
     setConverting(true)
-    setConversionProgress({ active: true, current: 0, total: 0 })
+    setConversionProgress({ current: 0, total: 0 })
     setConversionErrorMessage(null)
     try {
       const body: Record<string, unknown> = {
-        filenames: [selectedDocRef.current],
+        filenames: [docAtStart],
         converter,
+        force: true,
       }
       if (converter === 'vlm' && vlm) body.vlm = vlm
       if (converter === 'cloud' && cloud) body.cloud = cloud
@@ -265,8 +347,9 @@ export function useDocument(toast: ToastCallbacks) {
       let failedPages: number[] | undefined
       let resumedPages: number | undefined
       for await (const event of parseSse(res.body, () => setConversionErrorMessage(CONNECTION_LOST_MSG))) {
+        if (selectedDocRef.current !== docAtStart || convertAbortRef.current !== abortCtrl) return
         if (event.type === 'progress') {
-          setConversionProgress({ active: true, current: event.current as number, total: event.total as number })
+          setConversionProgress({ current: event.current as number, total: event.total as number })
         } else if (event.type === 'file_done') {
           if (!event.success) { fileError = String(event.error ?? 'Conversion failed'); break }
           mdContent = event.md_content as string
@@ -283,6 +366,7 @@ export function useDocument(toast: ToastCallbacks) {
 
       if (fileError) throw new Error(fileError)
       if (mdContent === undefined) throw new Error('Stream ended without a result')
+      if (selectedDocRef.current !== docAtStart || convertAbortRef.current !== abortCtrl) return
       setDocumentData(prev => prev
         ? { ...prev, has_markdown: true, md_content: mdContent!, md_filename: mdFilename ?? prev.md_filename }
         : prev)
@@ -301,13 +385,8 @@ export function useDocument(toast: ToastCallbacks) {
       // version list AND sync the dropdown selection so it points to the file
       // that's actually being displayed (instead of whichever variant was
       // selected before the conversion).
-      const fn = selectedDocRef.current
-      if (fn) {
-        fetchVersions(fn).then(versions => {
-          if (!mdFilename) return
-          const match = versions.find(v => v.filename === mdFilename)
-          setSelectedMarkdown(match?.filename ?? mdFilename)
-        }).catch(() => {})
+      if (mdFilename) {
+        void syncSelectedMarkdownFromVersions(docAtStart, mdFilename, 'preferred')
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return
@@ -319,7 +398,7 @@ export function useDocument(toast: ToastCallbacks) {
         setConversionErrorMessage(null)
       }
     }
-  }, [fetchVersions])
+  }, [syncSelectedMarkdownFromVersions])
 
   const cancelConversion = useCallback(() => {
     convertAbortRef.current?.abort()
@@ -339,21 +418,15 @@ export function useDocument(toast: ToastCallbacks) {
 
     setConvertingToPdf(true)
     try {
-      const res = await fetch(
-        `${API}/md-to-pdf/${encodeURIComponent(mdFilename)}`,
-        { method: 'POST', signal: abortCtrl.signal },
-      )
-      if (!res.ok) throw new Error()
-      const data = await res.json()
-      if (typeof data.pdf_filename !== 'string') throw new Error('Invalid response: missing pdf_filename')
+      const pdfFilename = await convertMarkdownToPdf(docAtStart, mdFilename, abortCtrl.signal)
       // Both state updates must be gated by the same "is the user still on
       // this doc?" check — otherwise a doc switch during conversion would
       // leave the previous-conversion's PDF metadata stamped onto the new
       // doc's ``documentData``, which would make the new doc claim it has
       // a PDF it doesn't actually own.
       if (selectedDocRef.current === docAtStart) {
-        setSelectedDoc(data.pdf_filename)
-        setDocumentData(prev => prev ? { ...prev, has_pdf: true, pdf_filename: data.pdf_filename } : prev)
+        setSelectedDoc(pdfFilename)
+        setDocumentData(prev => prev ? { ...prev, has_pdf: true, pdf_filename: pdfFilename } : prev)
       }
       await fetchDocuments()
       toastRef.current.onSuccess('Converted to PDF ✓')
@@ -373,43 +446,56 @@ export function useDocument(toast: ToastCallbacks) {
   }, [])
 
   const saveMarkdown = useCallback(async (content: string) => {
-    if (!selectedDocRef.current) return
+    const docAtStart = selectedDocRef.current
+    if (!docAtStart) return
     setSavingMd(true)
     try {
       const mdFilename =
         documentDataRef.current?.md_filename ??
-        selectedDocRef.current.replace(/\.pdf$/i, '.md')
-      const file = new File([new Blob([content], { type: 'text/markdown' })], mdFilename, { type: 'text/markdown' })
-      const formData = new FormData()
-      formData.append('files', file)
-      const res = await fetch(`${API}/upload`, { method: 'POST', body: formData })
-      if (!res.ok) throw new Error()
+        docAtStart.replace(/\.pdf$/i, '.md')
+      await saveMarkdownFile(docAtStart, mdFilename, content)
+      if (selectedDocRef.current !== docAtStart) return
+      setAvailableChunks([])
+      setSelectedChunks(null)
       setDocumentData(prev => prev ? { ...prev, md_content: content } : prev)
+      void fetchVersions(docAtStart)
       toastRef.current.onSuccess('Markdown saved ✓')
-    } catch {
+    } catch (err) {
       toastRef.current.onError('Failed to save Markdown')
+      throw err
     } finally {
       setSavingMd(false)
     }
-  }, [])
+  }, [fetchVersions])
 
   const deleteMarkdown = useCallback(async () => {
     const filename = selectedDocRef.current
     if (!filename) return
+    const deletesWholeDocument =
+      filename.toLowerCase().endsWith('.md') &&
+      !documentDataRef.current?.has_pdf
     const mdFilename =
       documentDataRef.current?.md_filename ??
       filename.replace(/\.pdf$/i, '.md')
     try {
-      const res = await fetch(`${API}/documents`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify([mdFilename]),
-      })
-      if (!res.ok) throw new Error()
+      await deleteMarkdownVariant(filename, mdFilename)
+      if (selectedDocRef.current !== filename) return
+      if (deletesWholeDocument) {
+        setSelectedDoc(null)
+        setDocumentData(null)
+        setAvailableMarkdowns([])
+        setAvailableChunks([])
+        setSelectedMarkdown(null)
+        setSelectedChunks(null)
+        await fetchDocuments()
+        toastRef.current.onSuccess('Markdown document deleted')
+        return
+      }
       // Other converter variants may still be on disk; re-fetch the version
       // list and either fall through to a sibling version or clear the
       // viewer if this was the last one.
       const remaining = await fetchVersions(filename)
+      if (selectedDocRef.current !== filename) return
       if (remaining.length === 0) {
         setDocumentData(prev => prev ? { ...prev, has_markdown: false, md_content: '' } : prev)
         setSelectedMarkdown(null)
@@ -424,7 +510,7 @@ export function useDocument(toast: ToastCallbacks) {
     } catch {
       toastRef.current.onError('Failed to remove Markdown')
     }
-  }, [fetchVersions, selectMarkdownVersion])
+  }, [fetchDocuments, fetchVersions, selectMarkdownVersion])
 
   const batchConvert = useCallback(async (
     filenames: string[],
@@ -438,7 +524,7 @@ export function useDocument(toast: ToastCallbacks) {
     onConnectionLost?: () => void,
     onPageProgress?: (filename: string, page: number, totalPages: number, fileIndex: number, fileTotal: number) => void,
   ): Promise<void> => {
-    const body: Record<string, unknown> = { filenames, converter }
+    const body: Record<string, unknown> = { filenames, converter, force: true }
     if (converter === 'vlm' && vlm) body.vlm = vlm
     if (converter === 'cloud' && cloud) body.cloud = cloud
 
@@ -494,6 +580,17 @@ export function useDocument(toast: ToastCallbacks) {
     if (!completed) throw new Error('Conversion stream ended without completion')
   }, [])
 
+  const refreshVersions = useCallback(async () => {
+    const fn = selectedDocRef.current
+    if (!fn) return
+    try {
+      await fetchVersions(fn)
+    } catch {
+      // Version lists are advisory state; callers that just completed a
+      // successful write should not be turned into failures by a refresh miss.
+    }
+  }, [fetchVersions])
+
   return {
     documents, selectedDoc, documentData, loading, uploading, converting, convertingToPdf, savingMd,
     conversionProgress, conversionErrorMessage,
@@ -506,9 +603,6 @@ export function useDocument(toast: ToastCallbacks) {
     selectedMarkdown, selectedChunks,
     selectMarkdownVersion,
     setSelectedChunks,
-    refreshVersions: () => {
-      const fn = selectedDocRef.current
-      if (fn) fetchVersions(fn).catch(() => {})
-    },
+    refreshVersions,
   }
 }

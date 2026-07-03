@@ -7,6 +7,7 @@
   position: fixed;
   inset: 0;
   z-index: 2000;
+  padding: 16px;
   background: rgba(20, 8, 2, 0.78);
   backdrop-filter: blur(10px);
   display: flex;
@@ -24,7 +25,8 @@
 .progress-card {
   background: linear-gradient(145deg, #ffffff 0%, #FFF8EC 100%);
   border-radius: 16px;
-  width: min(460px, 92vw);
+  width: min(460px, 100%);
+  max-height: calc(100dvh - 32px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -156,4 +158,30 @@
 .progress-interrupt-btn:active {
   transform: translateY(0);
   box-shadow: 0 2px 8px rgba(204, 34, 0, 0.35);
+}
+
+@media (max-width: 640px) {
+  .progress-overlay {
+    padding: 10px;
+  }
+
+  .progress-card {
+    border-radius: 12px;
+  }
+
+  .progress-card-header {
+    padding: 18px 20px 12px;
+  }
+
+  .progress-card-body {
+    padding: 16px 20px;
+  }
+
+  .progress-card-footer {
+    padding: 12px 20px 18px;
+  }
+
+  .progress-interrupt-btn {
+    width: 100%;
+  }
 }

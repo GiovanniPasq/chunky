@@ -1,12 +1,8 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-export default defineConfig(({ command }) => ({
+export default defineConfig({
   plugins: [react()],
-  esbuild: {
-    // Strip console.* and debugger statements from production builds.
-    drop: command === 'build' ? ['console', 'debugger'] : [],
-  },
   server: {
     port: 5173,
     host: true,
@@ -17,4 +13,24 @@ export default defineConfig(({ command }) => ({
       }
     }
   },
-}))
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          if (id.includes('pdfjs-dist')) return 'pdfjs'
+          if (
+            id.includes('react-markdown') ||
+            id.includes('remark-gfm') ||
+            id.includes('micromark') ||
+            id.includes('mdast-util') ||
+            id.includes('hast-util') ||
+            id.includes('unified')
+          ) return 'markdown'
+          if (id.includes('/react/') || id.includes('/react-dom/')) return 'react'
+          return undefined
+        },
+      },
+    },
+  },
+})

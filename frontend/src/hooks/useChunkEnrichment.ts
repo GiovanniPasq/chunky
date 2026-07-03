@@ -3,19 +3,21 @@ import type { Chunk, EnrichmentSettings, EnrichOp } from '../types'
 import { apiEnrichChunk, apiEnrichChunks } from '../services/apiService'
 import { CONNECTION_LOST_MSG } from '../utils/parseSse'
 import { missingEnrichmentModelError } from '../utils/chunkUtils'
+import { isCurrentChunkRevision } from '../utils/chunkUtils'
 
 // ── Hook ─────────────────────────────────────────────────────────────────────
 
 interface Options {
+  documentName?: string
+  chunkRevision: number
   chunkEnrichment?: EnrichmentSettings
   chunks: Chunk[] | null
   /** Watched to clear in-progress state when the document changes. */
   content: string
   /**
-   * Active markdown variant filename, e.g. ``"report_vlm.md"``.  When
-   * provided, the chunk-enrichment endpoint attaches the per-PDF cached
-   * summary to every chunk prompt as document-level context (Phase B).
-   * No effect when undefined or when no summary is cached for the PDF.
+   * Active Markdown variant filename, e.g. ``"report_vlm.md"``. When
+   * provided, chunk enrichment can use cached document summary and nearby
+   * source Markdown as read-only context.
    */
   mdFilename?: string
   selectedChunks: Set<number>
@@ -33,13 +35,15 @@ export interface UseChunkEnrichmentReturn {
   /** Per-chunk error messages (single-chunk flow). */
   chunkEnrichErrors: Map<number, string>
   handleInterruptChunkEnrich: () => void
-  /** Enrich a single chunk by index; shows per-block spinner in chunk viz. */
+  /** Enrich a single chunk by index; blocks via ProgressModal and shows a per-block spinner. */
   handleEnrichChunk: (chunkIndex: number) => Promise<void>
   /** Enrich all selected chunks in one batched SSE call. */
   handleEnrichSelected: () => Promise<void>
 }
 
 export function useChunkEnrichment({
+  documentName,
+  chunkRevision,
   chunkEnrichment,
   chunks,
   content,
@@ -66,20 +70,29 @@ export function useChunkEnrichment({
   chunksRef.current = chunks
   const selectedChunksRef = useRef(selectedChunks)
   selectedChunksRef.current = selectedChunks
+  const chunkRevisionRef = useRef(chunkRevision)
+  chunkRevisionRef.current = chunkRevision
 
   // Abort any in-flight enrichment on unmount.
   useEffect(() => {
     return () => {
       singleEnrichAbortRef.current?.abort()
       bulkEnrichAbortRef.current?.abort()
+      singleEnrichAbortRef.current = null
+      bulkEnrichAbortRef.current = null
     }
   }, [])
 
   // Clear per-chunk state when the document content changes (doc switch / reconvert).
   useEffect(() => {
+    singleEnrichAbortRef.current?.abort()
+    bulkEnrichAbortRef.current?.abort()
+    singleEnrichAbortRef.current = null
+    bulkEnrichAbortRef.current = null
+    setChunkEnrichOp(null)
     setEnrichingChunks(new Set())
     setChunkEnrichErrors(new Map())
-  }, [content])
+  }, [content, chunkRevision])
 
   // Clear per-chunk state when chunks become null (rechunk start / doc switch).
   // We don't clear on every chunks update so that concurrent single-chunk
@@ -87,18 +100,18 @@ export function useChunkEnrichment({
   // writes its result back into the array.
   //
   // We also abort any in-flight enrichment requests.  Without this, a doc
-  // switch (or rechunk) made while a single-chunk enrichment is in flight
-  // would let the late response land via ``onEnrichChunk(index, …)`` AFTER
-  // the new doc's chunks populated — silently writing the old doc's
-  // enrichment into the new doc's chunk at the same index.  Bulk and
-  // pipeline enrichments are gated by a full-viewport ProgressModal so the
-  // user can't trigger a doc switch during them, but single-chunk enrich
-  // leaves the sidebar reachable; this effect is the only thing that
-  // guarantees those requests don't outlive their owning document.
+  // switch (or rechunk) made while enrichment is in flight would let the late
+  // response land via ``onEnrichChunk(index, …)`` AFTER the new doc's chunks
+  // populated — silently writing the old doc's enrichment into the new doc's
+  // chunk at the same index. The modal blocks normal UI paths, and this effect
+  // is the final ownership guard for programmatic state changes.
   useEffect(() => {
     if (chunks === null) {
       singleEnrichAbortRef.current?.abort()
       bulkEnrichAbortRef.current?.abort()
+      singleEnrichAbortRef.current = null
+      bulkEnrichAbortRef.current = null
+      setChunkEnrichOp(null)
       setEnrichingChunks(new Set())
       setChunkEnrichErrors(new Map())
     }
@@ -109,10 +122,13 @@ export function useChunkEnrichment({
   const handleInterruptChunkEnrich = () => {
     singleEnrichAbortRef.current?.abort()
     bulkEnrichAbortRef.current?.abort()
+    singleEnrichAbortRef.current = null
+    bulkEnrichAbortRef.current = null
     setChunkEnrichOp(null)
   }
 
   const handleEnrichChunk = async (chunkIndex: number) => {
+    if (bulkEnrichAbortRef.current) return
     const currentChunks = chunksRef.current
     if (!chunkEnrichment?.model) {
       setChunkEnrichErrors(prev => new Map(prev).set(
@@ -124,6 +140,7 @@ export function useChunkEnrichment({
     if (!currentChunks) return
     const chunk = currentChunks[chunkIndex]
     if (!chunk) return
+    const ownerRevision = chunkRevisionRef.current
 
     singleEnrichAbortRef.current?.abort()
     const abortCtrl = new AbortController()
@@ -131,6 +148,12 @@ export function useChunkEnrichment({
 
     setChunkEnrichErrors(prev => { const m = new Map(prev); m.delete(chunkIndex); return m })
     setEnrichingChunks(prev => new Set(prev).add(chunkIndex))
+    setChunkEnrichOp({
+      title: 'Chunk Enrichment',
+      detail: `Chunk ${chunkIndex + 1} of ${currentChunks.length}`,
+      current: 0,
+      total: 0,
+    })
 
     try {
       const result = await apiEnrichChunk(
@@ -141,9 +164,16 @@ export function useChunkEnrichment({
         chunk.end ?? 0,
         (chunk.metadata ?? {}) as Record<string, unknown>,
         abortCtrl.signal,
-        () => setChunkEnrichErrors(prev => new Map(prev).set(chunkIndex, CONNECTION_LOST_MSG)),
+        () => {
+          setChunkEnrichErrors(prev => new Map(prev).set(chunkIndex, CONNECTION_LOST_MSG))
+          if (singleEnrichAbortRef.current === abortCtrl) {
+            setChunkEnrichOp(prev => prev ? { ...prev, errorMessage: CONNECTION_LOST_MSG } : null)
+          }
+        },
         mdFilename,
+        documentName,
       )
+      if (!isCurrentChunkRevision(ownerRevision, chunkRevisionRef.current)) return
       onEnrichChunk(chunkIndex, {
         cleaned_chunk: (result.cleaned_chunk as string) ?? chunk.cleaned_chunk,
         title: (result.title as string) ?? chunk.title,
@@ -156,8 +186,18 @@ export function useChunkEnrichment({
       if (err instanceof DOMException && err.name === 'AbortError') return
       const msg = err instanceof Error ? err.message : 'Enrichment failed'
       setChunkEnrichErrors(prev => new Map(prev).set(chunkIndex, msg))
+      if (singleEnrichAbortRef.current === abortCtrl) {
+        setChunkEnrichOp(prev => prev ? { ...prev, errorMessage: msg } : null)
+        await new Promise<void>(r => {
+          const id = setTimeout(r, 2000)
+          abortCtrl.signal.addEventListener('abort', () => { clearTimeout(id); r() }, { once: true })
+        })
+      }
     } finally {
-      if (singleEnrichAbortRef.current === abortCtrl) singleEnrichAbortRef.current = null
+      if (singleEnrichAbortRef.current === abortCtrl) {
+        singleEnrichAbortRef.current = null
+        setChunkEnrichOp(null)
+      }
       setEnrichingChunks(prev => { const s = new Set(prev); s.delete(chunkIndex); return s })
     }
   }
@@ -165,7 +205,7 @@ export function useChunkEnrichment({
   // ── Bulk chunk enrichment ────────────────────────────────────────────────
   //
   // Sends ALL selected chunks in a single SSE call. The backend processes
-  // them with a semaphore (MAX_CONCURRENT_ENRICHMENTS) so chunk_done events
+  // them with a semaphore (ENRICHMENT_MAX_CONCURRENT_CHUNKS) so chunk_done events
   // may arrive OUT OF ORDER relative to the original selection.
   //
   // Correctness guarantees:
@@ -186,6 +226,11 @@ export function useChunkEnrichment({
     }
     if (!currentChunks || currentSelected.size === 0) return
 
+    // A single-chunk request and a batch request must never race to write
+    // enrichment fields for the same chunk set. Batch ownership wins.
+    singleEnrichAbortRef.current?.abort()
+    singleEnrichAbortRef.current = null
+
     const indices = Array.from(currentSelected).sort((a, b) => a - b)
     const chunksToEnrich = indices
       .filter(i => i < currentChunks.length)
@@ -197,6 +242,7 @@ export function useChunkEnrichment({
         metadata: (currentChunks[i].metadata ?? {}) as Record<string, unknown>,
       }))
     if (chunksToEnrich.length === 0) return
+    const ownerRevision = chunkRevisionRef.current
 
     bulkEnrichAbortRef.current?.abort()
     const abortCtrl = new AbortController()
@@ -212,8 +258,10 @@ export function useChunkEnrichment({
         chunkEnrichment,
         chunksToEnrich,
         mdFilename,
+        documentName,
         abortCtrl.signal,
         ({ current, total, chunk }) => {
+          if (!isCurrentChunkRevision(ownerRevision, chunkRevisionRef.current)) return
           if (!chunk) {
             setChunkEnrichOp(prev => prev
               ? { ...prev, current, detail: `Enriched ${current} of ${total} chunks` }
@@ -243,6 +291,7 @@ export function useChunkEnrichment({
         },
         () => setChunkEnrichOp(prev => prev ? { ...prev, errorMessage: CONNECTION_LOST_MSG } : null),
       )
+      if (!isCurrentChunkRevision(ownerRevision, chunkRevisionRef.current)) return
       enrichedCount = result.succeeded
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
@@ -257,8 +306,10 @@ export function useChunkEnrichment({
         })
       }
     } finally {
-      setChunkEnrichOp(null)
-      bulkEnrichAbortRef.current = null
+      if (bulkEnrichAbortRef.current === abortCtrl) {
+        setChunkEnrichOp(null)
+        bulkEnrichAbortRef.current = null
+      }
       setSelectedChunks(new Set())
     }
 

@@ -63,8 +63,8 @@ export default function EnrichmentSettings({ title, settings, onChange, variant 
                 Skip document summary
                 <span className="label-hint">
                   {' '}— bypass the Summary Review modal entirely and run enrichment without
-                  a document-level reference block.  Saves the ~30 s summary build on long
-                  PDFs at the cost of cross-section context.  You can still build a summary
+                  a document-level reference block. This avoids summary generation at the
+                  cost of cross-section context. You can still build a summary
                   later by unchecking this and clicking Enrich.
                 </span>
               </span>

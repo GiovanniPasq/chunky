@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { ChunkSettings, Chunk, ChunksVersion, DocumentData } from '../types'
 import { loadSettings, saveSettings } from './useSettings'
 import { chunkSse, loadSavedChunksFile, saveChunks as saveChunksApi } from '../services/chunksApi'
 import { CONNECTION_LOST_MSG } from '../utils/parseSse'
-import { buildChunkConfigSignature, findMatchingSavedChunks } from '../utils/chunkUtils'
+import { buildChunkConfigSignature, buildContentRevision, findMatchingSavedChunks } from '../utils/chunkUtils'
 import { CHUNK_OVERLAP_SCAN_TAIL } from '../config'
 import type { ToastCallbacks } from './useDocument'
 
@@ -36,9 +36,12 @@ export function useChunks(
   // merged, enriched) since the last save / fresh load.  Used by the App-level
   // confirmation flow to warn before discarding unsaved work.
   const [chunksDirty, setChunksDirty] = useState(false)
+  const [chunkRevision, setChunkRevision] = useState(0)
 
   const toastRef = useRef<ToastCallbacks>(toast)
   toastRef.current = toast
+  const selectedDocRef = useRef<string | null>(selectedDoc)
+  selectedDocRef.current = selectedDoc
 
   const chunkAbortRef = useRef<AbortController | null>(null)
   // Tracks the in-flight loadSavedChunks fetch separately from the live
@@ -52,6 +55,17 @@ export function useChunks(
   // it, hiding+showing the panel would clobber any saved-version the user
   // had loaded with a fresh re-chunk.
   const chunkedSigRef = useRef<string>('')
+  const chunkSourceHashRef = useRef<string | null>(null)
+  const replaceChunkSet = useCallback((next: Chunk[] | null, sourceHash: string | null) => {
+    chunkSourceHashRef.current = sourceHash
+    setChunkRevision(revision => revision + 1)
+    setChunks(next)
+  }, [])
+
+  useEffect(() => () => {
+    chunkAbortRef.current?.abort()
+    loadAbortRef.current?.abort()
+  }, [])
 
   const chunkContent = useCallback(async (
     filename: string,
@@ -59,19 +73,20 @@ export function useChunks(
     md: string | null,
   ) => {
     chunkAbortRef.current?.abort()
+    loadAbortRef.current?.abort()
     const abortCtrl = new AbortController()
     chunkAbortRef.current = abortCtrl
 
     setChunking(true)
-    setChunks(null)
+    replaceChunkSet(null, null)
     try {
       const onConnectionLost = () => toastRef.current.onError(CONNECTION_LOST_MSG)
-      const chunks = await chunkSse(
+      const result = await chunkSse(
         [filename], s, abortCtrl.signal, onConnectionLost,
         undefined, undefined, md,
       )
-      if (chunkAbortRef.current === abortCtrl) {
-        setChunks(chunks)
+      if (chunkAbortRef.current === abortCtrl && selectedDocRef.current === filename) {
+        replaceChunkSet(result.chunks, result.sourceHash)
         setChunksDirty(false)
       }
     } catch (err) {
@@ -82,7 +97,7 @@ export function useChunks(
         setChunking(false)
       }
     }
-  }, [])
+  }, [replaceChunkSet])
 
   const { chunkerType, chunkerLibrary, chunkSize, chunkOverlap, enableMarkdownSizing } = settings
   const hasMarkdown = documentData?.has_markdown ?? false
@@ -92,12 +107,18 @@ export function useChunks(
   // refreshes after batch-convert — so keying chunking off this value avoids
   // any drift between "what the viewer is showing" and "what we're chunking".
   const mdFilename = documentData?.md_filename ?? null
+  const mdContent = documentData?.md_content ?? ''
+  const mdContentRevision = useMemo(() => buildContentRevision(mdContent), [mdContent])
 
   /** Internal-only loader used by the chunking effect when a matching saved
    *  version is detected.  Identical to the public loadSavedChunks below
    *  except that it leaves chunkedSigRef alone — the effect has already set
    *  the signature for this configuration. */
-  const autoLoadSavedChunks = useCallback(async (chunksFilename: string) => {
+  const autoLoadSavedChunks = useCallback(async (
+    chunksFilename: string,
+    fallbackSettings: ChunkSettings,
+    fallbackMdFilename: string | null,
+  ) => {
     const filename = selectedDoc
     if (!filename) return
     chunkAbortRef.current?.abort()
@@ -106,20 +127,23 @@ export function useChunks(
     loadAbortRef.current = abortCtrl
     setChunking(false)
     try {
-      const normalised = await loadSavedChunksFile(filename, chunksFilename, abortCtrl.signal)
-      if (loadAbortRef.current !== abortCtrl) return
-      setChunks(normalised)
+      const loaded = await loadSavedChunksFile(filename, chunksFilename, abortCtrl.signal)
+      if (loadAbortRef.current !== abortCtrl || selectedDocRef.current !== filename) return
+      replaceChunkSet(loaded.chunks, loaded.sourceHash)
       setChunksDirty(false)
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return
-      toastRef.current.onError('Failed to load saved chunks')
+      setSelectedChunksFilename(null)
+      toastRef.current.onError('Saved chunks could not be loaded — regenerating')
+      await chunkContent(filename, fallbackSettings, fallbackMdFilename)
     }
-  }, [selectedDoc])
+  }, [selectedDoc, replaceChunkSet, setSelectedChunksFilename, chunkContent])
 
   useEffect(() => {
     if (!selectedDoc || !hasMarkdown) {
       chunkAbortRef.current?.abort()
-      setChunks(null)
+      loadAbortRef.current?.abort()
+      replaceChunkSet(null, null)
       setChunking(false)
       chunkedSigRef.current = ''
       return
@@ -129,6 +153,7 @@ export function useChunks(
     // discard the user's selection — only abort any pending request.
     if (!chunkingEnabled) {
       chunkAbortRef.current?.abort()
+      loadAbortRef.current?.abort()
       return
     }
     // Include availableChunks.length and currentMdSource in the signature
@@ -137,7 +162,7 @@ export function useChunks(
     // chunks-version listing does, sig stays the same, and the auto-link
     // never fires.
     const sig = buildChunkConfigSignature(
-      selectedDoc, mdFilename, currentMdSource, settings, availableChunks.length,
+      selectedDoc, mdFilename, currentMdSource, settings, availableChunks.length, mdContentRevision,
     )
     if (sig === chunkedSigRef.current) return
     chunkedSigRef.current = sig
@@ -149,13 +174,13 @@ export function useChunks(
     const matching = findMatchingSavedChunks(availableChunks, currentMdSource, settings)
     if (matching) {
       setSelectedChunksFilename(matching.filename)
-      autoLoadSavedChunks(matching.filename)
+      autoLoadSavedChunks(matching.filename, settings, mdFilename)
     } else {
       setSelectedChunksFilename(null)
       chunkContent(selectedDoc, settings, mdFilename)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDoc, mdFilename, hasMarkdown, chunkerType, chunkerLibrary, chunkSize, chunkOverlap, enableMarkdownSizing, chunkingEnabled, chunkContent, availableChunks, currentMdSource])
+  }, [selectedDoc, mdFilename, mdContentRevision, hasMarkdown, chunkerType, chunkerLibrary, chunkSize, chunkOverlap, enableMarkdownSizing, chunkingEnabled, chunkContent, availableChunks, currentMdSource])
 
   const cancelChunking = useCallback(() => {
     chunkAbortRef.current?.abort()
@@ -267,7 +292,13 @@ export function useChunks(
     if (!chunks || !selectedDoc) return null
     setSaving(true)
     try {
-      const savedFilename = await saveChunksApi({ filename: selectedDoc, mdFilename, settings, chunks })
+      const savedFilename = await saveChunksApi({
+        filename: selectedDoc,
+        mdFilename,
+        sourceHash: chunkSourceHashRef.current,
+        settings,
+        chunks,
+      })
       setChunksDirty(false)
       toastRef.current.onSuccess(`Saved ${chunks.length} chunks ✓`)
       return savedFilename
@@ -310,25 +341,25 @@ export function useChunks(
     loadAbortRef.current = abortCtrl
     setChunking(false)
     try {
-      const normalised = await loadSavedChunksFile(filename, chunksFilename, abortCtrl.signal)
+      const loaded = await loadSavedChunksFile(filename, chunksFilename, abortCtrl.signal)
       // Race guard: only commit state if this controller is still the active
       // one — otherwise a slower earlier request could overwrite the newer
       // selection.
-      if (loadAbortRef.current !== abortCtrl) return
-      setChunks(normalised)
+      if (loadAbortRef.current !== abortCtrl || selectedDocRef.current !== filename) return
+      replaceChunkSet(loaded.chunks, loaded.sourceHash)
       setChunksDirty(false)
       // Mark the live config as already "satisfied" by these saved chunks
       // so the chunking effect doesn't fire fresh re-chunking the next time
       // the panel is reopened.  Routing both call sites through the shared
       // helper guarantees the format stays identical to the effect's sig.
       chunkedSigRef.current = buildChunkConfigSignature(
-        selectedDoc, mdFilename, currentMdSource, settings, availableChunks.length,
+        selectedDoc, mdFilename, currentMdSource, settings, availableChunks.length, mdContentRevision,
       )
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return
       toastRef.current.onError('Failed to load saved chunks')
     }
-  }, [selectedDoc, mdFilename, settings, currentMdSource, availableChunks])
+  }, [selectedDoc, mdFilename, mdContentRevision, settings, currentMdSource, availableChunks, replaceChunkSet])
 
   const enrichChunk = useCallback((index: number, updates: Partial<Chunk>) => {
     setChunks(prev => {
@@ -341,7 +372,7 @@ export function useChunks(
   }, [])
 
   return {
-    chunks, settings, saving, chunking, chunksDirty,
+    chunks, settings, saving, chunking, chunksDirty, chunkRevision,
     cancelChunking, applySettings,
     editChunk, deleteChunk, deleteChunks, mergeChunks, saveChunks, enrichChunk,
     loadSavedChunks, rechunk,

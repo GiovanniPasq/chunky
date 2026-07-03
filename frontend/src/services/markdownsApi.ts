@@ -14,9 +14,12 @@ export async function listMarkdownVersions(filename: string): Promise<MarkdownVe
   const res = await fetch(
     `${API_BASE}/documents/${encodeURIComponent(filename)}/markdowns`,
   )
-  if (!res.ok) return []
-  const data = await res.json().catch(() => ({ versions: [] }))
-  return (data.versions ?? []) as MarkdownVersion[]
+  if (!res.ok) throw new Error(`List markdowns failed: HTTP ${res.status}`)
+  const data = await res.json() as { versions?: unknown }
+  if (!Array.isArray(data.versions)) {
+    throw new Error('Invalid Markdown versions response')
+  }
+  return data.versions as MarkdownVersion[]
 }
 
 /**
@@ -27,9 +30,11 @@ export async function listMarkdownVersions(filename: string): Promise<MarkdownVe
 export async function getMarkdownContent(
   filename: string,
   identifier: string,
+  signal?: AbortSignal,
 ): Promise<MarkdownContent> {
   const res = await fetch(
     `${API_BASE}/documents/${encodeURIComponent(filename)}/markdowns/${encodeURIComponent(identifier)}`,
+    { signal },
   )
   if (!res.ok) throw new Error(`Get markdown failed: HTTP ${res.status}`)
   return res.json()

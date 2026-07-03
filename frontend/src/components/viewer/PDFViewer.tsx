@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, memo } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
-import workerSrc from 'pdfjs-dist/build/pdf.worker.min.js?url'
+import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { clamp, SCROLL_DEBOUNCE_MS } from '../../hooks/useScrollSync'
 import { VIEWER_SCROLL } from '../../utils/viewerEvents'
 import { PDF_DIM_BATCH as DIM_BATCH, PDF_RENDER_BUFFER as BUFFER } from '../../config'
@@ -70,8 +70,9 @@ function PDFViewer({ filename, scale = 1.0, scrollSyncEnabled = true, onToggleSc
   const textLayerRefs = useRef<(HTMLDivElement | null)[]>([])
   const containerRef = useRef<HTMLDivElement>(null)
   const isScrollingRef = useRef(false)
-  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout>>()
-  const rafRef = useRef<number>()
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const rafRef = useRef<number | undefined>(undefined)
+  const loadingTaskRef = useRef<pdfjsLib.PDFDocumentLoadingTask | null>(null)
 
   // Cancel any pending animation frame and scroll timeout on unmount.
   // Also destroy the current PDF document to release its buffers.
@@ -79,7 +80,9 @@ function PDFViewer({ filename, scale = 1.0, scrollSyncEnabled = true, onToggleSc
     return () => {
       if (rafRef.current !== undefined) cancelAnimationFrame(rafRef.current)
       if (scrollTimeoutRef.current !== undefined) clearTimeout(scrollTimeoutRef.current)
-      setPdf(prev => { prev?.destroy(); return null })
+      void loadingTaskRef.current?.destroy()
+      loadingTaskRef.current = null
+      setPdf(prev => { void prev?.cleanup(); return null })
     }
   }, [])
 
@@ -93,16 +96,16 @@ function PDFViewer({ filename, scale = 1.0, scrollSyncEnabled = true, onToggleSc
   // ── Load PDF ──────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false
-    let incoming: pdfjsLib.PDFDocumentProxy | null = null
+    const loadingTask = pdfjsLib.getDocument({ url: `/api/pdf/${encodeURIComponent(filename)}` })
+    loadingTaskRef.current = loadingTask
 
     // Destroy the previously loaded document to free its binary buffer and
     // decoded page objects. Without this, every file switch leaks several MB.
-    setPdf(prev => { prev?.destroy(); return null })
+    setPdf(prev => { void prev?.cleanup(); return null })
 
-    pdfjsLib.getDocument(`/api/pdf/${filename}`).promise
+    loadingTask.promise
       .then(doc => {
-        incoming = doc
-        if (cancelled) { doc.destroy(); return }
+        if (cancelled) { void doc.cleanup(); return }
         setPdf(doc)
         setNumPages(doc.numPages)
         setPageDimensions([])
@@ -116,9 +119,8 @@ function PDFViewer({ filename, scale = 1.0, scrollSyncEnabled = true, onToggleSc
       })
     return () => {
       cancelled = true
-      // If the promise resolves after cleanup, destroy there (handled above).
-      // If it hasn't resolved yet, destroy when it does via the incoming ref.
-      if (incoming) { incoming.destroy() }
+      if (loadingTaskRef.current === loadingTask) loadingTaskRef.current = null
+      void loadingTask.destroy()
     }
   }, [filename])
 
@@ -209,7 +211,7 @@ function PDFViewer({ filename, scale = 1.0, scrollSyncEnabled = true, onToggleSc
       if (!ctx || cancelled) return
       ctx.scale(dpr, dpr)
 
-      const task = page.render({ canvasContext: ctx, viewport })
+      const task = page.render({ canvas: null, canvasContext: ctx, viewport })
       renderTasks.push(task)
       await task.promise.catch(() => {})
       if (cancelled) return
@@ -227,7 +229,8 @@ function PDFViewer({ filename, scale = 1.0, scrollSyncEnabled = true, onToggleSc
         tl.style.setProperty('--scale-factor', String(viewport.scale))
         const tc = await page.getTextContent()
         if (!cancelled) {
-          pdfjsLib.renderTextLayer({ textContentSource: tc, container: tl, viewport, textDivs: [] })
+          const textLayer = new pdfjsLib.TextLayer({ textContentSource: tc, container: tl, viewport })
+          await textLayer.render()
         }
       }
     }

@@ -48,14 +48,6 @@ export interface VLMSettings {
   use_checkpoint?: boolean
 }
 
-export interface CheckpointInfo {
-  document_name: string
-  converter: string
-  exists: boolean
-  /** 1-indexed page numbers already cached on disk. */
-  completed_pages: number[]
-}
-
 export interface CloudSettings {
   base_url?: string
   bearer_token?: string
@@ -69,8 +61,9 @@ export interface EnrichmentSettings {
   user_prompt?: string
   /**
    * Pipeline enrichment: when true (default), per-piece corrections from a
-   * previous run are reused on re-run if every input (piece content +
-   * prompt + model + temperature + document summary) is unchanged.  When
+   * previous run are reused on re-run if every output-determining input
+   * (piece content, context, prompt, model, endpoint, temperature, and
+   * document summary) is unchanged. When
    * false, the cache is discarded and every piece is reconverted from
    * scratch.  Only the markdown enrichment pipeline reads this flag;
    * chunk enrichment ignores it.
@@ -91,9 +84,9 @@ export interface EnrichmentSettings {
 // ---------------------------------------------------------------------------
 // Document-level summary
 //
-// One record per source PDF, reused across every converter variant.  The
-// frontend's Summary Review modal lets the user inspect / edit /
-// regenerate the record before any enrichment pipeline runs against it.
+// One record per source document, reused across converter variants of a PDF.
+// The Summary Review modal lets the user inspect, edit, or regenerate it
+// before an enrichment pipeline runs.
 // ---------------------------------------------------------------------------
 
 export interface DocumentSummary {
@@ -149,7 +142,6 @@ export interface MarkdownVersion {
   filename: string
   source: 'converted' | 'uploaded'
   converter: string | null
-  file_path: string
   /** True iff this variant contains VLM ``<!-- page N failed: … -->``
    *  placeholders left by a partial conversion.  Drives the ⚠ marker
    *  next to the variant's entry in the version picker. */
@@ -164,7 +156,8 @@ export interface ChunksVersion {
   algorithm: string
   chunk_size: number | null
   chunk_overlap: number | null
-  file_path: string
+  source_hash: string | null
+  is_stale: boolean
 }
 
 // ---------------------------------------------------------------------------

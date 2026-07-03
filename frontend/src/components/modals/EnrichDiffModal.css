@@ -16,7 +16,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: 20px;
 }
 
 .enrich-diff-modal {
@@ -25,7 +25,7 @@
   border-radius: 10px;
   box-shadow: 0 20px 60px rgba(20, 8, 2, 0.30);
   width: min(1600px, 100%);
-  height: min(900px, 100%);
+  height: min(900px, calc(100dvh - 40px));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -324,4 +324,49 @@
 .enrich-diff-accept:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+@media (max-width: 900px) {
+  .enrich-diff-overlay {
+    padding: 10px;
+  }
+
+  .enrich-diff-modal {
+    height: calc(100dvh - 20px);
+  }
+
+  .enrich-diff-header {
+    padding: 12px 14px;
+  }
+
+  .enrich-diff-tabs {
+    padding: 6px 14px 0;
+  }
+
+  .enrich-diff-grid,
+  .enrich-diff-edit-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .enrich-diff-edit-grid {
+    grid-template-rows: auto minmax(220px, 1fr) auto minmax(220px, 1fr);
+  }
+
+  .enrich-diff-col-header + .enrich-diff-col-header,
+  .enrich-diff-cell + .enrich-diff-cell,
+  .enrich-diff-textarea + .enrich-diff-textarea {
+    border-left: none;
+  }
+
+  .enrich-diff-footer {
+    flex-wrap: wrap;
+    padding: 10px 14px;
+  }
+}
+
+@media (max-width: 560px) {
+  .enrich-diff-reject,
+  .enrich-diff-accept {
+    flex: 1 1 100%;
+  }
 }

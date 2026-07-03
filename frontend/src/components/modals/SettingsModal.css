@@ -6,6 +6,7 @@
 .modal-overlay {
   position: fixed;
   inset: 0;
+  padding: 16px;
   background: radial-gradient(circle at center, rgba(139, 69, 19, 0.2), rgba(0, 0, 0, 0.7));
   display: flex;
   align-items: center;
@@ -26,8 +27,8 @@
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 248, 235, 0.97) 100%);
   backdrop-filter: blur(20px);
   border-radius: 16px;
-  width: min(560px, 95vw);
-  max-height: 90vh;
+  width: min(560px, 100%);
+  max-height: min(90vh, calc(100dvh - 32px));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -439,6 +440,45 @@
 .modal-footer-actions {
   display: flex;
   gap: 10px;
+}
+
+@media (max-width: 640px) {
+  .modal-overlay {
+    padding: 8px;
+    align-items: stretch;
+  }
+
+  .settings-modal {
+    border-radius: 12px;
+    max-height: calc(100dvh - 16px);
+  }
+
+  .modal-header {
+    padding: 14px 16px 12px;
+  }
+
+  .modal-header h2 {
+    font-size: 18px;
+  }
+
+  .modal-body {
+    padding: 14px 16px;
+  }
+
+  .modal-footer {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 12px 16px;
+  }
+
+  .modal-footer-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .modal-footer .btn-reset {
+    width: 100%;
+  }
 }
 
 /* ── Reset to defaults ── */

@@ -1,7 +1,13 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { ChunkSettings, Capabilities, CapabilityLibrary, EnrichmentSettings } from '../../types'
 import { capabilityService } from '../../services/apiService'
-import { DEFAULT_SETTINGS, DEFAULT_VLM_MODEL, DEFAULT_VLM_BASE_URL, DEFAULT_VLM_TEMPERATURE } from '../../hooks/useSettings'
+import {
+  DEFAULT_SETTINGS,
+  DEFAULT_VLM_MODEL,
+  DEFAULT_VLM_BASE_URL,
+  DEFAULT_VLM_TEMPERATURE,
+  normaliseChunkSettings,
+} from '../../hooks/useSettings'
 import EnrichmentSettingsPanel from './EnrichmentSettings'
 import LLMSettingsPanel from './LLMSettingsPanel'
 import './SettingsModal.css'
@@ -31,9 +37,12 @@ function resolveStrategy(caps: Capabilities, library: string, current: string): 
 
 // Chunkers that don't support chunk_overlap per Chonkie docs
 const CHONKIE_NO_OVERLAP = new Set(['recursive', 'fast', 'table', 'code', 'late', 'neural', 'slumber'])
+const CHONKIE_NO_SIZE = new Set(['table', 'neural'])
 
 export default function SettingsModal({ isOpen, onClose, onSave, current }: Props) {
   const [settings, setSettings] = useState<ChunkSettings>(current)
+  const [chunkSizeDraft, setChunkSizeDraft] = useState(String(current.chunkSize))
+  const [chunkOverlapDraft, setChunkOverlapDraft] = useState(String(current.chunkOverlap))
   const [caps, setCaps] = useState<Capabilities | null>(null)
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [activeTab, setActiveTab] = useState<TabId>('conversion')
@@ -85,6 +94,11 @@ export default function SettingsModal({ isOpen, onClose, onSave, current }: Prop
     if (!isOpen) setSettings(current)
   }, [current, isOpen])
 
+  useEffect(() => {
+    setChunkSizeDraft(String(settings.chunkSize))
+    setChunkOverlapDraft(String(settings.chunkOverlap))
+  }, [settings.chunkSize, settings.chunkOverlap])
+
   if (!isOpen) return null
 
   const set = <K extends keyof ChunkSettings>(key: K, value: ChunkSettings[K]) =>
@@ -110,24 +124,48 @@ export default function SettingsModal({ isOpen, onClose, onSave, current }: Prop
   }
 
   const handleSave = () => {
-    onSave(settings)
+    onSave(normaliseChunkSettings(settings))
     onClose()
   }
 
   const handleReset = () => {
     setSettings(DEFAULT_SETTINGS)
+    setChunkSizeDraft(String(DEFAULT_SETTINGS.chunkSize))
+    setChunkOverlapDraft(String(DEFAULT_SETTINGS.chunkOverlap))
+  }
+
+  const handleChunkSizeChange = (value: string) => {
+    setChunkSizeDraft(value)
+    if (value.trim() === '') return
+    const v = parseInt(value, 10)
+    if (!Number.isNaN(v)) set('chunkSize', v)
+  }
+
+  const handleChunkOverlapChange = (value: string) => {
+    setChunkOverlapDraft(value)
+    if (value.trim() === '') return
+    const v = parseInt(value, 10)
+    if (!Number.isNaN(v)) set('chunkOverlap', v)
   }
 
   const availableStrategies = caps ? strategiesFor(caps, settings.chunkerLibrary) : []
   const currentStrategy = availableStrategies.find(s => s.strategy === settings.chunkerType)
 
   const isDocling = settings.chunkerLibrary === 'docling'
-  const isSizeDisabled = settings.chunkerType === 'markdown' && !settings.enableMarkdownSizing
+  const isMarkdownSizeDisabled =
+    settings.chunkerType === 'markdown' && !settings.enableMarkdownSizing
+  const isChunkerSizeDisabled =
+    settings.chunkerLibrary === 'chonkie' && CHONKIE_NO_SIZE.has(settings.chunkerType)
+  const isSizeDisabled = isMarkdownSizeDisabled || isChunkerSizeDisabled
   const isOverlapDisabled =
     isSizeDisabled ||
     isDocling ||
     (settings.chunkerLibrary === 'chonkie' && CHONKIE_NO_OVERLAP.has(settings.chunkerType))
-  const isSizeInTokens = settings.chunkerType === 'token' || isDocling
+  const sizeUnit = isDocling || settings.chunkerType === 'token'
+    ? 'tokens'
+    : settings.chunkerLibrary === 'chonkie' && settings.chunkerType === 'fast'
+      ? 'bytes'
+      : 'chars'
 
   return (
     <div className="modal-overlay" onClick={handleOverlay}>
@@ -311,29 +349,32 @@ export default function SettingsModal({ isOpen, onClose, onSave, current }: Prop
 
                   <div className="form-row">
                     <div className="form-group">
-                      <label>Chunk Size <span className="label-hint">({isSizeInTokens ? 'tokens' : 'chars'})</span></label>
+                      <label>Chunk Size <span className="label-hint">({sizeUnit})</span></label>
                       <input
                         type="number"
-                        value={settings.chunkSize}
-                        onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) set('chunkSize', v) }}
+                        value={chunkSizeDraft}
+                        onChange={e => handleChunkSizeChange(e.target.value)}
                         min={100} max={10000} step={100}
                         disabled={isSizeDisabled}
                       />
                     </div>
                     <div className="form-group">
-                      <label>Overlap <span className="label-hint">({isSizeInTokens ? 'tokens' : 'chars'})</span></label>
+                      <label>Overlap <span className="label-hint">({sizeUnit})</span></label>
                       <input
                         type="number"
-                        value={settings.chunkOverlap}
-                        onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) set('chunkOverlap', v) }}
+                        value={chunkOverlapDraft}
+                        onChange={e => handleChunkOverlapChange(e.target.value)}
                         min={0} max={Math.floor(settings.chunkSize / 2)} step={50}
                         disabled={isOverlapDisabled}
                       />
                     </div>
                   </div>
 
-                  {isSizeDisabled && (
+                  {isMarkdownSizeDisabled && (
                     <small className="size-hint">Enable sizing above to set chunk size and overlap.</small>
+                  )}
+                  {isChunkerSizeDisabled && (
+                    <small className="size-hint">This chunker determines its own boundaries and does not use size or overlap.</small>
                   )}
                   {!isSizeDisabled && isOverlapDisabled && (
                     <small className="size-hint">This chunker does not support chunk overlap.</small>

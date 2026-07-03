@@ -5,6 +5,7 @@
 .chunk-edit-overlay {
   position: fixed;
   inset: 0;
+  padding: 16px;
   background: radial-gradient(circle at center, rgba(139, 69, 19, 0.2), rgba(0, 0, 0, 0.72));
   display: flex;
   align-items: center;
@@ -25,8 +26,8 @@
   backdrop-filter: blur(20px);
   border-radius: 16px;
   /* 90vw wide, 88vh tall for a comfortable editor */
-  width: min(900px, 90vw);
-  height: min(88vh, 780px);
+  width: min(900px, 100%);
+  height: min(88vh, 780px, calc(100dvh - 32px));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -127,6 +128,35 @@
 .chunk-edit-close:hover {
   transform: rotate(90deg) scale(1.1);
   box-shadow: 0px 1px 10px 0px rgba(204, 34, 0, 0.45);
+}
+
+@media (max-width: 640px) {
+  .chunk-edit-overlay {
+    padding: 8px;
+  }
+
+  .chunk-edit-modal {
+    border-radius: 12px;
+    height: calc(100dvh - 16px);
+  }
+
+  .chunk-edit-header {
+    padding: 14px 16px 12px;
+  }
+
+  .chunk-edit-title-row {
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .chunk-edit-header h2 {
+    font-size: 18px;
+  }
+
+  .chunk-edit-tabs {
+    padding: 0 16px;
+    overflow-x: auto;
+  }
 }
 
 /* ── Tab bar ── */
@@ -398,4 +428,11 @@
   padding: 2px 10px;
   font-size: 11px;
   font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .chunk-edit-tabs {
+    padding: 0 16px;
+    overflow-x: auto;
+  }
 }

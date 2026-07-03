@@ -19,12 +19,15 @@ export const API_BASE = '/api'
 export interface DocumentMetadataEntry {
   filename: string
   has_markdown: boolean
+  /** Saved Markdown contains VLM failed-page placeholders and can be previewed. */
   has_failures?: boolean
+  /** VLM checkpoint exists; an interrupted conversion can be resumed. */
+  has_checkpoint?: boolean
 }
 
 /**
  * Fetch the current document-list metadata used by the sidebar to flag
- * which docs have a converted MD and which still have failures pending.
+ * which docs have a converted MD, failed VLM pages, or resumable VLM checkpoints.
  *
  * Returns an empty array on any failure (network / abort / non-2xx).
  * Caller is expected to feed the array into setDocsWithMarkdown +
@@ -57,7 +60,7 @@ export async function fetchDocumentMetadata(
  * Map a wire-level converter name (the value used by the /api/convert
  * endpoint) to the lowercase token the backend uses for filenames and
  * dropdown identifiers.  Kept in sync with
- * ``backend.services.document_service._CONVERTER_NORMALIZATION``; only the
+ * ``backend.utils.naming.CONVERTER_NORMALIZATION``; only the
  * identity-different entries need to appear here.
  */
 const CONVERTER_FILENAME_TOKEN: Record<string, string> = {
@@ -68,16 +71,6 @@ export function converterFilenameToken(converter: string | undefined | null): st
   if (!converter) return null
   return CONVERTER_FILENAME_TOKEN[converter] ?? converter
 }
-
-/**
- * Set of MD-source tokens that the conversion pipeline produces.  Mirrors
- * ``backend.utils.naming.KNOWN_MD_SOURCES`` minus ``"uploaded"``: that one
- * is the fallback, not a token that ever appears as the suffix in a
- * converted filename.
- */
-const KNOWN_CONVERTER_TOKENS = new Set([
-  'pymupdf4llm', 'docling', 'markitdown', 'liteparse', 'vlm', 'cloud',
-])
 
 /**
  * Derive the MD-source token (e.g. ``"docling"``, ``"uploaded"``) from a
@@ -97,7 +90,7 @@ export function mdSourceFromFilename(
     const prefix = `${docStem}_`
     if (mdStem.startsWith(prefix)) {
       const token = mdStem.slice(prefix.length)
-      if (KNOWN_CONVERTER_TOKENS.has(token)) return token
+      if (token) return token
     }
   }
   return 'uploaded'
@@ -141,7 +134,7 @@ export const capabilityService = {
  * drive a progress UI and the diff-preview modal.
  */
 export interface PipelineProgress {
-  /** Result of the deterministic regex cleanup pass. */
+  /** Result of the deterministic cleanup pass. */
   cleanup?: Record<string, number>
   /** Total number of pieces produced by the structure-aware splitter. */
   totalPieces: number
@@ -182,7 +175,7 @@ export interface ChunkEnrichmentBatchResult {
 }
 
 /**
- * Run the full enrichment pipeline (regex + structure-aware split +
+ * Run the full enrichment pipeline (deterministic cleanup + structure-aware split +
  * per-piece LLM with rolling context + per-piece checkpoint) on a stored
  * Markdown file.  Streams progress to the caller via ``onProgress`` and
  * returns the enriched content + stats once the run completes.
@@ -192,6 +185,7 @@ export interface ChunkEnrichmentBatchResult {
  */
 export async function apiEnrichMarkdownPipeline(
   filename: string,
+  documentName: string,
   settings: EnrichmentSettings,
   useCheckpoint: boolean,
   useSummary: boolean,
@@ -205,6 +199,7 @@ export async function apiEnrichMarkdownPipeline(
     signal,
     body: JSON.stringify(buildEnrichmentBody(settings, {
       filename,
+      document_name: documentName,
       use_checkpoint: useCheckpoint,
       use_summary: useSummary,
     })),
@@ -277,11 +272,13 @@ export async function apiEnrichChunk(
   signal?: AbortSignal,
   onConnectionLost?: () => void,
   mdFilename?: string,
+  documentName?: string,
 ): Promise<Record<string, unknown>> {
   const result = await apiEnrichChunks(
     settings,
     [{ index, content, start, end, metadata }],
     mdFilename,
+    documentName,
     signal,
     undefined,
     onConnectionLost,
@@ -301,6 +298,7 @@ export async function apiEnrichChunks(
   settings: EnrichmentSettings,
   chunks: ChunkEnrichmentInput[],
   mdFilename?: string | null,
+  documentName?: string | null,
   signal?: AbortSignal,
   onProgress?: (progress: ChunkEnrichmentProgress) => void,
   onConnectionLost?: () => void,
@@ -320,6 +318,7 @@ export async function apiEnrichChunks(
         metadata: c.metadata ?? {},
       })),
       ...(mdFilename ? { md_filename: mdFilename } : {}),
+      ...(documentName ? { document_name: documentName } : {}),
     })),
   })
   if (!res.ok) {
@@ -371,8 +370,11 @@ export async function apiEnrichChunks(
  *
  * Throws on non-404 errors.
  */
-export async function apiGetSummary(filename: string): Promise<DocumentSummaryResponse | null> {
-  const url = `${API_BASE}/enrich/summary?filename=${encodeURIComponent(filename)}`
+export async function apiGetSummary(
+  filename: string,
+  documentName: string,
+): Promise<DocumentSummaryResponse | null> {
+  const url = `${API_BASE}/enrich/summary?filename=${encodeURIComponent(filename)}&document_name=${encodeURIComponent(documentName)}`
   const res = await fetch(url)
   if (res.status === 404) return null
   if (!res.ok) {
@@ -389,13 +391,14 @@ export async function apiGetSummary(filename: string): Promise<DocumentSummaryRe
  */
 export async function apiPutSummary(
   filename: string,
+  documentName: string,
   summary: DocumentSummary,
   signal?: AbortSignal,
 ): Promise<DocumentSummaryResponse> {
   const res = await fetch(`${API_BASE}/enrich/summary`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ filename, summary }),
+    body: JSON.stringify({ filename, document_name: documentName, summary }),
     signal,
   })
   if (!res.ok) {
@@ -415,7 +418,6 @@ export interface SummaryGenerateProgress {
   stage: 'idle' | 'cleanup' | 'splitting' | 'extracting' | 'reducing' | 'done'
   totalPieces: number
   completedExtractions: number
-  cachedExtractions: number
   cleanup?: Record<string, number>
 }
 
@@ -430,6 +432,7 @@ export interface SummaryGenerateProgress {
  */
 export async function apiGenerateSummary(
   filename: string,
+  documentName: string,
   settings: EnrichmentSettings,
   force: boolean,
   onProgress: (state: SummaryGenerateProgress) => void,
@@ -442,6 +445,7 @@ export async function apiGenerateSummary(
     signal,
     body: JSON.stringify(buildEnrichmentBody(settings, {
       filename,
+      document_name: documentName,
       force,
     })),
   })
@@ -455,7 +459,6 @@ export async function apiGenerateSummary(
     stage: 'idle',
     totalPieces: 0,
     completedExtractions: 0,
-    cachedExtractions: 0,
   }
 
   for await (const event of parseSse(res.body, onConnectionLost)) {
@@ -477,7 +480,6 @@ export async function apiGenerateSummary(
       case 'summary_progress':
         state.totalPieces = (event.total as number) ?? state.totalPieces
         state.completedExtractions = (event.current as number) ?? state.completedExtractions
-        if (event.cached) state.cachedExtractions += 1
         onProgress({ ...state })
         break
       case 'summary_ready':

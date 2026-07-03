@@ -4,7 +4,8 @@ import remarkGfm from 'remark-gfm'
 import type { Chunk, EnrichmentSettings } from '../../types'
 import { useChunkEnrichment } from '../../hooks/useChunkEnrichment'
 import { useScrollSync } from '../../hooks/useScrollSync'
-import { isChunkEnriched } from '../../utils/chunkUtils'
+import { isChunkEnriched, reconcileChunkEnrichmentAfterEdit, serialiseChunk } from '../../utils/chunkUtils'
+import { downloadTextFile, filenameStem, safeDownloadFilename } from '../../utils/download'
 import {
   CHUNK_BORDER_COLORS,
   CHUNK_COLORS,
@@ -19,6 +20,8 @@ import './MarkdownViewer.css'
 import './ChunkViewer.css'
 
 interface Props {
+  documentName: string
+  chunkRevision: number
   chunks: Chunk[] | null
   /** Full document content — used to clear enrichment state on doc switch. */
   content: string
@@ -28,9 +31,9 @@ interface Props {
   scrollSyncEnabled?: boolean
   chunkEnrichment?: EnrichmentSettings
   /**
-   * Active markdown variant filename.  Threaded into chunk enrichment
-   * so the backend can attach the cached per-PDF summary as context
-   * (Phase B).  Optional — no summary attachment when undefined.
+   * Active Markdown variant filename. Threaded into chunk enrichment so
+   * the backend can attach cached document summary and nearby source
+   * Markdown. Optional — no source context when undefined.
    */
   mdFilename?: string
   onEnrichChunk: (index: number, updates: Partial<Chunk>) => void
@@ -43,6 +46,8 @@ interface Props {
   /** Active chunker token, displayed on the Re-chunk button so the label
    *  mirrors the "Convert with {converter}" pattern in the MD viewer. */
   chunkerLabel: string
+  /** Filename of the saved chunks version currently displayed, when any. */
+  chunksFilename?: string | null
   onEnrichSuccess?: (msg: string) => void
   onEnrichError?: (msg: string) => void
 }
@@ -82,6 +87,8 @@ type PendingOp =
   | { type: 'merge'; indices: number[] }
 
 function ChunkViewer({
+  documentName,
+  chunkRevision,
   chunks,
   content,
   chunksReady,
@@ -98,6 +105,7 @@ function ChunkViewer({
   onSaveChunks,
   onRechunk,
   chunkerLabel,
+  chunksFilename,
   onEnrichSuccess,
   onEnrichError,
 }: Props) {
@@ -108,6 +116,7 @@ function ChunkViewer({
 
   const containerRef = useRef<HTMLDivElement>(null)
   const prevChunkCountRef = useRef<number | null>(null)
+  const lastSelectedChunkRef = useRef<number | null>(null)
 
   const {
     chunkEnrichOp,
@@ -117,6 +126,8 @@ function ChunkViewer({
     handleEnrichChunk,
     handleEnrichSelected,
   } = useChunkEnrichment({
+    documentName,
+    chunkRevision,
     chunkEnrichment,
     chunks,
     content,
@@ -137,6 +148,7 @@ function ChunkViewer({
     if (newCount !== prevChunkCountRef.current) {
       prevChunkCountRef.current = newCount
       setSelectedChunks(new Set())
+      lastSelectedChunkRef.current = null
     }
   }, [chunks])
 
@@ -156,12 +168,19 @@ function ChunkViewer({
   const getColor = (i: number) => CHUNK_COLORS[i % CHUNK_COLORS.length]
   const getBorderColor = (i: number) => CHUNK_BORDER_COLORS[i % CHUNK_BORDER_COLORS.length]
 
-  const toggleChunkSelection = (index: number) => {
+  const toggleChunkSelection = (index: number, shiftKey: boolean) => {
     setSelectedChunks(prev => {
+      const anchor = lastSelectedChunkRef.current
       const next = new Set(prev)
-      next.has(index) ? next.delete(index) : next.add(index)
+      if (shiftKey && anchor !== null && chunks?.[anchor] && chunks?.[index]) {
+        const [start, end] = anchor < index ? [anchor, index] : [index, anchor]
+        for (let i = start; i <= end; i += 1) next.add(i)
+      } else {
+        next.has(index) ? next.delete(index) : next.add(index)
+      }
       return next
     })
+    lastSelectedChunkRef.current = index
   }
 
   const handleMergeSelected = () => {
@@ -169,12 +188,14 @@ function ChunkViewer({
     if (isEnrichmentActive) { setPendingOp({ type: 'merge', indices }); return }
     onMergeChunks(indices)
     setSelectedChunks(new Set())
+    lastSelectedChunkRef.current = null
   }
 
   const handleDeleteSelected = () => {
     if (isEnrichmentActive) { setPendingOp({ type: 'delete-bulk', indices: new Set(selectedChunks) }); return }
     onDeleteChunks(selectedChunks)
     setSelectedChunks(new Set())
+    lastSelectedChunkRef.current = null
   }
 
   const handleDeleteChunk = (index: number) => {
@@ -192,15 +213,36 @@ function ChunkViewer({
     } else if (op.type === 'delete-bulk') {
       onDeleteChunks(op.indices)
       setSelectedChunks(new Set())
+      lastSelectedChunkRef.current = null
     } else if (op.type === 'merge') {
       onMergeChunks(op.indices)
       setSelectedChunks(new Set())
+      lastSelectedChunkRef.current = null
     }
   }
 
   const handleChunkSave = (index: number, updatedContent: string, metadataUpdates?: Partial<Chunk>) => {
+    const original = chunks?.[index]
     onChunkEdit(index, updatedContent)
-    if (metadataUpdates) onEnrichChunk(index, metadataUpdates)
+    if (original && metadataUpdates) {
+      onEnrichChunk(
+        index,
+        reconcileChunkEnrichmentAfterEdit(original, updatedContent, metadataUpdates),
+      )
+    }
+  }
+
+  const handleDownloadChunks = () => {
+    if (!chunks) return
+    const filename = safeDownloadFilename(
+      chunksFilename ?? `${filenameStem(documentName)}_chunks.json`,
+      'chunks.json',
+    )
+    downloadTextFile(
+      filename,
+      `${JSON.stringify({ chunks: chunks.map(serialiseChunk) }, null, 2)}\n`,
+      'application/json;charset=utf-8',
+    )
   }
 
   return (
@@ -257,11 +299,14 @@ function ChunkViewer({
             <>
               <button
                 className="chunk-select-btn"
-                onClick={() => setSelectedChunks(
-                  chunks.length > 0 && selectedChunks.size === chunks.length
-                    ? new Set()
-                    : new Set(chunks.map((_, i) => i))
-                )}
+                onClick={() => {
+                  setSelectedChunks(
+                    chunks.length > 0 && selectedChunks.size === chunks.length
+                      ? new Set()
+                      : new Set(chunks.map((_, i) => i))
+                  )
+                  lastSelectedChunkRef.current = null
+                }}
               >
                 {chunks.length > 0 && selectedChunks.size === chunks.length ? 'Deselect all' : 'Select all'}
               </button>
@@ -316,6 +361,14 @@ function ChunkViewer({
             <span>{savingChunks ? '⏳' : '💾'}</span>
             {savingChunks ? 'Saving…' : chunking ? 'Chunking…' : 'Save Chunks'}
           </button>
+          <button
+            className="md-action-btn download"
+            onClick={handleDownloadChunks}
+            disabled={!chunks || chunks.length === 0}
+            title="Download the current chunks as JSON"
+          >
+            <span>⬇</span> Export
+          </button>
         </div>
       </div>
 
@@ -361,7 +414,8 @@ function ChunkViewer({
                         type="checkbox"
                         className="chunk-checkbox"
                         checked={isSelected}
-                        onChange={() => toggleChunkSelection(i)}
+                        onClick={e => toggleChunkSelection(i, e.shiftKey)}
+                        onChange={() => {}}
                         title="Select chunk"
                       />
                       <span className="chunk-badge">

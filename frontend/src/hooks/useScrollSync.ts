@@ -31,12 +31,12 @@ export function useScrollSync(
   enabled: boolean,
   source: string,
   listenSource: string,
-  containerRef: React.RefObject<HTMLDivElement>,
+  containerRef: React.RefObject<HTMLDivElement | null>,
   onExternalScroll?: (percentage: number) => void,
 ) {
   const isScrollingRef = useRef(false)
-  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout>>()
-  const rafRef = useRef<number>()
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const rafRef = useRef<number | undefined>(undefined)
 
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     if (isScrollingRef.current || !enabled) return

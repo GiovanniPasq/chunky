@@ -7,8 +7,14 @@ import { API_BASE } from './apiService'
 export interface SaveChunksPayload {
   filename: string
   mdFilename: string | null
+  sourceHash: string | null
   settings: ChunkSettings
   chunks: Chunk[]
+}
+
+export interface ChunkSetResult {
+  chunks: Chunk[]
+  sourceHash: string | null
 }
 
 /**
@@ -21,13 +27,18 @@ export interface SaveChunksPayload {
  * payload shape (and the set of fields that participate in the
  * configuration-keyed filename) can never drift between callers.
  */
-export async function saveChunks(payload: SaveChunksPayload): Promise<string> {
+export async function saveChunks(
+  payload: SaveChunksPayload,
+  signal?: AbortSignal,
+): Promise<string> {
   const res = await fetch(`${API_BASE}/chunks/save`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    signal,
     body: JSON.stringify({
       filename: payload.filename,
       md_filename: payload.mdFilename,
+      source_hash: payload.sourceHash,
       chunker_type: payload.settings.chunkerType,
       chunker_library: payload.settings.chunkerLibrary,
       chunk_size: payload.settings.chunkSize,
@@ -47,9 +58,12 @@ export async function listChunksVersions(filename: string): Promise<ChunksVersio
   const res = await fetch(
     `${API_BASE}/documents/${encodeURIComponent(filename)}/chunks`,
   )
-  if (!res.ok) return []
-  const data = await res.json().catch(() => ({ versions: [] }))
-  return (data.versions ?? []) as ChunksVersion[]
+  if (!res.ok) throw new Error(`List chunks failed: HTTP ${res.status}`)
+  const data = await res.json() as { versions?: unknown }
+  if (!Array.isArray(data.versions)) {
+    throw new Error('Invalid chunks versions response')
+  }
+  return data.versions as ChunksVersion[]
 }
 
 /** Load a specific saved chunks JSON file by its filename. */
@@ -57,14 +71,17 @@ export async function loadSavedChunksFile(
   filename: string,
   chunksFilename: string,
   signal?: AbortSignal,
-): Promise<Chunk[]> {
+): Promise<ChunkSetResult> {
   const res = await fetch(
     `${API_BASE}/documents/${encodeURIComponent(filename)}/chunks/${encodeURIComponent(chunksFilename)}`,
     { signal },
   )
   if (!res.ok) throw new Error(`Load chunks failed: HTTP ${res.status}`)
-  const data: { chunks: Chunk[] } = await res.json()
-  return data.chunks.map(normaliseChunk)
+  const data: { chunks: Chunk[]; source_hash?: string | null } = await res.json()
+  return {
+    chunks: data.chunks.map(normaliseChunk),
+    sourceHash: typeof data.source_hash === 'string' ? data.source_hash : null,
+  }
 }
 
 /**
@@ -88,7 +105,7 @@ export async function chunkSse(
     mdFilename: string | null,
   ) => void | Promise<void>,
   mdFilename?: string | null,
-): Promise<Chunk[]> {
+): Promise<ChunkSetResult> {
   const body: Record<string, unknown> = {
     filenames,
     chunker_type: s.chunkerType,
@@ -114,6 +131,7 @@ export async function chunkSse(
   if (!res.body) throw new Error('No response body')
 
   let firstFileChunks: Chunk[] = []
+  let firstFileSourceHash: string | null = null
   let sawBatchDone = false
   for await (const event of parseSse(res.body, onConnectionLost)) {
     if (event.type === 'file_start') {
@@ -125,7 +143,10 @@ export async function chunkSse(
       const chunks = raw.map(normaliseChunk)
       const mdFn = (event.md_filename as string | undefined) ?? null
       await onFileDone?.(filename, success, chunks, mdFn)
-      if (filename === filenames[0] && success) firstFileChunks = chunks
+      if (filename === filenames[0] && success) {
+        firstFileChunks = chunks
+        firstFileSourceHash = (event.source_hash as string | undefined) ?? null
+      }
       if (!success && filenames.length === 1) {
         throw new Error(String(event.error ?? 'Chunking failed'))
       }
@@ -139,5 +160,5 @@ export async function chunkSse(
     }
   }
   if (!sawBatchDone) throw new Error('Chunking stream ended without completion')
-  return firstFileChunks
+  return { chunks: firstFileChunks, sourceHash: firstFileSourceHash }
 }

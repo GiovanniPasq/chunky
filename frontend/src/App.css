@@ -577,7 +577,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: 3000;
   animation: fadeIn 0.15s ease-out;
 }
 
@@ -604,6 +604,90 @@
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+@media (max-width: 1100px) {
+  .panel-label {
+    gap: 8px;
+    padding: 11px 14px;
+  }
+
+  .panel-label-tools {
+    gap: 6px;
+  }
+
+  .panel-version-select {
+    max-width: 180px;
+  }
+
+  .panel-zoom button {
+    padding: 4px 7px;
+  }
+}
+
+@media (max-width: 900px) {
+  .viewers {
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .viewer-panel {
+    width: 100% !important;
+    max-width: none !important;
+    height: auto;
+    flex: 1 1 50%;
+    min-height: 0;
+  }
+
+  .viewer-divider {
+    display: none;
+  }
+
+  .panel-label {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .panel-label-tools {
+    width: 100%;
+    margin-left: 0;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .panel-version-select {
+    flex: 1 1 180px;
+    max-width: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .panel-label {
+    padding: 9px 10px;
+  }
+
+  .panel-view-tab,
+  .panel-version-select,
+  .show-pdf-btn {
+    font-size: 10px;
+  }
+
+  .md-not-found {
+    padding: 24px 16px;
+  }
+
+  .md-not-found .static-icon,
+  .md-not-found .hourglass-icon {
+    font-size: 54px;
+  }
+
+  .md-not-found h2 {
+    font-size: 22px;
+  }
+
+  .md-not-found p {
+    font-size: 14px;
+  }
 }
 
 @keyframes fadeIn {

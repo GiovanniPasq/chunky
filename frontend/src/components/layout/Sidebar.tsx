@@ -1,11 +1,15 @@
-import { useState, useRef } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import type { BulkProgressFn, BulkResultFn } from '../../hooks/useDocument'
+import type { DeleteDocumentsResponse } from '../../services/documentsApi'
 import logoSrc from '../../assets/logo.png'
 import './Sidebar.css'
 
-const WARNING_TOOLTIP_TEXT =
-  'Partial VLM conversion — some pages failed or the run was interrupted. Click Convert again to retry.'
+const FAILED_TOOLTIP_TEXT =
+  'Partial VLM conversion — saved Markdown contains failed pages. Open it to preview the partial result, then click Convert to retry.'
+
+const CHECKPOINT_TOOLTIP_TEXT =
+  'Interrupted VLM conversion — some pages are cached, but no updated preview was published yet. Click Convert to resume.'
 
 interface Props {
   documents: string[]
@@ -15,7 +19,7 @@ interface Props {
   uploading: boolean
   collapsed: boolean
   onToggleCollapse: () => void
-  onDelete: (filenames: string[]) => Promise<void>
+  onDelete: (filenames: string[]) => Promise<DeleteDocumentsResponse>
   onBulkConvert?: (filenames: string[], onProgress: BulkProgressFn, onResult: BulkResultFn) => Promise<void>
   onBulkChunk?: (filenames: string[], onProgress: BulkProgressFn, onResult: BulkResultFn) => Promise<void>
   /**
@@ -32,12 +36,15 @@ interface Props {
   onBulkChunkEnrich?: (filenames: string[], onProgress: BulkProgressFn, onResult: BulkResultFn) => Promise<void>
   onOpenSettings?: () => void
   docsWithMarkdown?: Set<string>
-  /**
-   * PDFs whose last VLM conversion ended with at least one failed page.
-   * Rendered as a warning icon next to the document name so partial
-   * conversions are visible without opening the file.
-   */
+  /** PDFs whose saved VLM Markdown contains failed-page placeholders. */
   docsWithFailures?: Set<string>
+  /**
+   * PDFs with a resumable VLM checkpoint. Unlike failed Markdown, this may not
+   * have a preview yet because the run was interrupted before publication.
+   */
+  docsWithCheckpoints?: Set<string>
+  /** Disable sidebar keyboard shortcuts while modal/operation flows own input. */
+  keyboardNavigationDisabled?: boolean
 }
 
 interface BulkOpState {
@@ -52,7 +59,8 @@ export default function Sidebar({
   documents, selectedDoc, onSelect, onUpload, uploading,
   collapsed, onToggleCollapse, onDelete,
   onBulkConvert, onBulkChunk, onBulkEnrich, onBulkChunkEnrich,
-  onOpenSettings, docsWithMarkdown, docsWithFailures,
+  onOpenSettings, docsWithMarkdown, docsWithFailures, docsWithCheckpoints,
+  keyboardNavigationDisabled = false,
 }: Props) {
   const [search, setSearch] = useState('')
   const [selectMode, setSelectMode] = useState(false)
@@ -60,17 +68,85 @@ export default function Sidebar({
   const [deleting, setDeleting] = useState(false)
   const [bulkOp, setBulkOp] = useState<BulkOpState | null>(null)
   const [dragOver, setDragOver] = useState(false)
-  const [warningTip, setWarningTip] = useState<{ x: number; y: number } | null>(null)
+  const [warningTip, setWarningTip] = useState<{ x: number; y: number; text: string } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragDepthRef = useRef(0)
+  const rowRefs = useRef(new Map<string, HTMLLIElement>())
+  const lastSelectedDocRef = useRef<string | null>(null)
 
-  const showWarningTip = (e: React.MouseEvent<HTMLSpanElement> | React.FocusEvent<HTMLSpanElement>) => {
+  const showWarningTip = (
+    e: React.MouseEvent<HTMLSpanElement> | React.FocusEvent<HTMLSpanElement>,
+    text: string,
+  ) => {
     const r = e.currentTarget.getBoundingClientRect()
-    setWarningTip({ x: r.right, y: r.top })
+    setWarningTip({ x: r.right, y: r.top, text })
   }
   const hideWarningTip = () => setWarningTip(null)
 
-  const filtered = documents.filter(d => d.toLowerCase().includes(search.toLowerCase()))
+  const filtered = useMemo(
+    () => documents.filter(d => d.toLowerCase().includes(search.toLowerCase())),
+    [documents, search],
+  )
+  const selectedVisible = useMemo(
+    () => filtered.filter(doc => selected.has(doc)),
+    [filtered, selected],
+  )
+  const visibleSelectedCount = selectedVisible.length
+
+  useEffect(() => {
+    const existing = new Set(documents)
+    setSelected(prev => {
+      const next = new Set(Array.from(prev).filter(doc => existing.has(doc)))
+      return next.size === prev.size ? prev : next
+    })
+    if (lastSelectedDocRef.current && !existing.has(lastSelectedDocRef.current)) {
+      lastSelectedDocRef.current = null
+    }
+  }, [documents])
+
+  // Keyboard document navigation.  It deliberately walks the visible
+  // filtered list, not the full document list, so hidden search results
+  // cannot be selected by Alt/Option + Arrow.
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!event.altKey || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')) return
+      if (event.metaKey || event.ctrlKey || event.shiftKey) return
+      if (document.querySelector('[aria-modal="true"]')) return
+      if (collapsed || keyboardNavigationDisabled || deleting || bulkOp !== null || uploading) return
+
+      const target = event.target as HTMLElement | null
+      if (target?.closest('input, textarea, select, button, [contenteditable="true"]')) return
+      if (!selectedDoc || filtered.length === 0) return
+
+      const currentIndex = filtered.indexOf(selectedDoc)
+      if (currentIndex === -1) return
+
+      const nextIndex = event.key === 'ArrowDown'
+        ? Math.min(filtered.length - 1, currentIndex + 1)
+        : Math.max(0, currentIndex - 1)
+      if (nextIndex === currentIndex) return
+
+      event.preventDefault()
+      onSelect(filtered[nextIndex])
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [
+    filtered,
+    selectedDoc,
+    onSelect,
+    collapsed,
+    keyboardNavigationDisabled,
+    deleting,
+    bulkOp,
+    uploading,
+  ])
+
+  useEffect(() => {
+    if (!selectedDoc || collapsed) return
+    rowRefs.current.get(selectedDoc)?.scrollIntoView({ block: 'nearest' })
+  }, [selectedDoc, collapsed])
 
   const handleFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? [])
@@ -118,23 +194,54 @@ export default function Sidebar({
   const toggleSelectMode = () => {
     setSelectMode(v => !v)
     setSelected(new Set())
+    lastSelectedDocRef.current = null
   }
 
-  const toggleDoc = (doc: string) => {
+  const toggleDoc = (doc: string, shiftKey: boolean) => {
     setSelected(prev => {
+      const anchor = lastSelectedDocRef.current
       const next = new Set(prev)
-      next.has(doc) ? next.delete(doc) : next.add(doc)
+      const currentIndex = filtered.indexOf(doc)
+      const anchorIndex = anchor ? filtered.indexOf(anchor) : -1
+
+      if (shiftKey && anchorIndex !== -1 && currentIndex !== -1) {
+        const [start, end] = anchorIndex < currentIndex
+          ? [anchorIndex, currentIndex]
+          : [currentIndex, anchorIndex]
+        filtered.slice(start, end + 1).forEach(filename => next.add(filename))
+      } else {
+        next.has(doc) ? next.delete(doc) : next.add(doc)
+      }
       return next
     })
+    lastSelectedDocRef.current = doc
+    onSelect(doc)
+  }
+
+  const allFilteredSelected = filtered.length > 0 && filtered.every(doc => selected.has(doc))
+
+  const toggleSelectAll = () => {
+    lastSelectedDocRef.current = null
+    if (allFilteredSelected) {
+      setSelected(prev => {
+        const next = new Set(prev)
+        filtered.forEach(doc => next.delete(doc))
+        return next
+      })
+    } else {
+      setSelected(new Set(filtered))
+    }
   }
 
   const handleDeleteSelected = async () => {
-    if (selected.size === 0) return
+    if (visibleSelectedCount === 0) return
     setDeleting(true)
     try {
-      await onDelete(Array.from(selected))
-      setSelected(new Set())
-      setSelectMode(false)
+      const result = await onDelete(selectedVisible)
+      const failed = new Set(Object.keys(result.failed))
+      setSelected(failed)
+      lastSelectedDocRef.current = null
+      if (failed.size === 0) setSelectMode(false)
     } finally {
       setDeleting(false)
     }
@@ -144,20 +251,21 @@ export default function Sidebar({
     e.stopPropagation()
     setDeleting(true)
     try {
-      await onDelete([doc])
+      const result = await onDelete([doc])
+      if (result.failed[doc]) setSelected(prev => new Set(prev).add(doc))
     } finally {
       setDeleting(false)
     }
   }
 
   const runBulkOp = async (type: BulkOpState['type'], handler: typeof onBulkConvert) => {
-    if (!handler || selected.size === 0) return
+    if (!handler || visibleSelectedCount === 0) return
     // Chunking and enrichment both require markdown — skip files
     // without any variant on disk.  Conversion takes the raw PDF
     // list as-is.
-    const filenames = (type === 'chunk' || type === 'enrich')
-      ? Array.from(selected).filter(f => docsWithMarkdown?.has(f))
-      : Array.from(selected)
+    const filenames = (type === 'chunk' || type === 'enrich' || type === 'chunk-enrich')
+      ? selectedVisible.filter(f => docsWithMarkdown?.has(f))
+      : selectedVisible
     if (filenames.length === 0) return
     const results = new Map<string, boolean>()
 
@@ -177,6 +285,7 @@ export default function Sidebar({
       setBulkOp(null)
       setSelected(new Set())
       setSelectMode(false)
+      lastSelectedDocRef.current = null
     }
   }
 
@@ -264,19 +373,19 @@ export default function Sidebar({
                 <div className="bulk-actions">
                   <button
                     className="bulk-btn select-all"
-                    onClick={() => setSelected(new Set(filtered))}
-                    disabled={selected.size === filtered.length || isBusy}
+                    onClick={toggleSelectAll}
+                    disabled={filtered.length === 0 || isBusy}
                   >
-                    Select all
+                    {allFilteredSelected ? 'Deselect all' : 'Select all'}
                   </button>
                   <button
                     className="bulk-btn delete-selected"
                     onClick={handleDeleteSelected}
-                    disabled={selected.size === 0 || isBusy}
+                    disabled={visibleSelectedCount === 0 || isBusy}
                   >
                     {deleting
                       ? '⏳ Deleting…'
-                      : `🗑 Delete${selected.size > 0 ? ` (${selected.size})` : ''}`}
+                      : `🗑 Delete${visibleSelectedCount > 0 ? ` (${visibleSelectedCount})` : ''}`}
                   </button>
                 </div>
 
@@ -286,21 +395,21 @@ export default function Sidebar({
                       <button
                         className="bulk-btn convert-selected"
                         onClick={() => runBulkOp('convert', onBulkConvert)}
-                        disabled={selected.size === 0 || isBusy}
+                        disabled={visibleSelectedCount === 0 || isBusy}
                       >
                         {bulkOp?.type === 'convert'
                           ? `⏳ ${bulkOp.current}/${bulkOp.total}`
-                          : `✨ Convert${selected.size > 0 ? ` (${selected.size})` : ''}`}
+                          : `✨ Convert${visibleSelectedCount > 0 ? ` (${visibleSelectedCount})` : ''}`}
                       </button>
                     )}
                     {onBulkChunk && (() => {
-                      const chunkable = Array.from(selected).filter(f => docsWithMarkdown?.has(f)).length
+                      const chunkable = selectedVisible.filter(f => docsWithMarkdown?.has(f)).length
                       return (
                         <button
                           className="bulk-btn chunk-selected"
                           onClick={() => runBulkOp('chunk', onBulkChunk)}
                           disabled={chunkable === 0 || isBusy}
-                          title={selected.size > chunkable ? `${selected.size - chunkable} selected file(s) have no markdown and will be skipped` : undefined}
+                          title={visibleSelectedCount > chunkable ? `${visibleSelectedCount - chunkable} visible selected file(s) have no markdown and will be skipped` : undefined}
                         >
                           {bulkOp?.type === 'chunk'
                             ? `⏳ ${bulkOp.current}/${bulkOp.total}`
@@ -309,13 +418,13 @@ export default function Sidebar({
                       )
                     })()}
                     {onBulkEnrich && (() => {
-                      const enrichable = Array.from(selected).filter(f => docsWithMarkdown?.has(f)).length
+                      const enrichable = selectedVisible.filter(f => docsWithMarkdown?.has(f)).length
                       return (
                         <button
                           className="bulk-btn enrich-selected"
                           onClick={() => runBulkOp('enrich', onBulkEnrich)}
                           disabled={enrichable === 0 || isBusy}
-                          title={selected.size > enrichable ? `${selected.size - enrichable} selected file(s) have no markdown and will be skipped` : 'Bulk enrichment skips the summary review modal and uses any cached summary silently.'}
+                          title={visibleSelectedCount > enrichable ? `${visibleSelectedCount - enrichable} visible selected file(s) have no markdown and will be skipped` : 'Bulk enrichment skips the summary review modal and uses any cached summary silently.'}
                         >
                           {bulkOp?.type === 'enrich'
                             ? `⏳ ${bulkOp.current}/${bulkOp.total}`
@@ -324,13 +433,13 @@ export default function Sidebar({
                       )
                     })()}
                     {onBulkChunkEnrich && (() => {
-                      const enrichable = Array.from(selected).filter(f => docsWithMarkdown?.has(f)).length
+                      const enrichable = selectedVisible.filter(f => docsWithMarkdown?.has(f)).length
                       return (
                         <button
                           className="bulk-btn chunk-enrich-selected"
                           onClick={() => runBulkOp('chunk-enrich', onBulkChunkEnrich)}
                           disabled={enrichable === 0 || isBusy}
-                          title={selected.size > enrichable ? `${selected.size - enrichable} selected file(s) have no markdown and will be skipped` : 'Enrich saved chunks, or chunk first when no matching saved chunks exist.'}
+                          title={visibleSelectedCount > enrichable ? `${visibleSelectedCount - enrichable} visible selected file(s) have no markdown and will be skipped` : 'Enrich saved chunks, or chunk first when no matching saved chunks exist.'}
                         >
                           {bulkOp?.type === 'chunk-enrich'
                             ? `⏳ ${bulkOp.current}/${bulkOp.total}`
@@ -379,52 +488,92 @@ export default function Sidebar({
               ? <li className="no-docs">No results</li>
               : filtered.map(doc => {
                   const isSelected = selected.has(doc)
-                  const isActive = selectedDoc === doc && !selectMode
+                  const isActive = selectedDoc === doc
+                  const hasFailedMarkdown = docsWithFailures?.has(doc) ?? false
+                  const hasCheckpointOnly = !hasFailedMarkdown && (docsWithCheckpoints?.has(doc) ?? false)
+                  const statusText = hasFailedMarkdown
+                    ? FAILED_TOOLTIP_TEXT
+                    : hasCheckpointOnly
+                      ? CHECKPOINT_TOOLTIP_TEXT
+                      : null
                   return (
                     <li
                       key={doc}
+                      ref={el => {
+                        if (el) rowRefs.current.set(doc, el)
+                        else rowRefs.current.delete(doc)
+                      }}
                       className={[
                         isActive ? 'active' : '',
                         selectMode && isSelected ? 'selected' : '',
                       ].filter(Boolean).join(' ')}
-                      onClick={() => selectMode ? toggleDoc(doc) : onSelect(doc)}
+                      onMouseDown={e => { if (selectMode) e.preventDefault() }}
+                      onClick={e => selectMode ? toggleDoc(doc, e.shiftKey) : onSelect(doc)}
                       title={doc}
                     >
                       {selectMode && (
-                        <span className={`doc-checkbox ${isSelected ? 'checked' : ''}`} />
+                        <button
+                          type="button"
+                          className={`doc-checkbox ${isSelected ? 'checked' : ''}`}
+                          role="checkbox"
+                          aria-checked={isSelected}
+                          aria-label={`${isSelected ? 'Deselect' : 'Select'} ${doc}`}
+                          onClick={e => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            toggleDoc(doc, e.shiftKey)
+                          }}
+                        />
                       )}
                       <span className="doc-icon">📄</span>
                       <span className="doc-name">{doc}</span>
-                      {docsWithFailures?.has(doc) && (
+                      {statusText && (
                         <span
-                          className="doc-warning-badge"
-                          aria-label={WARNING_TOOLTIP_TEXT}
+                          className={`doc-warning-badge${hasCheckpointOnly ? ' checkpoint' : ''}`}
+                          aria-label={statusText}
                           tabIndex={0}
-                          onMouseEnter={showWarningTip}
+                          onMouseEnter={e => showWarningTip(e, statusText)}
                           onMouseLeave={hideWarningTip}
-                          onFocus={showWarningTip}
+                          onFocus={e => showWarningTip(e, statusText)}
                           onBlur={hideWarningTip}
                         >
-                          {/* Inline SVG warning triangle.  Renders identically
+                          {/* Inline SVG indicators.  Render identically
                               across platforms (no Unicode/emoji font roulette),
                               inherits the colour via ``currentColor``, and
                               matches the stroke style used elsewhere in the
                               app (see the password-toggle icons). */}
-                          <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2.5"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            aria-hidden="true"
-                          >
-                            <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
-                            <line x1="12" y1="9" x2="12" y2="13" />
-                            <line x1="12" y1="17" x2="12.01" y2="17" />
-                          </svg>
+                          {hasCheckpointOnly ? (
+                            <svg
+                              width="14"
+                              height="14"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                            >
+                              <path d="M20 12a8 8 0 1 1-2.35-5.65" />
+                              <path d="M20 4v5h-5" />
+                            </svg>
+                          ) : (
+                            <svg
+                              width="14"
+                              height="14"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                            >
+                              <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                              <line x1="12" y1="9" x2="12" y2="13" />
+                              <line x1="12" y1="17" x2="12.01" y2="17" />
+                            </svg>
+                          )}
                         </span>
                       )}
                       {docsWithMarkdown?.has(doc) && (
@@ -445,6 +594,14 @@ export default function Sidebar({
                 })
             }
           </ul>
+          {documents.length > 0 && (
+            <div
+              className="shortcut-hint"
+              title="Use Alt/Option plus Arrow Up or Arrow Down to switch documents"
+            >
+              Alt/Option + ↑↓ to switch documents
+            </div>
+          )}
         </div>
       )}
 
@@ -468,7 +625,7 @@ export default function Sidebar({
           role="tooltip"
           style={{ left: warningTip.x + 8, top: warningTip.y }}
         >
-          {WARNING_TOOLTIP_TEXT}
+          {warningTip.text}
         </div>,
         document.body,
       )}

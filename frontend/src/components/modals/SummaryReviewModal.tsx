@@ -14,6 +14,7 @@ import './SummaryReviewModal.css'
 
 interface Props {
   isOpen: boolean
+  documentName: string | null
   filename: string | null
   settings: EnrichmentSettings
   onClose: () => void
@@ -40,7 +41,14 @@ function summariesEqual(a: DocumentSummary, b: DocumentSummary): boolean {
   return a.topic === b.topic && a.narrative === b.narrative
 }
 
-export default function SummaryReviewModal({ isOpen, filename, settings, onClose, onConfirm }: Props) {
+export default function SummaryReviewModal({
+  isOpen,
+  documentName,
+  filename,
+  settings,
+  onClose,
+  onConfirm,
+}: Props) {
   const [view, setView] = useState<View>('loading')
   // ``justGenerated`` distinguishes a freshly built summary from a cached
   // load.  Drives the "✓ Summary ready" banner so the user can see at a
@@ -58,14 +66,14 @@ export default function SummaryReviewModal({ isOpen, filename, settings, onClose
   useEffect(() => () => { mountedRef.current = false }, [])
 
   useEffect(() => {
-    if (!isOpen || !filename) return
+    if (!isOpen || !documentName || !filename) return
     let cancelled = false
     setView('loading')
     setErrorMessage('')
     setResponse(null)
     setEdited(emptySummary())
     setJustGenerated(false)
-    apiGetSummary(filename)
+    apiGetSummary(filename, documentName)
       .then(res => {
         if (cancelled) return
         if (res === null) {
@@ -86,7 +94,7 @@ export default function SummaryReviewModal({ isOpen, filename, settings, onClose
         setView('error')
       })
     return () => { cancelled = true }
-  }, [isOpen, filename])
+  }, [isOpen, documentName, filename])
 
   useEffect(() => {
     if (!isOpen) {
@@ -105,9 +113,9 @@ export default function SummaryReviewModal({ isOpen, filename, settings, onClose
   // is already ``'done'``.  Detect the stuck state and force the
   // transition by re-fetching the persisted summary directly.
   useEffect(() => {
-    if (progress?.stage !== 'done' || view !== 'generating' || !filename) return
+    if (progress?.stage !== 'done' || view !== 'generating' || !documentName || !filename) return
     let cancelled = false
-    apiGetSummary(filename)
+    apiGetSummary(filename, documentName)
       .then(res => {
         if (cancelled || !res) return
         setResponse(res)
@@ -120,19 +128,20 @@ export default function SummaryReviewModal({ isOpen, filename, settings, onClose
       })
       .catch(() => { /* swallow — the main runGenerate path will surface errors */ })
     return () => { cancelled = true }
-  }, [progress?.stage, view, filename])
+  }, [progress?.stage, view, documentName, filename])
 
   const runGenerate = useCallback(async (force: boolean) => {
-    if (!filename) return
+    if (!documentName || !filename) return
     generateAbortRef.current?.abort()
     const ctrl = new AbortController()
     generateAbortRef.current = ctrl
     setView('generating')
     setErrorMessage('')
-    setProgress({ stage: 'idle', totalPieces: 0, completedExtractions: 0, cachedExtractions: 0 })
+    setProgress({ stage: 'idle', totalPieces: 0, completedExtractions: 0 })
     try {
       const res = await apiGenerateSummary(
         filename,
+        documentName,
         settings,
         force,
         p => {
@@ -161,10 +170,10 @@ export default function SummaryReviewModal({ isOpen, filename, settings, onClose
       if (generateAbortRef.current === ctrl) generateAbortRef.current = null
       if (mountedRef.current) setProgress(null)
     }
-  }, [filename, settings])
+  }, [documentName, filename, settings])
 
   const handleConfirm = useCallback(async () => {
-    if (!filename) return
+    if (!documentName || !filename) return
     const original = response?.summary
     const isDirty = !original || !summariesEqual(original, edited)
     if (!isDirty) {
@@ -177,7 +186,7 @@ export default function SummaryReviewModal({ isOpen, filename, settings, onClose
     saveAbortRef.current = ctrl
     setView('saving')
     try {
-      await apiPutSummary(filename, edited, ctrl.signal)
+      await apiPutSummary(filename, documentName, edited, ctrl.signal)
       if (!mountedRef.current || ctrl.signal.aborted) return
       onConfirm(true)
       onClose()
@@ -190,7 +199,7 @@ export default function SummaryReviewModal({ isOpen, filename, settings, onClose
     } finally {
       if (saveAbortRef.current === ctrl) saveAbortRef.current = null
     }
-  }, [filename, response, edited, onConfirm, onClose])
+  }, [documentName, filename, response, edited, onConfirm, onClose])
 
   const handleRetry = useCallback(() => {
     if (!filename) {
@@ -263,8 +272,8 @@ export default function SummaryReviewModal({ isOpen, filename, settings, onClose
               <p className="label-hint">
                 The summary describes what the document is about and is attached to every
                 piece prompt during enrichment so the model has document-level context.
-                It's cached per source PDF — you only pay this cost once.  On long PDFs
-                (~1000 pages) generation can take several minutes.
+                It's cached per source document and reused across PDF converter variants.
+                On very long documents generation can take several minutes.
               </p>
               <div className="summary-empty-actions">
                 <button className="btn-primary" onClick={() => runGenerate(false)}>
@@ -326,7 +335,7 @@ export default function SummaryReviewModal({ isOpen, filename, settings, onClose
               {status?.user_edited && !justGenerated && (
                 <div className="summary-info-banner">
                   ✎ This summary has been manually edited.  It won't be auto-regenerated
-                  unless you click Regenerate or replace the source PDF.
+                  unless you click Regenerate or replace the source document.
                 </div>
               )}
 

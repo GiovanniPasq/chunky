@@ -43,7 +43,10 @@ export async function* parseSse(
       if (done) break
 
       armTimer() // reset on every chunk received (data frames and keepalives alike)
+      // Normalise CRLF so streams produced by standards-compliant proxies are
+      // framed the same way as the backend's native LF-only output.
       buffer += decoder.decode(value, { stream: true })
+      buffer = buffer.replace(/\r\n/g, '\n')
       const parts = buffer.split('\n\n')
       buffer = parts.pop() ?? ''
 
@@ -58,6 +61,10 @@ export async function* parseSse(
     }
   } finally {
     if (silentTimer !== null) clearTimeout(silentTimer)
-    reader.cancel()
+    try {
+      await reader.cancel()
+    } catch {
+      // The stream may already be errored or cancelled by AbortController.
+    }
   }
 }

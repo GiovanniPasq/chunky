@@ -234,7 +234,7 @@ export default function EnrichDiffModal({
                   <span className="enrich-diff-failed"> · <strong>{stats.failed_pieces.length}</strong> failed (kept original)</span>
                 )}
                 {stats.cleanup && stats.cleanup.total_changes > 0 && (
-                  <span> · <strong>{stats.cleanup.total_changes}</strong> regex cleanup{stats.cleanup.total_changes !== 1 ? 's' : ''}</span>
+                  <span> · <strong>{stats.cleanup.total_changes}</strong> cleanup change{stats.cleanup.total_changes !== 1 ? 's' : ''}</span>
                 )}
               </div>
             )}

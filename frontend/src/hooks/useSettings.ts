@@ -62,7 +62,7 @@ Return raw markdown with no wrapper, no code blocks, no explanations. Start imme
 
 /** Default system prompt for the markdown enrichment pipeline (mirrors
  *  `_PIECE_SYSTEM` in enrichment_service.py).  Deliberately conservative:
- *  the pipeline already runs a deterministic regex cleanup pass before
+ *  the pipeline already runs deterministic cleanup before
  *  the LLM sees the content, so the LLM should bias toward inaction
  *  rather than rewriting prose that already reads cleanly. */
 export const DEFAULT_SECTION_PROMPT =
@@ -89,14 +89,26 @@ export const DEFAULT_CHUNK_PROMPT =
 `You are a document analysis specialist. Analyze only the provided chunk and return one JSON object with EXACTLY these fields: "cleaned_chunk" (conservatively cleaned and normalized chunk text; preserve facts, numbers, names, and meaning), "title" (short descriptive title for the chunk), "context" (one concise sentence explaining where this chunk fits in the broader document), "summary" (one sentence summary of the chunk content), "keywords" (array of relevant keyword strings, including important named entities, acronyms, products, methods, and domain terms), "questions" (array of realistic user questions answerable primarily from this chunk). If document-summary or surrounding-context blocks are provided, use them only to disambiguate the chunk and improve the context field. Do not copy neighboring text into the output, and do not invent information that is not supported by the chunk. Return ONLY valid JSON — no commentary, no code fences.`
 
 // ---------------------------------------------------------------------------
-// VLM defaults — kept in sync with VLMConverter.__init__ in vlm.py.
+// Model endpoint defaults. Local runs use localhost; Docker can override these
+// via VITE_DEFAULT_MODEL_BASE_URL so backend calls reach the host machine.
 // ---------------------------------------------------------------------------
+
+function optionalEnvString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return trimmed || undefined
+}
+
+const DEFAULT_LOCAL_MODEL_BASE_URL = 'http://localhost:11434/v1'
+const DEFAULT_MODEL_BASE_URL =
+  optionalEnvString(import.meta.env.VITE_DEFAULT_MODEL_BASE_URL) ?? DEFAULT_LOCAL_MODEL_BASE_URL
 
 /** Default model for VLM conversion (mirrors `model` default in vlm.py). */
 export const DEFAULT_VLM_MODEL = 'qwen3-vl:4b-instruct-q4_K_M'
 
-/** Default base URL for VLM conversion (mirrors `base_url` default in vlm.py). */
-export const DEFAULT_VLM_BASE_URL = 'http://localhost:11434/v1'
+/** Default base URL for VLM conversion. */
+export const DEFAULT_VLM_BASE_URL =
+  optionalEnvString(import.meta.env.VITE_DEFAULT_VLM_BASE_URL) ?? DEFAULT_MODEL_BASE_URL
 
 /** Default API key for VLM conversion (mirrors `api_key` default in vlm.py). */
 export const DEFAULT_VLM_API_KEY = 'ollama'
@@ -112,8 +124,9 @@ export const DEFAULT_VLM_TEMPERATURE = 0.1
 /** Default model for enrichment (mirrors `model` default in enrichment_service.py / vlm.py). */
 export const DEFAULT_ENRICHMENT_MODEL = 'qwen3-vl:4b-instruct-q4_K_M'
 
-/** Default base URL for enrichment (mirrors `base_url` default in enrichment_service.py / vlm.py). */
-export const DEFAULT_ENRICHMENT_BASE_URL = 'http://localhost:11434/v1'
+/** Default base URL for enrichment. */
+export const DEFAULT_ENRICHMENT_BASE_URL =
+  optionalEnvString(import.meta.env.VITE_DEFAULT_ENRICHMENT_BASE_URL) ?? DEFAULT_MODEL_BASE_URL
 
 /** Default sampling temperature for enrichment (mirrors `temperature` default in enrichment_service.py). */
 export const DEFAULT_ENRICHMENT_TEMPERATURE = 0.3
@@ -154,6 +167,19 @@ export const DEFAULT_SETTINGS: ChunkSettings = {
 
 export const DEFAULT_SPLIT_PCT = 50
 
+/** Keep persisted/UI chunk values inside the backend schema invariants. */
+export function normaliseChunkSettings(settings: ChunkSettings): ChunkSettings {
+  const rawSize = Number.isFinite(settings.chunkSize)
+    ? Math.trunc(settings.chunkSize)
+    : DEFAULT_SETTINGS.chunkSize
+  const chunkSize = Math.max(1, rawSize)
+  const rawOverlap = Number.isFinite(settings.chunkOverlap)
+    ? Math.trunc(settings.chunkOverlap)
+    : DEFAULT_SETTINGS.chunkOverlap
+  const chunkOverlap = Math.min(Math.max(0, rawOverlap), chunkSize - 1)
+  return { ...settings, chunkSize, chunkOverlap }
+}
+
 /** Merge two plain objects, keeping only defined values from `stored`. */
 function mergeNested<T extends object>(
   defaults: T,
@@ -172,7 +198,7 @@ export function loadSettings(): ChunkSettings {
     const raw = localStorage.getItem(SETTINGS_KEY)
     if (!raw) return DEFAULT_SETTINGS
     const stored: Partial<ChunkSettings> = JSON.parse(raw)
-    return {
+    return normaliseChunkSettings({
       ...DEFAULT_SETTINGS,
       ...stored,
       // Deep-merge nested objects so new default fields are always present
@@ -180,7 +206,7 @@ export function loadSettings(): ChunkSettings {
       cloud: mergeNested(DEFAULT_SETTINGS.cloud ?? {}, stored.cloud),
       sectionEnrichment: mergeNested(DEFAULT_SETTINGS.sectionEnrichment ?? {}, stored.sectionEnrichment),
       chunkEnrichment: mergeNested(DEFAULT_SETTINGS.chunkEnrichment ?? {}, stored.chunkEnrichment),
-    }
+    })
   } catch {
     return DEFAULT_SETTINGS
   }
@@ -188,7 +214,7 @@ export function loadSettings(): ChunkSettings {
 
 export function saveSettings(s: ChunkSettings): void {
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(s))
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(normaliseChunkSettings(s)))
   } catch {
     // Silently ignore quota errors or private-browsing restrictions
   }
@@ -208,12 +234,5 @@ export function loadSplitPct(): number {
 export function saveSplitPct(pct: number): void {
   try {
     localStorage.setItem(SPLIT_PCT_KEY, String(pct))
-  } catch {}
-}
-
-export function clearPersistedSettings(): void {
-  try {
-    localStorage.removeItem(SETTINGS_KEY)
-    localStorage.removeItem(SPLIT_PCT_KEY)
   } catch {}
 }

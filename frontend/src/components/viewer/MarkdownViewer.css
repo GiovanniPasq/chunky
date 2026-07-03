@@ -16,6 +16,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;   /* left group / right group */
+  flex-wrap: wrap;
   padding: 10px 16px;
   background: linear-gradient(135deg, rgba(255, 248, 235, 0.97) 0%, rgba(253, 246, 236, 0.95) 100%);
   border-bottom: 2px solid #F0E6D6;
@@ -30,6 +31,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 1 1 320px;
   flex-wrap: wrap;
   row-gap: 6px;
   min-width: 0;
@@ -43,12 +45,14 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-shrink: 0;
+  flex: 0 1 auto;
   flex-wrap: wrap;
+  justify-content: flex-end;
   row-gap: 6px;
+  max-width: 100%;
 }
 
-/* ── Edit actions wrapper (right side legacy) ── */
+/* ── Edit actions wrapper ── */
 .md-edit-actions {
   display: flex;
   gap: 6px;
@@ -145,6 +149,28 @@
 .md-action-btn.convert-now:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+/* Download/export — neutral utility action shared by Markdown and chunks. */
+.md-action-btn.download {
+  background: white;
+  border: 1.5px solid rgba(107, 95, 85, 0.3);
+  color: #6B5F55;
+  box-shadow: 0 1px 4px rgba(107, 95, 85, 0.1);
+}
+
+.md-action-btn.download:hover:not(:disabled) {
+  background: linear-gradient(135deg, #6B5F55 0%, #8A7A6D 100%);
+  border-color: transparent;
+  color: white;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(107, 95, 85, 0.28);
+}
+
+.md-action-btn.download:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
 }
 
 /* Delete this Markdown variant — destructive, red. */
@@ -492,6 +518,48 @@
   opacity: 0.65;
   cursor: not-allowed;
   transform: none;
+}
+
+@media (max-width: 900px) {
+  .md-controls {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 8px 12px;
+  }
+
+  .md-controls-left,
+  .md-controls-right {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+  }
+
+  .md-action-btn {
+    padding: 6px 10px;
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 640px) {
+  .md-controls {
+    gap: 8px;
+  }
+
+  .md-controls-left,
+  .md-controls-right,
+  .md-edit-actions {
+    gap: 6px;
+  }
+
+  .md-action-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+    min-width: 0;
+  }
+
+  .md-edit-actions {
+    display: contents;
+  }
 }
 
 /* ── Enrich error banner ── */

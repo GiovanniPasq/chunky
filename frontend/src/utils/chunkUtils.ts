@@ -14,6 +14,7 @@ export function buildChunkConfigSignature(
   currentMdSource: string | null,
   settings: ChunkSettings,
   availableChunksCount: number,
+  mdContentRevision: string,
 ): string {
   return JSON.stringify([
     selectedDoc,
@@ -25,7 +26,23 @@ export function buildChunkConfigSignature(
     settings.chunkOverlap,
     settings.enableMarkdownSizing,
     availableChunksCount,
+    mdContentRevision,
   ])
+}
+
+/** Compact deterministic revision for content-sensitive cache signatures. */
+export function buildContentRevision(content: string): string {
+  let hash = 2166136261
+  for (let i = 0; i < content.length; i += 1) {
+    hash ^= content.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return `${content.length}:${(hash >>> 0).toString(36)}`
+}
+
+/** Late async results may update chunks only while their owning revision is active. */
+export function isCurrentChunkRevision(startedAt: number, current: number): boolean {
+  return startedAt === current
 }
 
 /** Returns true if any enrichment field has been populated for the given chunk. */
@@ -38,6 +55,41 @@ export function isChunkEnriched(chunk: Chunk): boolean {
     chunk.keywords?.length ||
     chunk.questions?.length
   )
+}
+
+function sameStringList(a: string[] | undefined, b: string[] | undefined): boolean {
+  const left = a ?? []
+  const right = b ?? []
+  return left.length === right.length && left.every((value, index) => value === right[index])
+}
+
+/**
+ * Keep enrichment only when it was explicitly edited with new chunk text.
+ *
+ * Otherwise the metadata describes the previous content and must be cleared.
+ */
+export function reconcileChunkEnrichmentAfterEdit(
+  original: Chunk,
+  updatedContent: string,
+  updates: Partial<Chunk>,
+): Partial<Chunk> {
+  if (updatedContent === original.content) return updates
+
+  return {
+    ...updates,
+    cleaned_chunk: (updates.cleaned_chunk ?? original.cleaned_chunk) === original.cleaned_chunk
+      ? ''
+      : updates.cleaned_chunk,
+    title: (updates.title ?? original.title) === original.title ? '' : updates.title,
+    context: (updates.context ?? original.context) === original.context ? '' : updates.context,
+    summary: (updates.summary ?? original.summary) === original.summary ? '' : updates.summary,
+    keywords: sameStringList(updates.keywords ?? original.keywords, original.keywords)
+      ? []
+      : updates.keywords,
+    questions: sameStringList(updates.questions ?? original.questions, original.questions)
+      ? []
+      : updates.questions,
+  }
 }
 
 /**
@@ -119,6 +171,7 @@ export function findMatchingSavedChunks(
 
 /** True when a saved chunks version was produced by the active chunker config. */
 export function isChunksVersionForSettings(v: ChunksVersion, settings: ChunkSettings): boolean {
+  if (v.is_stale) return false
   if (
     v.library === 'langchain' &&
     v.algorithm === 'markdown' &&
