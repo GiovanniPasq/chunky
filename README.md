@@ -7,9 +7,10 @@
 </p>
 <p align="center">
 <img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white"/>
-<img src="https://img.shields.io/badge/Node.js-22+-339933?style=for-the-badge&logo=node.js&logoColor=white"/>
-<img src="https://img.shields.io/badge/FastAPI-0.136+-009688?style=for-the-badge&logo=fastapi&logoColor=white"/>
-<img src="https://img.shields.io/badge/React-18+-61DAFB?style=for-the-badge&logo=react&logoColor=white"/>
+<img src="https://img.shields.io/badge/Node.js-24+-339933?style=for-the-badge&logo=node.js&logoColor=white"/>
+<img src="https://img.shields.io/badge/FastAPI-0.139+-009688?style=for-the-badge&logo=fastapi&logoColor=white"/>
+<img src="https://img.shields.io/badge/React-19+-61DAFB?style=for-the-badge&logo=react&logoColor=white"/>
+<img src="https://img.shields.io/badge/Vite-8+-646CFF?style=for-the-badge&logo=vite&logoColor=white"/>
 <img src="https://img.shields.io/badge/License-MIT-D2691E?style=for-the-badge"/>
 </p>
 <p align="center">
@@ -50,6 +51,10 @@ As [NVIDIA's research](https://developer.nvidia.com/blog/finding-the-best-chunki
 | ✨ **Chunk enrichment** | Generate context-aware titles, summaries, keywords, and retrieval questions |
 | 🔌 **Pluggable backend** | Add converters or splitters through the registry without frontend changes |
 
+Saved chunks retain the SHA-256 revision of the Markdown that produced them.
+If the Markdown changes, the saved set remains available for inspection but
+must be regenerated before it can overwrite a current chunk version.
+
 ---
 
 ## Getting Started
@@ -57,13 +62,21 @@ As [NVIDIA's research](https://developer.nvidia.com/blog/finding-the-best-chunki
 Two ways to run Chunky: locally or with Docker.
 
 ### Option 1 — Local
+
+macOS, Linux, or WSL:
+
 ```bash
 git clone https://github.com/GiovanniPasq/chunky.git
 cd chunky
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
 ./start_all.sh
+```
+
+Windows PowerShell:
+
+```powershell
+git clone https://github.com/GiovanniPasq/chunky.git
+cd chunky
+.\start_all.ps1
 ```
 
 ### Option 2 — Docker
@@ -81,22 +94,45 @@ docker compose up --build
 
 ---
 
+## Development checks
+
+Run the backend regression suite from the repository root:
+
+```bash
+./.venv/bin/python -m unittest discover -s tests
+```
+
+Run frontend type checking and production build from `frontend/`:
+
+```bash
+npm test
+npm run typecheck
+npm run build
+```
+
+---
+
 ## PDF to Markdown Converters
 
-No single converter wins on every document type. Chunky ships with six — switch between them in the UI and re-convert without losing your settings.
+No single converter wins on every document type. Chunky ships with six — switch between them in the UI and re-convert whenever you want to replace a converter's existing output.
 
 | Converter | Library | Best for |
 |-----------|---------|----------|
 | **PyMuPDF** | `pymupdf4llm` | Fast conversion of standard digital PDFs with selectable text |
 | **Docling** | `docling` | Complex layouts: multi-column documents, tables, and figures |
-| **MarkItDown** | `markitdown[pdf]` | Broad-format documents, simple and deterministic output |
-| **LiteParse** | `liteparse` | Fast, lightweight parsing by LlamaIndex — good for standard documents |
+| **MarkItDown** | `markitdown[pdf]` | Simple, deterministic conversion of standard PDFs |
+| **LiteParse** | `liteparse` | Fast, model-free PDF-to-Markdown parsing by LlamaIndex |
 | **VLM** | `openai` + any vision model | Scanned PDFs, handwriting, diagrams — anything a human can read |
 | **Cloud API** | `httpx` | POSTs the PDF to a configurable external endpoint and returns the Markdown response body directly |
 
+Standalone Markdown names that match the generated
+`{pdf_stem}_{converter}.md` pattern are reserved when the corresponding PDF
+exists. Chunky rejects that ambiguous upload instead of silently treating it
+as converter output.
+
 ### VLM converter
 
-The VLM converter rasterises each page at 300 DPI and sends it to any OpenAI-compatible vision model. By default it targets a **locally running Ollama instance** — no API key, no internet access required.
+The VLM converter rasterises each page at 300 DPI by default and sends it to any OpenAI-compatible vision model. By default it targets a **locally running Ollama instance** — no API key, no internet access required.
 
 Through the frontend, you can configure the model name, base URL, and API key directly in the UI before requesting a conversion — no code changes needed.
 
@@ -108,7 +144,7 @@ Through the frontend, you can configure the model name, base URL, and API key di
 
 ## Chunking Strategies
 
-Chunky supports two splitting libraries, each exposing multiple strategies. The library and strategy are selected independently in the UI.
+Chunky supports three splitting libraries, each exposing multiple strategies. The library and strategy are selected independently in the UI; size and overlap controls apply where the selected strategy supports them.
 
 ### LangChain (`langchain-text-splitters`)
 
@@ -123,14 +159,14 @@ Chunky supports two splitting libraries, each exposing multiple strategies. The 
 
 | Strategy | Description |
 |----------|-------------|
-| **Token** | Splits on token boundaries. Fast, no external tokeniser needed. |
-| **Fast** | SIMD-accelerated byte-based chunking at 100+ GB/s. Best for high-throughput pipelines. |
+| **Token** | Splits on GPT-2 token boundaries via tiktoken. |
+| **Fast** | SIMD-accelerated byte-based chunking. Uses `chunk_size` as a byte target and does not support overlap. |
 | **Sentence** | Splits at sentence boundaries. Preserves semantic completeness. |
 | **Recursive** | Recursively splits using structural delimiters (paragraphs → sentences → words). Note: `chunk_overlap` is not supported. |
-| **Table** | Splits large Markdown tables by row while preserving headers. Ideal for tabular data. |
-| **Code** | Splits source code using AST-based structural analysis. Supports multiple languages. |
-| **Semantic** | Groups content by embedding similarity. Best for preserving topical coherence. |
-| **Neural** | Uses a fine-tuned BERT model to detect semantic shifts. Great for topic-coherent chunks. |
+| **Table** | Splits Markdown tables using Chonkie's row-based defaults; size and overlap controls do not apply. |
+| **Code** | Splits source code using AST structure and a size target; overlap does not apply. |
+| **Semantic** | Groups content by embedding similarity with a size target; overlap does not apply. |
+| **Neural** | Uses a fine-tuned BERT model to detect semantic shifts; size and overlap controls do not apply. |
 
 > **Note:** The **Semantic** and **Neural** strategies download ML models on first use and may be slow to initialise.
 
@@ -138,10 +174,17 @@ Chunky supports two splitting libraries, each exposing multiple strategies. The 
 
 | Strategy | Description |
 |----------|-------------|
-| **Hybrid** | Hierarchical document-aware chunking with tokenization-aware refinements. Merges undersized chunks and supports header repetition across table splits. |
-| **Line-Based** | Preserves line boundaries with optional repeated prefix per chunk (e.g. table headers). Best for tables, code, and logs where line integrity matters. |
+| **Hybrid** | Document-structure-aware chunking that respects headings, tables, and lists while enforcing a token limit. |
+| **Line-Based** | Preserves line boundaries while enforcing a token limit. Best for tables, code, and logs where line integrity matters. |
 
 > **Note:** Both **Docling** strategies operate on `DoclingDocument` objects and require the `docling` library. The **Hybrid** strategy downloads a tokenizer model on first use.
+
+### Cancellation behavior
+
+VLM, Cloud, and enrichment requests support cooperative interruption. CPU
+conversion and chunking batches run in request-owned process pools. Pressing
+Interrupt cancels queued jobs and terminates every running worker in that
+batch; another request uses a different pool and is unaffected.
 
 ---
 
@@ -153,7 +196,7 @@ Chunky includes an LLM-powered enrichment layer that operates at two levels of t
 
 Before chunking, you can run enrichment directly on the converted Markdown. The pipeline:
 
-1. **Regex pass** — automatically corrects common conversion artifacts (broken tables, stray escape characters, malformed headers)
+1. **Deterministic cleanup** — removes likely pagination noise, repeated headers/footers, invisible characters, mojibake, and conservative line-wrap artifacts while preserving fenced code
 2. **LLM correction** — splits the document into pieces and sends each to an LLM for contextual cleanup, producing coherent, well-structured Markdown
 3. **Summary** *(optional)* — generates a document-level summary used as context during LLM correction
 
@@ -187,7 +230,7 @@ The `questions` field addresses a complementary problem: pre-generating the ques
 
 ## Extending Chunky
 
-The converter and chunker layers use a **decorator-based registry**: adding a new converter or chunker automatically exposes it through the `/api/capabilities` endpoint and the UI — no frontend changes needed.
+The converter and chunker layers use a **decorator-based capability registry**. After a backend implementation is added to the relevant enum and dispatch map, its decorator exposes it through `/api/capabilities`; no frontend changes are needed.
 
 ### Adding a new converter
 
@@ -199,7 +242,7 @@ from pathlib import Path
 
 class PDFConverter(ABC):
     @abstractmethod
-    def convert(self, pdf_path: Path) -> str:
+    def convert(self, pdf_path: Path, total_pages: int | None = None) -> str:
         """Convert a PDF to a Markdown string."""
 
     def validate_path(self, pdf_path: Path) -> None:
@@ -225,12 +268,14 @@ class MyConverter(PDFConverter):
         from my_library import MyParser
         self._parser = MyParser()
 
-    def convert(self, pdf_path: Path) -> str:
+    def convert(self, pdf_path: Path, total_pages: int | None = None) -> str:
         self.validate_path(pdf_path)
         return self._parser.to_markdown(str(pdf_path))
 ```
 
-**2. Import it in `capabilities_router.py`:**
+**2. Add its wire name to `ConverterType` in `backend/models/schemas.py` and its class to `_CONVERTER_MAP` in `backend/services/document_service.py`.**
+
+**3. Import it in `capabilities_router.py`:**
 
 ```python
 import backend.converters.my_converter  # noqa: F401 — side-effect import
