@@ -444,7 +444,7 @@ class VLMConverter(PDFConverter):
                     "content": [
                         {
                             "type": "image_url",
-                            "image_url": f"data:image/png;base64,{img_b64}",
+                            "image_url": {"url": f"data:image/png;base64,{img_b64}"},
                         },
                         {"type": "text", "text": prompt_text},
                     ],
