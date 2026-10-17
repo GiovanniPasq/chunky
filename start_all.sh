@@ -215,16 +215,21 @@ VENV_DIR="${VENV_DIR:-.venv}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 ensure_port_free 8000 "Backend" "uvicorn .*backend\.main:app|backend\.main:app .*uvicorn"
 ensure_port_free 5173 "Frontend" "$PROJECT_ROOT/frontend.*vite|vite.*$PROJECT_ROOT/frontend"
-if [ ! -x "$VENV_DIR/bin/python" ]; then
-    echo "Python environment not found. Creating '$VENV_DIR'..."
-    "$PYTHON_BIN" -m venv "$VENV_DIR"
-fi
+if command -v uv >/dev/null 2>&1; then
+    echo "⚡ Using uv for environment management..."
+    uv sync
+else
+    if [ ! -x "$VENV_DIR/bin/python" ]; then
+        echo "Python environment not found. Creating '$VENV_DIR'..."
+        "$PYTHON_BIN" -m venv "$VENV_DIR"
+    fi
 
-if [ ! -f "$VENV_DIR/.requirements-installed" ] || [ requirements.txt -nt "$VENV_DIR/.requirements-installed" ]; then
-    echo "Installing Python dependencies..."
-    "$VENV_DIR/bin/python" -m pip install --upgrade pip
-    "$VENV_DIR/bin/python" -m pip install -r requirements.txt
-    touch "$VENV_DIR/.requirements-installed"
+    if [ ! -f "$VENV_DIR/.requirements-installed" ] || [ requirements.txt -nt "$VENV_DIR/.requirements-installed" ]; then
+        echo "Installing Python dependencies..."
+        "$VENV_DIR/bin/python" -m pip install --upgrade pip
+        "$VENV_DIR/bin/python" -m pip install -r requirements.txt
+        touch "$VENV_DIR/.requirements-installed"
+    fi
 fi
 "$VENV_DIR/bin/python" -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 &
 BACKEND_PID=$!

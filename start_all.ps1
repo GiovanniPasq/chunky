@@ -188,24 +188,30 @@ try {
     $PythonBin = if ($env:PYTHON_BIN) { $env:PYTHON_BIN } else { "python" }
     $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
 
-    if (-not (Test-Path $VenvPython)) {
-        Write-Host "Python environment not found. Creating '$VenvDir'..."
-        & $PythonBin -m venv $VenvDir
-    }
+    $UvCmd = Get-Command uv -ErrorAction SilentlyContinue
+    if ($UvCmd) {
+        Write-Host "⚡ Using uv for environment management..."
+        & uv sync
+    } else {
+        if (-not (Test-Path $VenvPython)) {
+            Write-Host "Python environment not found. Creating '$VenvDir'..."
+            & $PythonBin -m venv $VenvDir
+        }
 
-    $RequirementsMarker = Join-Path $VenvDir ".requirements-installed"
-    $InstallBackendDeps = $false
-    if (-not (Test-Path $RequirementsMarker)) {
-        $InstallBackendDeps = $true
-    } elseif ((Get-Item "requirements.txt").LastWriteTimeUtc -gt (Get-Item $RequirementsMarker).LastWriteTimeUtc) {
-        $InstallBackendDeps = $true
-    }
+        $RequirementsMarker = Join-Path $VenvDir ".requirements-installed"
+        $InstallBackendDeps = $false
+        if (-not (Test-Path $RequirementsMarker)) {
+            $InstallBackendDeps = $true
+        } elseif ((Get-Item "requirements.txt").LastWriteTimeUtc -gt (Get-Item $RequirementsMarker).LastWriteTimeUtc) {
+            $InstallBackendDeps = $true
+        }
 
-    if ($InstallBackendDeps) {
-        Write-Host "Installing Python dependencies..."
-        & $VenvPython -m pip install --upgrade pip
-        & $VenvPython -m pip install -r requirements.txt
-        New-Item -ItemType File -Force -Path $RequirementsMarker | Out-Null
+        if ($InstallBackendDeps) {
+            Write-Host "Installing Python dependencies..."
+            & $VenvPython -m pip install --upgrade pip
+            & $VenvPython -m pip install -r requirements.txt
+            New-Item -ItemType File -Force -Path $RequirementsMarker | Out-Null
+        }
     }
 
     $BackendProcess = Start-Process -FilePath $VenvPython `
