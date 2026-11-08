@@ -10,7 +10,7 @@
  *                  The callback fires at most once per invocation.
  */
 
-export const SSE_SILENT_MS = 60_000
+const SSE_SILENT_MS = 60_000
 
 /** Shared message shown when the SSE stream goes silent for too long. */
 export const CONNECTION_LOST_MSG =

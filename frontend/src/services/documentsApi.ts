@@ -1,7 +1,7 @@
 import type { CloudSettings, ConverterType, DocumentData, VLMSettings } from '../types'
 import { API_BASE } from './apiService'
 
-export interface UploadFileResult {
+interface UploadFileResult {
   filename: string
   success: boolean
   message: string

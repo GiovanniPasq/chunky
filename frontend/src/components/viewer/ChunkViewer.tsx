@@ -1,7 +1,6 @@
 import FeatureIcon from '../common/FeatureIcon'
 import { useState, useEffect, useRef, memo, type ReactNode } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import MarkdownContent from '../common/MarkdownContent'
 import type { Chunk, EnrichmentSettings } from '../../types'
 import { useChunkEnrichment } from '../../hooks/useChunkEnrichment'
 import { useScrollSync } from '../../hooks/useScrollSync'
@@ -464,7 +463,7 @@ function ChunkViewer({
                     </div>
                   )}
                   <div className="markdown-content">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{chunk.content}</ReactMarkdown>
+                    <MarkdownContent>{chunk.content}</MarkdownContent>
                   </div>
                 </div>
                 </LazyChunk>

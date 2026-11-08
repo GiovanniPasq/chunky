@@ -8,15 +8,8 @@ const source = [
 ].map((body, index) => `<!-- page-marker:${index + 1} -->\n${body}`).join('\n\n---\n\n')
 
 async function workspace(page: Page, content = source, heights = [792, 1100, 850]) {
-  await mockWorkspace(page)
+  await mockWorkspace(page, 0, content)
   await page.route('**/api/pdf/*', route => route.fulfill({ contentType: 'application/pdf', body: samplePdf(heights) }))
-  await page.route('**/api/document/*', route => route.fulfill({ json: {
-    pdf_filename: 'Annual report.pdf', md_filename: 'Annual report_pymupdf4llm.md',
-    md_content: content, has_pdf: true, has_markdown: true,
-  } }))
-  await page.route('**/api/documents/*/markdowns/*', route => route.fulfill({ json: {
-    filename: 'Annual report_pymupdf4llm.md', content, source: 'converted', converter: 'pymupdf4llm',
-  } }))
   await page.goto('/')
   await openDocument(page)
   await expect(page.getByRole('group', { name: 'PDF page navigation', exact: true })).toContainText(`of ${heights.length}`)
@@ -127,4 +120,14 @@ test('jumping outside the rendered PDF window paints the requested page', async 
     return false
   })).toBe(true)
   expect(failures).toEqual([])
+})
+
+test('hides internal page markers in rendered chunks and retains them in the editable source', async ({ page }) => {
+  await workspace(page)
+  await page.getByRole('button', { name: 'Chunks', exact: true }).click()
+  const chunk = page.locator('.chunk-block').first()
+  await expect(chunk.locator('.markdown-content')).not.toContainText('page-marker:')
+  await expect(chunk.locator('.markdown-content')).toContainText('First page paragraph')
+  await chunk.locator('.chunk-edit-btn').click()
+  await expect(page.getByRole('textbox', { name: 'Chunk content' })).toHaveValue(source)
 })

@@ -100,7 +100,7 @@ export function mdSourceFromFilename(
  * Build the request body for enrichment endpoints.
  * Applies defaults for optional fields so callers don't need to repeat them.
  */
-export function buildEnrichmentBody(
+function buildEnrichmentBody(
   settings: EnrichmentSettings,
   extra: Record<string, unknown>,
 ): Record<string, unknown> {

@@ -4,7 +4,7 @@ import Button from './Button'
 import { IconCheck, IconMore } from './Icons'
 import './Controls.css'
 
-export interface MenuAction {
+interface MenuAction {
   label: string
   onSelect: () => void
   icon?: ReactNode

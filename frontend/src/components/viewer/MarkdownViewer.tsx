@@ -1,7 +1,6 @@
 import FeatureIcon from '../common/FeatureIcon'
 import { useRef, useEffect, useState, useMemo, memo } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import MarkdownContent from '../common/MarkdownContent'
 import type { EnrichmentSettings } from '../../types'
 import { useScrollSync } from '../../hooks/useScrollSync'
 import PageNavigator from '../common/PageNavigator'
@@ -88,7 +87,7 @@ const LazySection = memo(function LazySection({
     return () => observer.disconnect()
   }, [])
 
-  if (visible) return <ReactMarkdown remarkPlugins={[remarkGfm]}>{sectionContent}</ReactMarkdown>
+  if (visible) return <MarkdownContent>{sectionContent}</MarkdownContent>
   return <div ref={ref} style={{ minHeight: estimatedHeight }} />
 })
 

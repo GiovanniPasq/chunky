@@ -9,7 +9,7 @@ import Button from '../common/Button'
  * indicator (e.g. ``"Saving…"`` while a request is in flight) without
  * recreating the whole dialog.
  */
-export interface ConfirmDialogAction {
+interface ConfirmDialogAction {
   label: ReactNode
   onClick: () => void
   variant?: 'primary' | 'secondary' | 'danger'

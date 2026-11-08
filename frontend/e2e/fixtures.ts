@@ -5,8 +5,8 @@ export const markdown =
 const mdFilename = 'Annual report_pymupdf4llm.md'
 const chunksFilename = 'Annual report_langchain_token_512_51.json'
 
-export async function mockWorkspace(page: Page, chunkDelay = 0) {
-  let content = markdown
+export async function mockWorkspace(page: Page, chunkDelay = 0, initialContent = markdown) {
+  let content = initialContent
   let saved = false
   let chunkRequests = 0
   const documents = [

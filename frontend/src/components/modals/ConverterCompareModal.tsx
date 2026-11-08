@@ -1,8 +1,7 @@
 import FeatureIcon from '../common/FeatureIcon'
 import Modal from '../common/Modal'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import MarkdownContent from '../common/MarkdownContent'
 import type { CapabilityConverter, ChunkSettings, ConverterType } from '../../types'
 import { capabilityService } from '../../services/apiService'
 import {
@@ -456,7 +455,7 @@ function PreviewPane({
           : (
             <div className="compare-output rendered">
               {state.result.md_content
-                ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{state.result.md_content}</ReactMarkdown>
+                ? <MarkdownContent>{state.result.md_content}</MarkdownContent>
                 : <p>(empty output)</p>}
             </div>
           )

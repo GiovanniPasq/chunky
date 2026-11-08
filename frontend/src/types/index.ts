@@ -94,7 +94,7 @@ export interface DocumentSummary {
   narrative: string
 }
 
-export interface DocumentSummaryStatus {
+interface DocumentSummaryStatus {
   /**
    * True when the most recent persistence happened via the PUT endpoint
    * (i.e. the user edited the summary in the review modal).  Protects
@@ -116,8 +116,8 @@ export interface DocumentSummaryResponse {
 // Chunker types — open strings; the authoritative list comes from
 // GET /api/capabilities so new strategies appear automatically.
 // ---------------------------------------------------------------------------
-export type ChunkerType = string
-export type ChunkerLibrary = string
+type ChunkerType = string
+type ChunkerLibrary = string
 
 export interface ChunkSettings {
   chunkerType: ChunkerType
@@ -163,7 +163,7 @@ export interface ChunksVersion {
 // ---------------------------------------------------------------------------
 // Capabilities — shape returned by GET /api/capabilities
 // ---------------------------------------------------------------------------
-export interface CapabilityStrategy {
+interface CapabilityStrategy {
   strategy: string
   label: string
   description: string
