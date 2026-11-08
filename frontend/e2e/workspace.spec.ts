@@ -588,3 +588,23 @@ test('confirms deleting all chunks and preserves them when cancelled', async ({ 
   await expect(page.locator('.chunk-block')).toHaveCount(0)
   await expect(page.locator('.workspace-save-state')).toContainText('Unsaved changes')
 })
+
+for (const width of [1440, 1280, 1024, 390]) {
+  test(`keeps the Markdown version selector beside zoom at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto('/')
+    if (width < 640) await page.getByRole('button', { name: 'Expand sidebar', exact: true }).click()
+    await openDocument(page)
+    const picker = page.getByRole('combobox', { name: 'Markdown version', exact: true })
+    const tools = page.locator('.panel-label-tools').filter({ has: picker })
+    const alignment = await tools.evaluate(element => {
+      const version = element.querySelector('select')!.getBoundingClientRect()
+      const zoom = element.querySelector('.panel-zoom')!.getBoundingClientRect()
+      return { versionMiddle: version.y + version.height / 2, zoomMiddle: zoom.y + zoom.height / 2,
+        versionRight: version.right, zoomLeft: zoom.left }
+    })
+    expect(Math.abs(alignment.versionMiddle - alignment.zoomMiddle)).toBeLessThan(1)
+    expect(alignment.versionRight).toBeLessThan(alignment.zoomLeft)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+  })
+}

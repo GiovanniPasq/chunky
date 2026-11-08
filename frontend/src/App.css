@@ -198,11 +198,12 @@
   color: var(--text-secondary);
 }
 .panel-label-tools {
+  flex: 1 1 200px;
   margin-left: auto;
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
   min-width: 0;
 }
