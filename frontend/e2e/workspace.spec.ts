@@ -471,3 +471,34 @@ test('retries a failed summary regeneration without silently using the old cache
   await expect(dialog.getByLabel('Topic', { exact: true })).toHaveValue('New summary')
   expect(forced).toEqual([true, true])
 })
+
+for (const width of [1440, 390]) {
+  test(`wraps long Markdown table cells within the viewer at ${width}px`, async ({ page }) => {
+    const paragraph = 'Keep the original source details readable when reviewing a converted document. '.repeat(12).trim()
+    const content = '# Annual report\n\n| Field | Description |\n| --- | --- |\n'
+      + `| First field | ${paragraph} |\n| Second field | ${paragraph} |\n| Last field | Final source details. |`
+    await page.setViewportSize({ width, height: 900 })
+    await page.route('**/api/document/*', route => route.fulfill({ json: {
+      pdf_filename: 'Annual report.pdf', md_filename: 'Annual report_pymupdf4llm.md',
+      md_content: content, has_pdf: true, has_markdown: true,
+    } }))
+    await page.route('**/api/documents/*/markdowns/*', route => route.fulfill({ json: {
+      filename: 'Annual report_pymupdf4llm.md', content, source: 'converted', converter: 'pymupdf4llm',
+    } }))
+    await page.goto('/')
+    if (width < 640) await page.getByRole('button', { name: 'Expand sidebar', exact: true }).click()
+    await openDocument(page)
+    const table = page.locator('.markdown-content table')
+    await expect(table.locator('tbody tr')).toHaveCount(3)
+    await expect(table.locator('tbody tr').first().locator('td').last()).toHaveText(paragraph)
+    for (const colorScheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme })
+      const dimensions = await table.evaluate(element => {
+        const viewer = element.closest('.md-viewer')!
+        return { table: element.getBoundingClientRect().width, viewer: viewer.clientWidth, scrollWidth: viewer.scrollWidth }
+      })
+      expect(dimensions.table).toBeLessThanOrEqual(dimensions.viewer)
+      expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.viewer + 1)
+    }
+  })
+}
