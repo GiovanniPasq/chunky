@@ -86,6 +86,32 @@ class ConverterPageTests(unittest.TestCase):
         self.assertTrue(all('page-marker:' not in content for content in model.calls))
         self.assertIn('First page content', output.corrected_markdown)
 
+    def test_docling_tables_keep_cells_without_column_padding(self):
+        from docling_core.types.doc import DoclingDocument, ProvenanceItem, BoundingBox, Size, TableCell, TableData
+        doc = DoclingDocument(name='table')
+        doc.add_page(1, Size(width=612, height=792))
+        values = [['Name', 'Description'], ['Short', 'A much longer description of the item']]
+        cells = [TableCell(
+            text=text, start_row_offset_idx=row, end_row_offset_idx=row + 1,
+            start_col_offset_idx=column, end_col_offset_idx=column + 1,
+            column_header=row == 0,
+        ) for row, entries in enumerate(values) for column, text in enumerate(entries)]
+        doc.add_table(data=TableData(num_rows=2, num_cols=2, table_cells=cells), prov=ProvenanceItem(
+            page_no=1, bbox=BoundingBox(l=10, t=10, r=500, b=200), charspan=(0, 0),
+        ))
+        converter = object.__new__(DoclingConverter)
+        converter._converter = SimpleNamespace(convert=lambda _: SimpleNamespace(document=doc))
+        with TemporaryDirectory() as folder:
+            filename = Path(folder) / 'test.pdf'
+            filename.write_bytes(b'%PDF-1.4')
+            for mapped in (True, False):
+                if not mapped:
+                    doc.pages.clear()
+                with self.subTest(mapped=mapped):
+                    output = converter.convert(filename)
+                    self.assertIn('| Short | A much longer description of the item |', output)
+                    self.assertEqual(output.count(values[1][1]), 1)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -44,10 +44,13 @@ class DoclingConverter(PDFConverter):
         # Docling assigns compound items (e.g. merged tables) to their first
         # provenance page. Serialize them once, without duplicating their rows.
         if not document.pages:
-            return document.export_to_markdown(image_mode=ImageRefMode.PLACEHOLDER, image_placeholder="")
+            return document.export_to_markdown(
+                image_mode=ImageRefMode.PLACEHOLDER, image_placeholder="", compact_tables=True,
+            )
         count = total_pages or max(document.pages)
         return page_markdown((
             (number, document.export_to_markdown(
                 page_no=number, image_mode=ImageRefMode.PLACEHOLDER, image_placeholder="",
+                compact_tables=True,
             )) for number in range(1, count + 1)
         ), count)
