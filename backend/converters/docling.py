@@ -9,6 +9,7 @@ from .pages import page_markdown
 
 @register_converter(
     name="docling",
+    page_mapping=True,
     label="Docling",
     description="Layout-aware. Handles multi-column, tables, and complex structures.",
 )

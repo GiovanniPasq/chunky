@@ -62,12 +62,12 @@ async def get_capabilities():
             }
           ],
           "converters": [
-            {"name": "pymupdf",    "label": "PyMuPDF",    "description": "..."},
-            {"name": "markitdown", "label": "MarkItDown", "description": "..."},
-            {"name": "docling",    "label": "Docling",    "description": "..."},
-            {"name": "vlm",        "label": "VLM (Vision-Language Model)", "description": "..."},
-            {"name": "cloud",    "label": "Cloud API", "description": "..."},
-            {"name": "liteparse", "label": "LiteParse", "description": "..."}
+            {"name": "pymupdf", "page_mapping": true,    "label": "PyMuPDF",    "description": "..."},
+            {"name": "markitdown", "page_mapping": false, "label": "MarkItDown", "description": "..."},
+            {"name": "docling", "page_mapping": true,    "label": "Docling",    "description": "..."},
+            {"name": "vlm", "page_mapping": true,        "label": "VLM (Vision-Language Model)", "description": "..."},
+            {"name": "cloud", "page_mapping": false,    "label": "Cloud API", "description": "..."},
+            {"name": "liteparse", "page_mapping": true, "label": "LiteParse", "description": "..."}
           ]
         }
     """

@@ -97,6 +97,18 @@ If Chunky is useful to you, a star on GitHub helps others discover the project.
 
 ---
 
+## Exporting saved outputs
+
+Use **Export all**, or **Select → Export selected**, for a ZIP download or a folder
+on the backend machine. Choose Markdown, saved chunk JSON, optional PDFs, and
+latest matching outputs or all versions. Save active edits first. Each export
+includes a manifest with missing-file and stale-chunk warnings.
+
+Folder exports use `EXPORTS_DIR` (default `docs/exports`), with an optional child
+folder and a unique directory per export. Set an absolute `EXPORTS_DIR` in the
+backend environment to change the root; mount it explicitly when using Docker.
+Workspace files stay in place. Downloads use a location picker where supported.
+
 ## Development checks
 
 Run the backend regression suite from the repository root:
@@ -125,36 +137,6 @@ PLAYWRIGHT_CHANNEL=chrome npm run test:e2e
 
 ---
 
-## Workspace appearance and controls
-
-Use **Appearance** in the workspace header to choose Light, Dark, or System.
-The choice is saved in this browser. On narrow screens, Source, Markdown, and
-Chunks tabs show one viewer at a time. Markdown and chunk actions include export
-menus, visible save states, and protection for unsaved edits. The document list
-can be filtered by conversion and review status.
-
-The converter and chunker below the document name stay visible in the workspace
-header. Click either to open its settings tab, or hover for details. These are processing
-defaults; saved Markdown and chunk versions retain their original configuration.
-
-Use **Export all**, or **Select → Export selected**, to export saved Markdown,
-chunk JSON, and optional original PDFs. Choose the latest Markdown and its latest
-saved chunks, or all saved versions. A manifest records missing outputs and stale
-chunk warnings. Save or cancel active edits before exporting that document.
-
-**Download ZIP** saves to your computer (with a location picker where supported).
-**Folder on the backend machine** creates a unique export directory under
-`EXPORTS_DIR` (default: `docs/exports`), with an optional subfolder. Set
-`EXPORTS_DIR=/absolute/path/to/exports` in the backend environment to change the
-root. For Docker, configure a matching volume mount for paths outside `/app/docs`.
-Workspace files stay in place; export excludes processing caches and credentials.
-
-Settings are browser defaults for future operations. Changing a converter does
-not reconvert existing files. Changing chunking settings regenerates the active
-chunk view; unsaved work is guarded before applying those changes.
-
----
-
 ## PDF to Markdown Converters
 
 No single converter wins on every document type. Chunky ships with six — switch between them in the UI and re-convert whenever you want to replace a converter's existing output.
@@ -179,6 +161,14 @@ such as merged tables remain attached to their first provenance page. Page marke
 stay outside model-editable enrichment pieces. Reconvert older Markdown to add
 page mapping. MarkItDown and arbitrary Cloud API responses can still be used;
 page mapping is available only when the resulting Markdown contains valid markers.
+
+Use Previous/Next or enter a page number in either viewer to navigate linked
+pages. **Page sync** follows the source page and relative position within it;
+it does not promise paragraph-level alignment. **Approx. sync** uses document
+scroll percentages when page mapping is unavailable, including chunk views.
+Turn sync off for independent navigation. Page labels in Markdown still jump to
+the corresponding PDF page explicitly. **Link pages…** offers reconversion for
+older output without a page map; reconversion replaces that converter's Markdown.
 
 ### VLM converter
 
@@ -303,6 +293,10 @@ class PDFConverter(ABC):
         if not pdf_path.exists():
             raise FileNotFoundError(f"PDF file not found: {pdf_path}")
 ```
+
+Converters that emit the common `<!-- page-marker:N -->` format can advertise
+`page_mapping=True` in `@register_converter`. This enables the reconversion action
+for older output; actual page linking still depends on the saved document's markers.
 
 **1. Create a new file in `backend/converters/` and decorate the class:**
 

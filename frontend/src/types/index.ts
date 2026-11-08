@@ -176,6 +176,7 @@ export interface CapabilityLibrary {
 }
 
 export interface CapabilityConverter {
+  page_mapping?: boolean
   name: string
   label: string
   description: string

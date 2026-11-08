@@ -366,6 +366,7 @@ export default function ConverterCompareModal({ isOpen, filename, settings, onCl
                   </div>
                 </div>
                 <PDFViewer
+                  syncScope={`${filename}:converter-preview`}
                   filename={filename}
                   scale={pdfScale}
                   scrollSyncEnabled={false}

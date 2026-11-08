@@ -108,6 +108,7 @@ class _PageResult:
 
 @register_converter(
     name="vlm",
+    page_mapping=True,
     label="VLM (Vision-Language Model)",
     description=(
         "Rasterises each page and sends it to an OpenAI-compatible VLM. "

@@ -172,12 +172,10 @@ function ChunkViewer({
 
   // ── Scroll sync ────────────────────────────────────────────────────────────
 
-  const { handleScroll } = useScrollSync(
-    scrollSyncEnabled,
-    'markdown',
-    'pdf',
-    containerRef,
-  )
+  const { handleScroll } = useScrollSync({
+    enabled: scrollSyncEnabled, source: 'chunks', scope: documentName, containerRef,
+    layoutKey: chunkRevision,
+  })
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 

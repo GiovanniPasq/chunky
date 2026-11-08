@@ -2,10 +2,12 @@ import { useState, useEffect, useCallback, useRef, useMemo, type CSSProperties }
 import Sidebar from './components/layout/Sidebar'
 import WorkspaceWelcome from './components/layout/WorkspaceWelcome'
 import ProcessingSettings from './components/layout/ProcessingSettings'
+import { parseDocumentPages } from './utils/documentPages'
 import ThemeMenu from './components/common/ThemeMenu'
 import StatusBadge from './components/common/StatusBadge'
 import ViewTabs from './components/common/ViewTabs'
 import { useMediaQuery } from './hooks/useMediaQuery'
+import { useCapabilities } from './hooks/useCapabilities'
 import {
   ChunksVersionPicker,
   MarkdownVersionPicker,
@@ -317,6 +319,10 @@ export default function App() {
     }
     setExportFiles(filenames)
   }
+  const { caps } = useCapabilities()
+  const [pageMappingOpen, setPageMappingOpen] = useState(false)
+  const canCreatePageMap = !!caps?.converters.find(converter => converter.name === settings.converter)?.page_mapping
+  const pageMap = useMemo(() => parseDocumentPages(documentData?.md_content ?? ''), [documentData?.md_content])
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSection, setSettingsSection] = useState<'conversion' | 'chunking'>('conversion')
   const openSettings = (section: 'conversion' | 'chunking' = 'conversion') => {
@@ -502,7 +508,7 @@ export default function App() {
     convertMdToPdf()
   }, [markdownDirty, showUnsavedMarkdownWarning, convertMdToPdf])
 
-  const converterLabel = settings.converter ?? 'Convert'
+  const converterLabel = caps?.converters.find(converter => converter.name === settings.converter)?.label ?? settings.converter ?? 'Convert'
 
   const conversionDetail = selectedDoc
     ? conversionProgress && conversionProgress.total > 0
@@ -631,6 +637,7 @@ export default function App() {
         content={documentData.md_content}
         documentName={selectedDoc!}
         scale={mdScale}
+        hasSourcePdf={documentData.has_pdf}
         scrollSyncEnabled={scrollSync}
         onSaveMarkdown={saveMarkdown}
         onDeleteMarkdown={handleDeleteMarkdown}
@@ -859,6 +866,9 @@ export default function App() {
                         scale={pdfScale}
                         scrollSyncEnabled={scrollSync}
                         onToggleScrollSync={handleToggleScrollSync}
+                        pageSyncAvailable={effectiveRightView === 'markdown' && !!pageMap}
+                        mappedPageCount={pageMap?.length ?? 0}
+                        onRequestPageMapping={documentData.has_markdown && !pageMap ? () => setPageMappingOpen(true) : undefined}
                       />
                     ) : (
                       <div className="md-not-found">
@@ -995,6 +1005,17 @@ export default function App() {
           </>
         )}
 
+        <ConfirmDialog isOpen={pageMappingOpen} title="Enable linked pages" onDismiss={() => setPageMappingOpen(false)} actions={[
+          { label: 'Cancel', onClick: () => setPageMappingOpen(false) },
+          { label: canCreatePageMap ? `Reconvert with ${converterLabel}` : 'Choose converter', variant: 'primary', onClick: () => {
+            setPageMappingOpen(false)
+            if (canCreatePageMap) handleConvert()
+            else openSettings('conversion')
+          } },
+        ]}>
+          <p>This saved Markdown has no source-page map. Reconvert with a page-aware converter to link PDF and Markdown pages.</p>
+          <p>Reconversion replaces the saved Markdown for that converter. Save any edits first; existing chunks may need regeneration.</p>
+        </ConfirmDialog>
         {exportFiles && <ExportModal filenames={exportFiles} onClose={() => setExportFiles(null)} />}
         <SettingsModal
           isOpen={settingsOpen}

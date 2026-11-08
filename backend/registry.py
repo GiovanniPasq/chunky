@@ -47,6 +47,7 @@ class ConverterMeta:
     name: str              # enum value, e.g. "pymupdf"
     label: str             # human-readable, e.g. "PyMuPDF"
     description: str = ""
+    page_mapping: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -91,10 +92,11 @@ class _CapabilityRegistry:
         name: str,
         label: str,
         description: str = "",
+        page_mapping: bool = False,
     ) -> None:
         if name not in self._converters:
             self._converters[name] = ConverterMeta(
-                name=name, label=label, description=description
+                name=name, label=label, description=description, page_mapping=page_mapping
             )
 
     # ------------------------------------------------------------------
@@ -122,6 +124,7 @@ class _CapabilityRegistry:
             "converters": [
                 {
                     "name": c.name,
+                    "page_mapping": c.page_mapping,
                     "label": c.label,
                     "description": c.description,
                 }
@@ -170,7 +173,7 @@ def register_chunker(
     return decorator
 
 
-def register_converter(name: str, label: str, description: str = ""):
+def register_converter(name: str, label: str, description: str = "", page_mapping: bool = False):
     """Class decorator for PDFConverter subclasses — registers on import.
 
     Apply to the converter class itself::
@@ -184,6 +187,6 @@ def register_converter(name: str, label: str, description: str = ""):
             ...
     """
     def decorator(cls):
-        registry.add_converter(name=name, label=label, description=description)
+        registry.add_converter(name=name, label=label, description=description, page_mapping=page_mapping)
         return cls
     return decorator

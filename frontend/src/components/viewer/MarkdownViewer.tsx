@@ -3,7 +3,8 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { EnrichmentSettings } from '../../types'
 import { useScrollSync } from '../../hooks/useScrollSync'
-import { VIEWER_PAGE_SYNC } from '../../utils/viewerEvents'
+import PageNavigator from '../common/PageNavigator'
+import { parseDocumentPages } from '../../utils/documentPages'
 import { LAZY_OBSERVER_MARGIN, LAZY_SECTION_TARGET_CHARS } from '../../config'
 import { downloadTextFile, replaceExtension, safeDownloadFilename } from '../../utils/download'
 import { splitMarkdownSections } from '../../utils/markdownSections'
@@ -13,6 +14,7 @@ import SummaryReviewModal from '../modals/SummaryReviewModal'
 import { useMarkdownEnrichment } from '../../hooks/useMarkdownEnrichment'
 import {
   IconSparkles,
+  IconPdf,
   IconTrash,
   IconDownload,
   IconEdit,
@@ -30,6 +32,7 @@ interface Props {
   /** Display scale (managed and rendered by the parent — see App.tsx). */
   scale?: number
   scrollSyncEnabled?: boolean
+  hasSourcePdf?: boolean
   onSaveMarkdown: (content: string) => Promise<void>
   onDeleteMarkdown: () => void
   /** Triggers PDF→Markdown conversion with the converter currently selected
@@ -54,24 +57,6 @@ interface Props {
    *  content from disk so the checkpoint key stays stable across
    *  requests. */
   mdFilename?: string
-}
-
-// ── Page-marker helpers ─────────────────────────────────────────────────────
-
-// Split content at page-marker comments into per-page sections.
-// This avoids false positives from `---` horizontal rules inside page content.
-function splitAtPageMarkers(md: string): Array<{ page: number; content: string }> | null {
-  const parts = md.split(/<!--\s*page-marker:(\d+)\s*-->/)
-  // parts = [before_first_marker, '1', content1, '2', content2, ...]
-  if (parts.length < 3) return null
-  const sections: Array<{ page: number; content: string }> = []
-  for (let i = 1; i < parts.length; i += 2) {
-    const page = parseInt(parts[i], 10)
-    // Strip the trailing `\n\n---\n\n` page-separator (added by the backend between pages)
-    const content = (parts[i + 1] ?? '').replace(/\n\n---\n\n$/, '').trim()
-    sections.push({ page, content })
-  }
-  return sections.length > 0 ? sections : null
 }
 
 // ── Lazy section splitting ──────────────────────────────────────────────────
@@ -110,7 +95,7 @@ const LazySection = memo(function LazySection({
 
 function MarkdownViewer({
   content, documentName, scale = 1.0,
-  scrollSyncEnabled = true,
+  scrollSyncEnabled = true, hasSourcePdf = false,
   onSaveMarkdown, onDeleteMarkdown,
   onConvert, converterLabel, activeConverter, converting,
   savingMd,
@@ -159,11 +144,11 @@ function MarkdownViewer({
   }, [markdownDirty, onDirtyChange])
 
   // Pre-compute lazy sections once per content change.
-  // For VLM output (page markers present) each page is further split into
+  // For page-aware conversion output (page markers present) each page is further split into
   // ~2 500-char buckets. For plain output the whole string is bucketed directly.
   // Either way, only sections near the viewport are ever parsed by ReactMarkdown.
   const lazyContent = useMemo(() => {
-    const paged = splitAtPageMarkers(content)
+    const paged = parseDocumentPages(content)
     if (paged) {
       return {
         type: 'paged' as const,
@@ -201,30 +186,6 @@ function MarkdownViewer({
     if (pages.length <= 8) return pages.join(', ')
     return `${pages.slice(0, 6).join(', ')}, … (+${pages.length - 6} more)`
   }
-
-  // Listen for page-sync events from the PDF viewer.
-  useEffect(() => {
-    if (!hasPageSync) return
-    const scrollToPage = (pageNum: number) => {
-      if (!containerRef.current) return
-      const anchor = document.getElementById(`md-page-anchor-${pageNum}`)
-      if (!anchor) {
-        if (pageNum === 1) containerRef.current.scrollTo({ top: 0, behavior: 'smooth' })
-        return
-      }
-      const containerRect = containerRef.current.getBoundingClientRect()
-      const anchorRect = anchor.getBoundingClientRect()
-      const scrollTop = containerRef.current.scrollTop + (anchorRect.top - containerRect.top) - 8
-      containerRef.current.scrollTo({ top: Math.max(0, scrollTop), behavior: 'smooth' })
-    }
-    const handler = (e: Event) => {
-      const ev = e as CustomEvent
-      if (ev.detail.source !== 'pdf') return
-      scrollToPage(ev.detail.page as number)
-    }
-    window.addEventListener(VIEWER_PAGE_SYNC, handler)
-    return () => window.removeEventListener(VIEWER_PAGE_SYNC, handler)
-  }, [hasPageSync])
 
   useEffect(() => {
     setEditContent(content)
@@ -302,13 +263,11 @@ function MarkdownViewer({
 
   // ── Scroll sync ────────────────────────────────────────────────────────────
 
-  const { handleScroll } = useScrollSync(
-    scrollSyncEnabled ?? false,
-    'markdown',
-    'pdf',
-    containerRef,
-    (pct) => { savedScrollRatioRef.current = pct },
-  )
+  const { handleScroll, currentPage, navigate } = useScrollSync({
+    enabled: !!scrollSyncEnabled && !editMode, source: 'markdown', scope: documentName,
+    containerRef, pageAware: hasPageSync && !editMode, layoutKey: content,
+    onExternalScroll: percentage => { savedScrollRatioRef.current = percentage },
+  })
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -365,7 +324,11 @@ function MarkdownViewer({
       </ConfirmDialog>
 
       <div className="md-controls">
-        <span className="toolbar-context">{editMode ? 'Editing Markdown' : 'Markdown'}</span>
+        <div className="md-controls-left">
+          {hasPageSync && !editMode
+            ? <PageNavigator label="Markdown" page={currentPage} total={lazyContent.type === 'paged' ? lazyContent.pages.length : 0} onSelect={navigate} />
+            : <span className="toolbar-context">{editMode ? 'Editing Markdown' : 'Markdown'}</span>}
+        </div>
         <div className="md-controls-right">
           {editMode ? (
             <>
@@ -447,24 +410,21 @@ function MarkdownViewer({
             <div className="markdown-content">
               {lazyContent.type === 'paged' ? (
                 lazyContent.pages.map(({ page, sections }) => (
-                  <div key={page}>
-                    {page === 1
-                      ? <div id="md-page-anchor-1" style={{ height: 0 }} />
-                      : (
-                        <div className="md-page-break" id={`md-page-anchor-${page}`}>
+                  <div key={page} className="markdown-page" data-viewer-page={page}>
+                    {page !== 1 && (
+                        <div className="md-page-break">
                           <hr />
                           <button
                             className="md-page-label"
-                            title={`Jump PDF to page ${page}`}
-                            onClick={() => window.dispatchEvent(new CustomEvent(VIEWER_PAGE_SYNC, {
-                              detail: { source: 'markdown', page },
-                            }))}
+                            title={hasSourcePdf ? `Jump PDF to page ${page}` : `Go to page ${page}`}
+                            onClick={() => navigate(page, hasSourcePdf)}
                           >
-                            Page {page}
+                            <IconPdf size={12} /> Page {page}
                           </button>
                         </div>
                       )
                     }
+                    {sections.every(section => !section.trim()) && <p className="empty-source-page">No extracted text on this page.</p>}
                     {sections.map((section, i) => (
                       <LazySection
                         key={i}

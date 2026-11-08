@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback, memo } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-import { clamp, SCROLL_DEBOUNCE_MS } from '../../hooks/useScrollSync'
-import { VIEWER_SCROLL } from '../../utils/viewerEvents'
+import { useScrollSync } from '../../hooks/useScrollSync'
+import PageNavigator from '../common/PageNavigator'
 import { PDF_DIM_BATCH as DIM_BATCH, PDF_RENDER_BUFFER as BUFFER } from '../../config'
 import Toast from '../Toast'
 import { IconLink, IconLinkBroken } from '../common/Icons'
@@ -17,6 +17,10 @@ interface Props {
   scale?: number
   scrollSyncEnabled?: boolean
   onToggleScrollSync?: () => void
+  pageSyncAvailable?: boolean
+  mappedPageCount?: number
+  onRequestPageMapping?: () => void
+  syncScope?: string
 }
 
 // Height of the padding-bottom on .pdf-page (keeps the page-number label visible).
@@ -57,7 +61,7 @@ function computeRenderRange(
   ]
 }
 
-function PDFViewer({ filename, scale = 1.0, scrollSyncEnabled = true, onToggleScrollSync }: Props) {
+function PDFViewer({ filename, scale = 1.0, scrollSyncEnabled = true, onToggleScrollSync, pageSyncAvailable = false, mappedPageCount = 0, onRequestPageMapping, syncScope }: Props) {
   const [pdf, setPdf] = useState<pdfjsLib.PDFDocumentProxy | null>(null)
   const [numPages, setNumPages] = useState(0)
   const [toast, setToast] = useState<string | null>(null)
@@ -70,17 +74,11 @@ function PDFViewer({ filename, scale = 1.0, scrollSyncEnabled = true, onToggleSc
   const canvasRefs = useRef<(HTMLCanvasElement | null)[]>([])
   const textLayerRefs = useRef<(HTMLDivElement | null)[]>([])
   const containerRef = useRef<HTMLDivElement>(null)
-  const isScrollingRef = useRef(false)
-  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const rafRef = useRef<number | undefined>(undefined)
   const loadingTaskRef = useRef<pdfjsLib.PDFDocumentLoadingTask | null>(null)
 
-  // Cancel any pending animation frame and scroll timeout on unmount.
-  // Also destroy the current PDF document to release its buffers.
+  // Release the current PDF document and worker buffers on unmount.
   useEffect(() => {
     return () => {
-      if (rafRef.current !== undefined) cancelAnimationFrame(rafRef.current)
-      if (scrollTimeoutRef.current !== undefined) clearTimeout(scrollTimeoutRef.current)
       void loadingTaskRef.current?.destroy()
       loadingTaskRef.current = null
       setPdf(prev => { void prev?.cleanup(); return null })
@@ -275,65 +273,40 @@ function PDFViewer({ filename, scale = 1.0, scrollSyncEnabled = true, onToggleSc
     setRenderRange(prev => (prev[0] === range[0] && prev[1] === range[1] ? prev : range))
   }, [pageDimensions, numPages])
 
-  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    const el = e.target as HTMLDivElement
-    if (rafRef.current) cancelAnimationFrame(rafRef.current)
-    rafRef.current = requestAnimationFrame(() => {
-      updateRenderRange()
-      if (isScrollingRef.current || !scrollSyncEnabled) return
-      const maxScroll = el.scrollHeight - el.clientHeight
-      if (maxScroll <= 0) return
-      window.dispatchEvent(new CustomEvent(VIEWER_SCROLL, {
-        detail: { source: 'pdf', percentage: clamp(el.scrollTop / maxScroll, 0, 1) }
-      }))
-    })
-  }, [updateRenderRange, scrollSyncEnabled])
+  const { handleScroll, currentPage, navigate } = useScrollSync({
+    enabled: scrollSyncEnabled, source: 'pdf', scope: syncScope ?? filename,
+    containerRef, pageAware: true,
+    layoutKey: `${filename}:${scale}:${numPages}:${pageDimensions.length}`,
+    onViewportChange: updateRenderRange,
+  })
 
-
-  useEffect(() => {
-    const onExtScroll = (e: Event) => {
-      const ev = e as CustomEvent
-      if (ev.detail.source !== 'markdown' || !containerRef.current || !scrollSyncEnabled) return
-      isScrollingRef.current = true
-      clearTimeout(scrollTimeoutRef.current)
-      const el = containerRef.current
-      const maxScroll = el.scrollHeight - el.clientHeight
-      if (maxScroll <= 0) { isScrollingRef.current = false; return }
-      el.scrollTo({ top: Math.round(clamp(ev.detail.percentage, 0, 1) * maxScroll), behavior: 'instant' })
-      scrollTimeoutRef.current = setTimeout(() => {
-        isScrollingRef.current = false
-        updateRenderRange()
-      }, SCROLL_DEBOUNCE_MS)
-    }
-    window.addEventListener(VIEWER_SCROLL, onExtScroll)
-    return () => window.removeEventListener(VIEWER_SCROLL, onExtScroll)
-  }, [scrollSyncEnabled, updateRenderRange])
+  const pageLinked = pageSyncAvailable && mappedPageCount === numPages
 
   return (
     <div className="pdf-viewer">
       {toast && <Toast message={toast} onClose={() => setToast(null)} />}
 
-      {/* Zoom is hosted in the panel header (see App.tsx) for layout
-          consistency with the Markdown viewer.  Only the scroll-sync
-          toggle stays here, since it's PDF-specific. */}
-      {onToggleScrollSync && (
-        <div className="pdf-controls">
+      {/* Page navigation and linking share the existing viewer toolbar. */}
+      <div className="pdf-controls">
+          <PageNavigator label="PDF" page={currentPage} total={numPages} onSelect={navigate} />
+          {onToggleScrollSync && (
           <div className="pdf-controls-right">
+            {onRequestPageMapping && <button type="button" className="pdf-sync-btn" title="Reconvert to add a source-page map" onClick={onRequestPageMapping}>Link pages…</button>}
             <button
               className={`pdf-sync-btn${scrollSyncEnabled ? ' active' : ''}`}
               onClick={onToggleScrollSync}
-              title="Toggle scroll synchronization"
+              title={pageLinked ? "Link source pages and relative position within each page" : "Approximate alignment by document scroll percentage; this view has no matching page map"}
               aria-pressed={scrollSyncEnabled}
             >
               {scrollSyncEnabled ? <IconLink size={14} /> : <IconLinkBroken size={14} />}
-              <span className="pdf-sync-label">Scroll sync</span>
+              <span className="pdf-sync-label">{pageLinked ? 'Page sync' : 'Approx. sync'}</span>
               <span className={`pdf-sync-status${scrollSyncEnabled ? ' on' : ' off'}`}>
                 {scrollSyncEnabled ? 'ON' : 'OFF'}
               </span>
             </button>
           </div>
+          )}
         </div>
-      )}
 
       <div className="pdf-container" ref={containerRef} onScroll={handleScroll}>
         {Array.from({ length: numPages }, (_, i) => {
@@ -342,6 +315,7 @@ function PDFViewer({ filename, scale = 1.0, scrollSyncEnabled = true, onToggleSc
             <div
               key={i}
               className="pdf-page"
+              data-viewer-page={i + 1}
               style={dims ? { minWidth: `${dims.width}px`, minHeight: `${dims.height + PAGE_PADDING_BOTTOM}px` } : undefined}
             >
               <canvas ref={el => { canvasRefs.current[i] = el }} />

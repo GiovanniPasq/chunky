@@ -11,6 +11,7 @@ from .pages import page_markdown
 
 @register_converter(
     name="pymupdf",
+    page_mapping=True,
     label="PyMuPDF",
     description="Fast, lightweight. Best for standard digital PDFs with selectable text.",
 )

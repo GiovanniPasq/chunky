@@ -15,6 +15,13 @@ from backend.utils.markdown import split_markdown
 
 
 class ConverterPageTests(unittest.TestCase):
+    def test_capabilities_advertise_page_mapping_for_supported_converters(self):
+        from backend.registry import registry
+        capabilities = {item['name']: item['page_mapping'] for item in registry.get_capabilities()['converters']}
+        self.assertEqual({name for name, enabled in capabilities.items() if enabled}, {'pymupdf', 'docling', 'liteparse', 'vlm'})
+        self.assertFalse(capabilities['markitdown'])
+        self.assertFalse(capabilities['cloud'])
+
     def test_native_converters_keep_blank_pages_and_original_page_numbers(self):
         with TemporaryDirectory() as folder:
             filename = Path(folder)/'three.pdf'

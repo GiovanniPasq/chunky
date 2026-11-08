@@ -50,6 +50,7 @@ export async function mockWorkspace(page: Page, chunkDelay = 0) {
         converters: [
           {
             name: 'pymupdf',
+            page_mapping: true,
             label: 'PyMuPDF',
             description: 'Fast conversion for searchable PDFs.',
           },
@@ -155,19 +156,23 @@ export async function openDocument(page: Page) {
   await page
     .getByRole('button', { name: 'Annual report.pdf', exact: true })
     .click()
-  await page.locator('.markdown-content h1').waitFor()
+  await page.locator('.markdown-content h1').first().waitFor()
 }
 
-function samplePdf(): Buffer {
-  const stream =
-    'BT /F1 22 Tf 50 720 Td (Annual report) Tj 0 -40 Td /F1 12 Tf (Document preparation and retrieval quality) Tj ET'
+export function samplePdf(heights = [792]): Buffer {
   const objects = [
     '<< /Type /Catalog /Pages 2 0 R >>',
-    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
-    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
-    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
-    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    `<< /Type /Pages /Kids [${heights.map((_, index) => `${3 + index * 3} 0 R`).join(' ')}] /Count ${heights.length} >>`,
   ]
+  heights.forEach((height, index) => {
+    const first = 3 + index * 3
+    const stream = 'BT /F1 22 Tf 50 720 Td (Annual report) Tj 0 -40 Td /F1 12 Tf (Document preparation and retrieval quality) Tj ET'
+    objects.push(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 ${height}] /Resources << /Font << /F1 ${first + 1} 0 R >> >> /Contents ${first + 2} 0 R >>`,
+      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+      `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    )
+  })
   let output = '%PDF-1.4\n'
   const offsets: number[] = []
   objects.forEach((object, index) => {
@@ -175,6 +180,6 @@ function samplePdf(): Buffer {
     output += `${index + 1} 0 obj\n${object}\nendobj\n`
   })
   const xref = output.length
-  output += `xref\n0 6\n0000000000 65535 f \n${offsets.map((offset) => `${String(offset).padStart(10, '0')} 00000 n \n`).join('')}trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`
+  output += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.map((offset) => `${String(offset).padStart(10, '0')} 00000 n \n`).join('')}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`
   return Buffer.from(output)
 }

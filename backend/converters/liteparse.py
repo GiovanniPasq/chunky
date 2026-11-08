@@ -15,6 +15,7 @@ from .pages import page_markdown
 
 @register_converter(
     name="liteparse",
+    page_mapping=True,
     label="LiteParse",
     description="LlamaIndex LiteParse — fast, model-free PDF-to-Markdown parsing.",
 )

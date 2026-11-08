@@ -8,8 +8,9 @@
 .pdf-controls {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
   padding: 9px 12px;
   min-height: 49px;
   background: var(--bg-main);
@@ -57,6 +58,7 @@
 .pdf-container {
   flex: 1;
   min-height: 0;
+  overflow-anchor: none;
   overflow-y: auto;
   overflow-x: auto;
   padding: 24px;
