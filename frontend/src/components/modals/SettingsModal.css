@@ -144,42 +144,6 @@
   margin-top: 2px;
 }
 
-.form-group select,
-.form-group input[type="number"],
-.form-group input[type="text"],
-.form-group input[type="password"] {
-  background: var(--bg-control);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  color: var(--text-primary);
-  padding: 9px 12px;
-  font-size: 13px;
-  font-weight: 500;
-  outline: none;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  font-family: inherit;
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.form-group select:hover,
-.form-group input:not(:disabled):hover {
-  border-color: var(--border-hover);
-}
-
-.form-group select:focus,
-.form-group input:focus {
-  border-color: var(--brand-primary);
-  box-shadow: 0 0 0 2px var(--brand-ring);
-}
-
-.form-group select:disabled,
-.form-group input:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-  background: var(--bg-subtle);
-}
-
 .form-group small {
   font-size: 11px;
   color: var(--text-muted);

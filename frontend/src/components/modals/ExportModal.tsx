@@ -44,19 +44,19 @@ export default function ExportModal({ filenames, onClose }: { filenames: string[
           <label><input type="checkbox" checked={options.include_pdfs} onChange={e => set('include_pdfs', e.target.checked)} /> Original PDFs</label>
         </fieldset>
         <label htmlFor="export-versions">Versions</label>
-        <select id="export-versions" value={options.versions} disabled={busy} onChange={e => set('versions', e.target.value as 'latest' | 'all')}>
+        <select className="ui-field" id="export-versions" value={options.versions} disabled={busy} onChange={e => set('versions', e.target.value as 'latest' | 'all')}>
           <option value="latest">Latest Markdown and its latest saved chunks</option>
           <option value="all">All saved versions</option>
         </select>
         <label htmlFor="export-destination">Destination</label>
-        <select id="export-destination" value={options.destination} disabled={busy} onChange={e => set('destination', e.target.value as 'download' | 'folder')}>
+        <select className="ui-field" id="export-destination" value={options.destination} disabled={busy} onChange={e => set('destination', e.target.value as 'download' | 'folder')}>
           <option value="download">Download ZIP to this computer</option>
           <option value="folder">Folder on the backend machine</option>
         </select>
         {options.destination === 'folder' && <>
           <p className="export-help">Export root: <code>{directory || 'Configured EXPORTS_DIR'}</code>. For Docker, this is a path inside the backend container.</p>
           <label htmlFor="export-folder">Subfolder (optional)</label>
-          <input id="export-folder" value={options.folder} disabled={busy} onChange={e => set('folder', e.target.value)} placeholder="e.g. rag-dataset" />
+          <input className="ui-field" type="text" id="export-folder" value={options.folder} disabled={busy} onChange={e => set('folder', e.target.value)} placeholder="e.g. rag-dataset" />
           <small>Each export creates a new folder. Configure the root with EXPORTS_DIR on the backend.</small>
         </>}
         <p className="export-help">Latest is determined by save time. A manifest lists included files, missing outputs, and stale chunk warnings.</p>
