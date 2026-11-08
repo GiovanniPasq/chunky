@@ -65,8 +65,12 @@ export default function SummaryReviewModal({
   const [progress, setProgress] = useState<SummaryGenerateProgress | null>(null)
   const generateAbortRef = useRef<AbortController | null>(null)
   const saveAbortRef = useRef<AbortController | null>(null)
+  const generationForceRef = useRef(false)
   const mountedRef = useRef(true)
-  useEffect(() => () => { mountedRef.current = false }, [])
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
 
   useEffect(() => {
     if (!isOpen || !documentName || !filename) return
@@ -99,45 +103,19 @@ export default function SummaryReviewModal({
     return () => { cancelled = true }
   }, [isOpen, documentName, filename])
 
-  useEffect(() => {
-    if (!isOpen) {
-      generateAbortRef.current?.abort()
-      generateAbortRef.current = null
-      saveAbortRef.current?.abort()
-      saveAbortRef.current = null
-    }
-  }, [isOpen])
-
-  // Failsafe transition.  In normal operation, ``runGenerate``'s
-  // post-await setState block flips view to ``'editing'`` once the SSE
-  // ``done`` event lands.  In edge cases — proxy/HMR weirdness or a
-  // promise that resolves at an unlucky React-scheduling moment — that
-  // transition has been observed to skip even though ``progress.stage``
-  // is already ``'done'``.  Detect the stuck state and force the
-  // transition by re-fetching the persisted summary directly.
-  useEffect(() => {
-    if (progress?.stage !== 'done' || view !== 'generating' || !documentName || !filename) return
-    let cancelled = false
-    apiGetSummary(filename, documentName)
-      .then(res => {
-        if (cancelled || !res) return
-        setResponse(res)
-        setEdited({
-          topic: res.summary.topic ?? '',
-          narrative: res.summary.narrative ?? '',
-        })
-        setJustGenerated(true)
-        setView('editing')
-      })
-      .catch(() => { /* swallow — the main runGenerate path will surface errors */ })
-    return () => { cancelled = true }
-  }, [progress?.stage, view, documentName, filename])
+  useEffect(() => () => {
+    generateAbortRef.current?.abort()
+    generateAbortRef.current = null
+    saveAbortRef.current?.abort()
+    saveAbortRef.current = null
+  }, [isOpen, documentName, filename])
 
   const runGenerate = useCallback(async (force: boolean) => {
     if (!documentName || !filename) return
     generateAbortRef.current?.abort()
     const ctrl = new AbortController()
     generateAbortRef.current = ctrl
+    generationForceRef.current = force
     setView('generating')
     setErrorMessage('')
     setProgress({ stage: 'idle', totalPieces: 0, completedExtractions: 0 })
@@ -165,13 +143,15 @@ export default function SummaryReviewModal({
       requestAnimationFrame(() => { bodyRef.current?.scrollTo({ top: 0 }) })
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return
-      if (!mountedRef.current) return
+      if (!mountedRef.current || ctrl.signal.aborted) return
       setLastFailedOp('generate')
       setErrorMessage(err instanceof Error ? err.message : 'Summary generation failed')
       setView('error')
     } finally {
-      if (generateAbortRef.current === ctrl) generateAbortRef.current = null
-      if (mountedRef.current) setProgress(null)
+      if (generateAbortRef.current === ctrl) {
+        generateAbortRef.current = null
+        if (mountedRef.current) setProgress(null)
+      }
     }
   }, [documentName, filename, settings])
 
@@ -195,7 +175,7 @@ export default function SummaryReviewModal({
       onClose()
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return
-      if (!mountedRef.current) return
+      if (!mountedRef.current || ctrl.signal.aborted) return
       setLastFailedOp('save')
       setErrorMessage(err instanceof Error ? err.message : 'Failed to save summary')
       setView('error')
@@ -212,7 +192,7 @@ export default function SummaryReviewModal({
     if (lastFailedOp === 'save') {
       handleConfirm()
     } else {
-      runGenerate(false)
+      runGenerate(lastFailedOp === 'generate' && generationForceRef.current)
     }
   }, [filename, lastFailedOp, onClose, handleConfirm, runGenerate])
 
@@ -302,7 +282,7 @@ export default function SummaryReviewModal({
                 title={
                   lastFailedOp === 'save'
                     ? 'Retry saving your edits'
-                    : 'Reload the cached summary'
+                    : 'Retry summary generation'
                 }
               >
                 {lastFailedOp === 'save' ? 'Retry save' : 'Try again'}
@@ -312,15 +292,6 @@ export default function SummaryReviewModal({
 
           {view === 'editing' && (
             <>
-              {justGenerated && !edited.topic && !edited.narrative && (
-                <div className="summary-warning-banner">
-                  ⚠ The generated summary is empty.  Every section extraction returned
-                  no content — most often this means the LLM endpoint is unreachable or
-                  the configured model isn't installed.  Check the backend log for the
-                  exact error, fix the model setting, and click <strong>Regenerate</strong>.
-                </div>
-              )}
-
               {justGenerated && (edited.topic || edited.narrative) && (
                 <div className="summary-info-banner">
                   ✓ Summary ready — review the fields below, edit anything that looks wrong,
@@ -337,8 +308,9 @@ export default function SummaryReviewModal({
               )}
 
               <div className="form-group">
-                <label>Topic</label>
+                <label htmlFor="summary-topic">Topic</label>
                 <input
+                  id="summary-topic"
                   type="text"
                   value={edited.topic}
                   onChange={e => setEdited({ ...edited, topic: e.target.value })}
@@ -347,12 +319,13 @@ export default function SummaryReviewModal({
               </div>
 
               <div className="form-group">
-                <label>Narrative</label>
+                <label htmlFor="summary-narrative">Narrative</label>
                 <textarea
+                  id="summary-narrative"
                   value={edited.narrative}
                   onChange={e => setEdited({ ...edited, narrative: e.target.value })}
                   rows={10}
-                  placeholder="A ~200-word coherent summary covering the whole document in source order."
+                  placeholder="A concise factual summary covering the document in source order."
                 />
               </div>
 

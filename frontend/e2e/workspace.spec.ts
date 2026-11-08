@@ -404,3 +404,70 @@ test('Alt/Option arrows navigate focused document rows and respect filters and d
   await page.keyboard.press('Alt+ArrowDown')
   await expect(page.locator('.workspace-context h1')).toHaveText('Unconverted.pdf')
 })
+
+test('generates and saves a reviewed summary before previewing Markdown enrichment', async ({ page }) => {
+  let summary: Record<string, unknown> | null = null
+  let saved = false
+  const record = (topic: string, narrative: string) => ({
+    filename: 'Annual report_pymupdf4llm.md', doc_stem: 'Annual report',
+    summary: { topic, narrative }, status: { user_edited: saved, generated_at: '2026-11-08T00:00:00Z' },
+  })
+  await page.route('**/api/enrich/summary?*', route => summary
+    ? route.fulfill({ json: summary })
+    : route.fulfill({ status: 404, json: { detail: 'No summary' } }))
+  await page.route('**/api/enrich/summary', async route => {
+    const fields = route.request().postDataJSON().summary
+    saved = true
+    summary = record(fields.topic, fields.narrative)
+    return route.fulfill({ json: summary })
+  })
+  await page.route('**/api/enrich/summary/generate', async route => {
+    summary = record('Annual report', 'A factual summary of the annual report.')
+    return route.fulfill({ contentType: 'text/event-stream', body: `data: ${JSON.stringify({ type: 'done', summary })}\n\n` })
+  })
+  let pipeline: Record<string, unknown> | null = null
+  await page.route('**/api/enrich/markdown/pipeline', async route => {
+    pipeline = route.request().postDataJSON()
+    return route.fulfill({ contentType: 'text/event-stream', body: `data: ${JSON.stringify({
+      type: 'done', enriched_content: markdown + '\nReviewed.',
+      stats: { pieces: 1, cached_pieces: 0, failed_pieces: [], cleanup_report: {} },
+    })}\n\n` })
+  })
+  await page.goto('/')
+  await openDocument(page)
+  await page.getByRole('button', { name: 'Enrich', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Review document summary' })
+  await dialog.getByRole('button', { name: 'Generate summary', exact: true }).click()
+  await expect(dialog.getByLabel('Topic', { exact: true })).toHaveValue('Annual report')
+  await dialog.getByLabel('Narrative', { exact: true }).fill('Reviewed factual summary.')
+  await dialog.getByRole('button', { name: 'Confirm & enrich', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'Review enrichment changes' })).toBeVisible()
+  expect(saved).toBe(true)
+  expect(summary?.summary).toMatchObject({ narrative: 'Reviewed factual summary.' })
+  expect(pipeline).toMatchObject({ use_summary: true, filename: 'Annual report_pymupdf4llm.md' })
+})
+
+test('retries a failed summary regeneration without silently using the old cache', async ({ page }) => {
+  const record = { filename: 'Annual report_pymupdf4llm.md', doc_stem: 'Annual report',
+    summary: { topic: 'Old summary', narrative: 'Previous reviewed narrative.' },
+    status: { user_edited: false, generated_at: '2026-11-08T00:00:00Z' } }
+  const forced: boolean[] = []
+  await page.route('**/api/enrich/summary?*', route => route.fulfill({ json: record }))
+  await page.route('**/api/enrich/summary/generate', async route => {
+    forced.push(route.request().postDataJSON().force)
+    const event = forced.length === 1
+      ? { type: 'error', status: 502, message: 'Summary generation did not complete. Please retry.' }
+      : { type: 'done', summary: { ...record, summary: { topic: 'New summary', narrative: 'New narrative.' } } }
+    return route.fulfill({ contentType: 'text/event-stream', body: `data: ${JSON.stringify(event)}\n\n` })
+  })
+  await page.goto('/')
+  await openDocument(page)
+  await page.getByRole('button', { name: 'Enrich', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Review document summary' })
+  await expect(dialog.getByLabel('Topic', { exact: true })).toHaveValue('Old summary')
+  await dialog.getByRole('button', { name: 'Regenerate', exact: true }).click()
+  await expect(dialog.getByText('Summary generation did not complete. Please retry.', { exact: true })).toBeVisible()
+  await dialog.getByRole('button', { name: 'Try again', exact: true }).click()
+  await expect(dialog.getByLabel('Topic', { exact: true })).toHaveValue('New summary')
+  expect(forced).toEqual([true, true])
+})

@@ -146,23 +146,7 @@
   }
 }
 
-/* Status hints for partial generation and user-edited summaries. */
-
-.summary-warning-banner {
-  background: var(--status-warning-bg);
-  border: 1px solid var(--status-warning-border);
-  color: var(--status-warning);
-  padding: 10px 14px;
-  border-radius: var(--radius-lg);
-  font-size: 12.5px;
-  line-height: 1.5;
-  font-weight: 500;
-}
-
-.summary-warning-banner strong {
-  font-weight: 600;
-  color: var(--status-warning);
-}
+/* Status hints for generated and user-edited summaries. */
 
 .summary-info-banner {
   background: var(--bg-inset);
