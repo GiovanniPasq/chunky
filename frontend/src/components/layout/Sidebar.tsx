@@ -20,6 +20,7 @@ import {
   IconClose,
 } from '../common/Icons'
 import StatusBadge from '../common/StatusBadge'
+import ConfirmDialog from '../modals/ConfirmDialog'
 import { getDocumentStatus, type DocumentStage } from '../../utils/documentStatus'
 import './Sidebar.css'
 
@@ -87,6 +88,7 @@ export default function Sidebar({
   const [selectMode, setSelectMode] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [deleting, setDeleting] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<string[] | null>(null)
   const [bulkOp, setBulkOp] = useState<BulkOpState | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const [warningTip, setWarningTip] = useState<{ x: number; y: number; text: string } | null>(null)
@@ -266,16 +268,17 @@ export default function Sidebar({
     }
   }
 
-  const handleDeleteSelected = async () => {
-    if (visibleSelectedCount === 0) return
+  const handleConfirmDeleteSelected = async () => {
+    if (!pendingDelete?.length || deleting) return
     setDeleting(true)
     try {
-      const result = await onDelete(selectedVisible)
+      const result = await onDelete(pendingDelete)
       const failed = new Set(Object.keys(result.failed))
       setSelected(failed)
       lastSelectedDocRef.current = null
       if (failed.size === 0) setSelectMode(false)
     } finally {
+      setPendingDelete(null)
       setDeleting(false)
     }
   }
@@ -326,6 +329,19 @@ export default function Sidebar({
 
   return (
     <div className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+
+      <ConfirmDialog
+        isOpen={pendingDelete !== null}
+        title={pendingDelete?.length === documents.length ? 'Delete all documents?' : 'Delete selected documents?'}
+        onDismiss={() => setPendingDelete(null)}
+        dismissible={!deleting}
+        actions={[
+          { label: 'Cancel', onClick: () => setPendingDelete(null), disabled: deleting },
+          { label: deleting ? 'Deleting…' : 'Delete documents', onClick: handleConfirmDeleteSelected, variant: 'danger', disabled: deleting },
+        ]}
+      >
+        <p>Are you sure you want to delete {pendingDelete?.length} document{pendingDelete?.length === 1 ? '' : 's'}? Their Markdown, saved chunks, summaries, and checkpoints will also be permanently deleted. This cannot be undone.</p>
+      </ConfirmDialog>
 
       <input
         ref={fileInputRef}
@@ -483,7 +499,7 @@ export default function Sidebar({
                   <button
                     type="button"
                     className="bulk-btn delete-selected"
-                    onClick={handleDeleteSelected}
+                    onClick={() => setPendingDelete([...selectedVisible])}
                     disabled={visibleSelectedCount === 0 || isBusy}
                   >
                     {deleting ? (

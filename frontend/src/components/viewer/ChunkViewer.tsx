@@ -166,9 +166,12 @@ function ChunkViewer({
     if (newCount !== prevChunkCountRef.current) {
       prevChunkCountRef.current = newCount
       setSelectedChunks(new Set())
+      setPendingOp(null)
       lastSelectedChunkRef.current = null
     }
   }, [chunks])
+
+  useEffect(() => { setPendingOp(null) }, [documentName, mdFilename])
 
   // ── Scroll sync ────────────────────────────────────────────────────────────
 
@@ -208,10 +211,8 @@ function ChunkViewer({
   }
 
   const handleDeleteSelected = () => {
-    if (isEnrichmentActive) { setPendingOp({ type: 'delete-bulk', indices: new Set(selectedChunks) }); return }
-    onDeleteChunks(selectedChunks)
-    setSelectedChunks(new Set())
-    lastSelectedChunkRef.current = null
+    if (selectedChunks.size === 0) return
+    setPendingOp({ type: 'delete-bulk', indices: new Set(selectedChunks) })
   }
 
   const handleDeleteChunk = (index: number) => {
@@ -219,8 +220,8 @@ function ChunkViewer({
     onDeleteChunk(index)
   }
 
-  const handleConfirmInterrupt = () => {
-    handleInterruptChunkEnrich()
+  const handleConfirmOperation = () => {
+    if (isEnrichmentActive) handleInterruptChunkEnrich()
     const op = pendingOp
     setPendingOp(null)
     if (!op) return
@@ -273,11 +274,14 @@ function ChunkViewer({
         errorMessage={chunkEnrichOp?.errorMessage}
       />
 
-      <ConfirmDialog isOpen={!!pendingOp} title="Enrichment in progress" onDismiss={() => setPendingOp(null)} actions={[
+      <ConfirmDialog isOpen={!!pendingOp} title={pendingOp?.type === 'delete-bulk'
+        ? pendingOp.indices.size === chunks?.length ? 'Delete all chunks?' : 'Delete selected chunks?'
+        : 'Enrichment in progress'} onDismiss={() => setPendingOp(null)} actions={[
         { label: 'Cancel', onClick: () => setPendingOp(null) },
-        { label: 'Interrupt and continue', onClick: handleConfirmInterrupt, variant: 'danger' },
+        { label: pendingOp?.type === 'delete-bulk' ? isEnrichmentActive ? 'Interrupt and delete' : 'Delete chunks' : 'Interrupt and continue', onClick: handleConfirmOperation, variant: 'danger' },
       ]}>
-        <p>Enrichment is running. Continuing will interrupt it before applying your changes.</p>
+        {pendingOp?.type === 'delete-bulk' && <p>Are you sure you want to delete {pendingOp.indices.size} chunk{pendingOp.indices.size === 1 ? '' : 's'} from the current chunk set?</p>}
+        {isEnrichmentActive && <p>Enrichment is running. Continuing will interrupt it before applying your changes.</p>}
       </ConfirmDialog>
 
       {editingChunkIndex !== null && chunks?.[editingChunkIndex] && (

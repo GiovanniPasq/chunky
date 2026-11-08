@@ -25,12 +25,13 @@ interface Props {
   children: ReactNode
   /** Footer buttons, left-to-right.  Most dialogs have 2 (cancel + confirm). */
   actions: ConfirmDialogAction[]
+  dismissible?: boolean
 }
 
 /** Shared confirmation flow with managed focus, dismissal, and actions. */
-export default function ConfirmDialog({ isOpen, title = 'Confirm changes', onDismiss, children, actions }: Props) {
+export default function ConfirmDialog({ isOpen, title = 'Confirm changes', onDismiss, children, actions, dismissible = true }: Props) {
   return (
-    <Modal open={isOpen} onClose={onDismiss} title={title}>
+    <Modal open={isOpen} onClose={onDismiss} title={title} dismissible={dismissible}>
       <div className="ui-modal-body">{children}</div>
       <div className="ui-modal-footer">
         {actions.map((action, index) => (
