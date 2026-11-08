@@ -6,9 +6,9 @@ Prefix: /api
 GET /api/capabilities
     Returns all registered chunker libraries + strategies and converters.
     The frontend calls this once on startup to build its UI dynamically.
-    No frontend changes are needed when new strategies or converters are added
-    to the backend — as long as they are decorated with @register_chunker
-    or @register_converter, they will appear here automatically.
+    Decorators populate the UI choices automatically. Execution still requires
+    request-enum, dispatch, and naming registrations; parameter units and
+    supported controls are shared with the frontend chunkingOptions helper.
 
 Import order matters: the chunker and converter modules must be imported
 before this router is mounted so that their decorators have already run and

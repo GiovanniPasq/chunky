@@ -5,8 +5,8 @@ Usage
 -----
 Decorate each chunker method with @register_chunker and each converter
 class with @register_converter. The registry then exposes get_capabilities()
-which is served by the /api/capabilities endpoint — no frontend changes
-needed when new strategies or libraries are added.
+which is served by the /api/capabilities endpoint. Choices are discovered
+dynamically; execution wiring and parameter semantics remain explicit.
 
 Example
 -------

@@ -42,15 +42,16 @@ As [NVIDIA's research](https://developer.nvidia.com/blog/finding-the-best-chunki
 
 | | |
 |---|---|
-| 📄 **Document review workspace** | Compare PDF, Markdown, and chunks side by side before indexing |
-| ✨ **Multiple conversion engines** | PyMuPDF, Docling, MarkItDown, LiteParse, VLM, and Cloud API support |
-| 📤 **Bulk export** | Export selected documents or the whole workspace as a ZIP or to a backend folder |
-| 📦 **Batch processing** | Convert, enrich, and chunk multiple documents from the sidebar |
-| ✂️ **Chunking strategy comparison** | Test LangChain, Chonkie, and Docling splitters with configurable size and overlap |
-| 💾 **Saved chunk versions** | Persist and reload chunk sets by Markdown source and splitter configuration |
-| 🧠 **Markdown enrichment** | Clean conversion artifacts with deterministic cleanup plus LLM correction |
-| ✨ **Chunk enrichment** | Generate context-aware titles, summaries, keywords, and retrieval questions |
-| 🔌 **Pluggable backend** | Add converters or splitters through the registry without frontend changes |
+| **Document review workspace** | Compare PDF, Markdown, and chunks side by side before indexing |
+| **Multiple conversion engines** | PyMuPDF, Docling, MarkItDown, LiteParse, VLM, and Cloud API support |
+| **Linked page navigation** | Navigate PDF and Markdown pages together, with page-aware scroll synchronization |
+| **Bulk export** | Export selected documents or the whole workspace as a ZIP or to a backend folder |
+| **Batch processing** | Convert, enrich, and chunk multiple documents from the sidebar |
+| **Chunking strategy comparison** | Test LangChain, Chonkie, and Docling splitters with configurable size and overlap |
+| **Saved chunk versions** | Persist and reload chunk sets by Markdown source and splitter configuration |
+| **Markdown enrichment** | Clean conversion artifacts with deterministic cleanup plus LLM correction |
+| **Chunk enrichment** | Generate context-aware titles, summaries, keywords, and retrieval questions |
+| **Pluggable backend** | Discover registered converters and splitters dynamically through the capabilities API |
 
 Saved chunks retain the SHA-256 revision of the Markdown that produced them.
 If the Markdown changes, the saved set remains available for inspection but
@@ -274,31 +275,16 @@ The `questions` field addresses a complementary problem: pre-generating the ques
 
 ## Extending Chunky
 
-The converter and chunker layers use a **decorator-based capability registry**. After a backend implementation is added to the relevant enum and dispatch map, its decorator exposes it through `/api/capabilities`; no frontend changes are needed.
+The capability registry supplies converter/library/strategy choices and labels.
+Request validation, worker dispatch, saved-file naming, and parameter semantics
+still need the registrations below. Registering a decorator alone does not make
+an implementation executable.
 
 ### Adding a new converter
 
-Every converter inherits from `PDFConverter` (`backend/converters/base.py`):
-
-```python
-from abc import ABC, abstractmethod
-from pathlib import Path
-
-class PDFConverter(ABC):
-    @abstractmethod
-    def convert(self, pdf_path: Path, total_pages: int | None = None) -> str:
-        """Convert a PDF to a Markdown string."""
-
-    def validate_path(self, pdf_path: Path) -> None:
-        if not pdf_path.exists():
-            raise FileNotFoundError(f"PDF file not found: {pdf_path}")
-```
-
-Converters that emit the common `<!-- page-marker:N -->` format can advertise
-`page_mapping=True` in `@register_converter`. This enables the reconversion action
-for older output; actual page linking still depends on the saved document's markers.
-
-**1. Create a new file in `backend/converters/` and decorate the class:**
+Create a `PDFConverter` subclass in `backend/converters/`. Keep heavy imports and
+parser initialization lazy. `convert(pdf_path, total_pages=None)` must return the
+complete Markdown string and call `validate_path` before reading the PDF.
 
 ```python
 # backend/converters/my_converter.py
@@ -313,7 +299,7 @@ from .base import PDFConverter
 )
 class MyConverter(PDFConverter):
     def __init__(self) -> None:
-        from my_library import MyParser
+        from my_library import MyParser  # replace with your library's actual API
         self._parser = MyParser()
 
     def convert(self, pdf_path: Path, total_pages: int | None = None) -> str:
@@ -321,31 +307,80 @@ class MyConverter(PDFConverter):
         return self._parser.to_markdown(str(pdf_path))
 ```
 
-**2. Add its wire name to `ConverterType` in `backend/models/schemas.py` and its class to `_CONVERTER_MAP` in `backend/services/document_service.py`.**
+1. Add `my_converter = "my_converter"` to `ConverterType` in
+   `backend/models/schemas.py`.
+2. Import the class and add `ConverterType.my_converter: MyConverter` to
+   `_CONVERTER_MAP` in `backend/services/document_service.py`. Converters needing
+   request-specific options also need schema fields and `_build_converter` wiring.
+3. Add `"my_converter": "myconverter"` to `CONVERTER_NORMALIZATION` in
+   `backend/utils/naming.py`. This keeps Markdown variants, ownership checks,
+   saved chunks, and bulk export associated with the original document.
+4. Import the module in `backend/routers/capabilities_router.py` so its decorator
+   runs before capability discovery. The worker must also import the class
+   through its dispatch module; a router-only import does not wire execution.
+5. Add required dependencies to `pyproject.toml` and `requirements.txt`, update
+   `uv.lock`, and test conversion, preview, variant listing, and export.
 
-**3. Import it in `capabilities_router.py`:**
+For page-aware output, use `page_markdown` from `backend/converters/pages.py` with
+`(physical_page_number, markdown)` pairs and the total source-page count. It adds
+`<!-- page-marker:N -->` comments and preserves blank or missing pages. Advertise
+`page_mapping=True` in `@register_converter` only when the adapter produces this
+mapping. Actual linking is checked against the saved Markdown; the flag enables
+reconversion of older output. Keep structured items on their source pages without
+duplicating their text across page boundaries.
+
+### Adding a strategy to an existing chunker
+
+Add a decorated method **inside** the existing chunker class. For example, this
+character-based strategy belongs inside `LangChainChunker` and uses its existing
+imports and `build_chunks` helper:
 
 ```python
-import backend.converters.my_converter  # noqa: F401 — side-effect import
-```
-
-Done. The new converter appears automatically in `/api/capabilities` and the UI.
-
-### Adding a new chunker strategy
-
-```python
-from backend.registry import register_chunker
-
 @register_chunker(
-    library="my_lib",
-    library_label="My Library",
-    strategy="my_strategy",
-    label="My Strategy",
-    description="Short description shown in the UI.",
+    library="langchain",
+    library_label="LangChain",
+    strategy="custom_recursive",
+    label="Custom Recursive",
+    description="Splits paragraphs and lines using a character budget.",
 )
-def _chunk_my_strategy(self, request: ChunkRequest) -> list[ChunkItem]:
-    splits = my_chunker.split(request.content, request.chunk_size)
-    return self.build_chunks(request.content, splits, request.chunk_overlap)
+def _split_custom_recursive(self, request: ChunkRequest) -> list[ChunkItem]:
+    splitter = RecursiveCharacterTextSplitter(
+        separators=["\n\n", "\n", " ", ""],
+        chunk_size=request.chunk_size,
+        chunk_overlap=request.chunk_overlap,
+    )
+    return self.build_chunks(
+        request.content, splitter.split_text(request.content),
+        char_overlap=request.chunk_overlap,
+    )
 ```
 
-Import the module in `capabilities_router.py` and add the strategy to the chunker's `_DISPATCH` table. The strategy appears in the UI automatically.
+Add `custom_recursive = "custom_recursive"` to `ChunkerType`, then add
+`ChunkerType.custom_recursive: _split_custom_recursive` to that class's `_DISPATCH`
+table. Existing chunker modules are already imported by capability discovery.
+
+### Adding a chunker library
+
+Implement `TextChunker.chunk(request)` in `backend/chunkers/`, then add the library
+to `ChunkerLibrary`, export its class from `backend/chunkers/__init__.py`, and wire
+it into `_LIBRARY_MAP` in `backend/services/chunking_service.py`. Import its module
+in `capabilities_router.py` and add its token to `KNOWN_LIBRARIES` in
+`backend/utils/naming.py`. Use a lowercase alphanumeric library token such as
+`mylib`; filenames separate the library and algorithm with a hyphen.
+
+For any new strategy or library, keep `params_used_by` in `backend/utils/naming.py`
+and `chunkingOptions` in `frontend/src/utils/chunkingOptions.ts` consistent with
+its actual size units and supported overlap. Those rules control validation,
+settings inputs, cache signatures, and saved-version matching. The example above
+uses the existing LangChain character/overlap defaults; token-, row-, or
+model-defined strategies need corresponding rules and tests.
+
+Chunk offsets must be Python character indices into the original Markdown,
+with an exclusive `end`. `build_chunks` accepts **character** overlap, not token
+or byte counts. Token/byte strategies must map boundaries back to the source.
+If no contiguous span is available, preserve `metadata.source_span_available:
+false` with `start: 0, end: 0`; merge extra metadata instead of replacing it.
+Test Unicode, overlap, source spans, ignored parameters, and saved-version reloads.
+
+Frontend actions use `FeatureIcon`: Markdown for conversion, scissors for
+chunking, and sparkles for enrichment. Reuse it when adding new actions.
