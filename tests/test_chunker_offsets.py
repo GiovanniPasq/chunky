@@ -1,5 +1,6 @@
 import re
 import unittest
+from unittest.mock import patch
 
 from backend.chunkers.base import TextChunker
 from backend.chunkers.langchain_chunker import LangChainChunker
@@ -18,6 +19,17 @@ class ChunkerOffsetTests(unittest.TestCase):
                 normalize = lambda value: re.sub(r'\s+', ' ', value).strip()
                 self.assertEqual(normalize(source[chunk.start:chunk.end]), normalize(chunk.content))
             self.assertGreater(result[-1].start, source.index('## Next') - 1)
+
+    def test_markdown_header_metadata_preserves_unavailable_source_span(self) -> None:
+        from langchain_core.documents import Document
+        transformed = Document(page_content='Normalized table summary.', metadata={'Header 1': 'Title'})
+        with patch('backend.chunkers.langchain_chunker.MarkdownHeaderTextSplitter.split_text', return_value=[transformed]):
+            chunk = LangChainChunker().chunk(ChunkRequest(
+                content='# Title\n\n| Count |\n| --- |\n| 7 |', chunker_type=ChunkerType.markdown,
+            ))[0]
+        self.assertEqual((chunk.start, chunk.end), (0, 0))
+        self.assertFalse(chunk.metadata['source_span_available'])
+        self.assertEqual(chunk.metadata['Header 1'], 'Title')
 
     def test_repeated_short_chunks_advance_even_with_large_overlap(self) -> None:
         chunks = TextChunker.build_chunks('one one one', ['one', 'one', 'one'], 20)

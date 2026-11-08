@@ -162,7 +162,7 @@ class LangChainChunker(TextChunker):
         )
         # Preserve header metadata produced by MarkdownHeaderTextSplitter.
         for chunk, doc in zip(chunks, docs):
-            chunk.metadata = doc.metadata
+            chunk.metadata.update(doc.metadata)
         return chunks
 
     # ------------------------------------------------------------------
