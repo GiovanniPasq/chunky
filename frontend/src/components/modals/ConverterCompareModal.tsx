@@ -1,3 +1,4 @@
+import FeatureIcon from '../common/FeatureIcon'
 import Modal from '../common/Modal'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
@@ -348,7 +349,7 @@ export default function ConverterCompareModal({ isOpen, filename, settings, onCl
               </button>
             </div>
             <button className="compare-preview-btn" onClick={handlePreview} disabled={loading || !prefsReady}>
-              {loading ? 'Previewing…' : prefsReady ? 'Preview' : 'Loading…'}
+              <FeatureIcon feature="convert" size={14} /> {loading ? 'Previewing…' : prefsReady ? 'Preview' : 'Loading…'}
             </button>
           </div>
 

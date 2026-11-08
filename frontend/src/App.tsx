@@ -1,3 +1,4 @@
+import FeatureIcon from './components/common/FeatureIcon'
 import { useState, useEffect, useCallback, useRef, useMemo, type CSSProperties } from 'react'
 import Sidebar from './components/layout/Sidebar'
 import WorkspaceWelcome from './components/layout/WorkspaceWelcome'
@@ -16,11 +17,9 @@ import {
 import {
   IconPdf,
   IconMarkdown,
-  IconSparkles,
   IconSpinner,
   IconClose,
   IconCompare,
-  IconLayers,
 } from './components/common/Icons'
 import MarkdownViewer from './components/viewer/MarkdownViewer'
 import ChunkViewer from './components/viewer/ChunkViewer'
@@ -627,7 +626,7 @@ export default function App() {
           <h2>Markdown not found</h2>
           <p>This document hasn't been converted yet.</p>
           <button onClick={handleConvert} disabled={converting} className="btn-primary">
-            <IconSparkles size={16} /> Convert with {converterLabel}
+            <FeatureIcon feature="convert" size={16} /> Convert with {converterLabel}
           </button>
         </div>
       )
@@ -823,7 +822,7 @@ export default function App() {
                 <ViewTabs label="Document view" value={compactView} onChange={handleCompactView} className="compact-view-tabs" items={[
                   { value: 'pdf', label: 'Source', icon: <IconPdf size={14} /> },
                   { value: 'markdown', label: 'Markdown', icon: <IconMarkdown size={14} /> },
-                  { value: 'chunks', label: 'Chunks', icon: <IconLayers size={14} />, disabled: !documentData.has_markdown },
+                  { value: 'chunks', label: 'Chunks', icon: <FeatureIcon feature="chunk" size={14} />, disabled: !documentData.has_markdown },
                 ]} />
               )}
               <div className={`viewers${compact ? ' viewers--compact' : ''}`} style={{ '--split-pct': `${splitPct}%` } as CSSProperties}>
@@ -892,7 +891,7 @@ export default function App() {
                             <h2>No PDF available</h2>
                             <p>This document only has a Markdown file.</p>
                             <button onClick={handleConvertMdToPdf} className="btn-primary">
-                              <IconSparkles size={16} /> Convert to PDF
+                              <FeatureIcon feature="convert" size={16} /> Convert to PDF
                             </button>
                           </>
                         )}

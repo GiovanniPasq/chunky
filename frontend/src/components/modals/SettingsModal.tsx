@@ -1,3 +1,5 @@
+import { IconWarning } from '../common/Icons'
+import FeatureIcon from '../common/FeatureIcon'
 import Modal from '../common/Modal'
 import Button from '../common/Button'
 import ViewTabs from '../common/ViewTabs'
@@ -143,9 +145,9 @@ export default function SettingsModal({ isOpen, onClose, onSave, current, hasAct
         {/* Error state */}
         {loadState === 'error' && (
           <div className="caps-state caps-error">
-            <span className="caps-error-icon">⚠️</span>
+            <span className="caps-error-icon"><IconWarning size={32} /></span>
             <p>Could not reach the server.<br />Check that the backend is running.</p>
-            <button className="btn-retry" onClick={fetchCaps}>↺ Retry</button>
+            <button className="btn-retry" onClick={fetchCaps}>Retry</button>
           </div>
         )}
 
@@ -154,9 +156,9 @@ export default function SettingsModal({ isOpen, onClose, onSave, current, hasAct
           <>
             {/* Tab bar */}
             <ViewTabs label="Settings section" value={activeTab} onChange={setActiveTab} variant="segmented" className="settings-tabs" items={[
-              { value: 'conversion', label: 'Conversion' },
-              { value: 'chunking', label: 'Chunking' },
-              { value: 'enrichment', label: 'Enrichment' },
+              { value: 'conversion', label: 'Conversion', icon: <FeatureIcon feature="convert" size={13} /> },
+              { value: 'chunking', label: 'Chunking', icon: <FeatureIcon feature="chunk" size={13} /> },
+              { value: 'enrichment', label: 'Enrichment', icon: <FeatureIcon feature="enrich" size={13} /> },
             ]} />
 
             <div className="modal-body">

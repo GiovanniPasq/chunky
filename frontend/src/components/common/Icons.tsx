@@ -48,28 +48,6 @@ export function IconSidebarCollapse({ size = 18, ...props }: IconProps) {
   )
 }
 
-export function IconSidebarExpand({ size = 18, ...props }: IconProps) {
-  return (
-    <svg
-      aria-hidden="true"
-      focusable="false"
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      {...props}
-    >
-      <rect width="18" height="18" x="3" y="3" rx="2" />
-      <path d="M9 3v18" />
-      <path d="m13 9 3 3-3 3" />
-    </svg>
-  )
-}
-
 export function IconFile({ size = 16, ...props }: IconProps) {
   return (
     <svg
@@ -292,29 +270,6 @@ export function IconSave({ size = 16, ...props }: IconProps) {
   )
 }
 
-export function IconRefresh({ size = 16, ...props }: IconProps) {
-  return (
-    <svg
-      aria-hidden="true"
-      focusable="false"
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      {...props}
-    >
-      <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-      <path d="M3 3v5h5" />
-      <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
-      <path d="M16 21h5v-5" />
-    </svg>
-  )
-}
-
 export function IconSettings({ size = 16, ...props }: IconProps) {
   return (
     <svg
@@ -359,7 +314,7 @@ export function IconMerge({ size = 16, ...props }: IconProps) {
   )
 }
 
-export function IconLayers({ size = 16, ...props }: IconProps) {
+export function IconScissors({ size = 16, ...props }: IconProps) {
   return (
     <svg
       aria-hidden="true"
@@ -374,9 +329,19 @@ export function IconLayers({ size = 16, ...props }: IconProps) {
       strokeLinejoin="round"
       {...props}
     >
-      <polygon points="12 2 2 7 12 12 22 7 12 2" />
-      <polyline points="2 17 12 22 22 17" />
-      <polyline points="2 12 12 17 22 12" />
+      <circle cx="6" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="m8.12 8.12 12.76 12.76M14 14l7-11M8.12 15.88 12 12" />
+    </svg>
+  )
+}
+
+export function IconWarning({ size = 16, ...props }: IconProps) {
+  return (
+    <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24"
+      fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="m10.3 3.9-8.1 14a2 2 0 0 0 1.7 3h16.2a2 2 0 0 0 1.7-3l-8.1-14a2 2 0 0 0-3.4 0Z" />
+      <path d="M12 9v4m0 4h.01" />
     </svg>
   )
 }

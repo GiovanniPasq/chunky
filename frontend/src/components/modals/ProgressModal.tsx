@@ -1,3 +1,4 @@
+import { IconWarning } from '../common/Icons'
 import Modal from '../common/Modal'
 import Button from '../common/Button'
 import './ProgressModal.css'
@@ -25,7 +26,7 @@ export default function ProgressModal({ isOpen, title, detail, current, total, o
 
         <div className="progress-card-body">
           {errorMessage ? (
-            <p className="progress-error">⚠️ {errorMessage}</p>
+            <p className="progress-error"><IconWarning size={14} /> {errorMessage}</p>
           ) : (
             <>
               {detail && <p className="progress-detail">{detail}</p>}

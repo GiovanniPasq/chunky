@@ -7,9 +7,9 @@ const source = [
   '# Last page\n\n' + Array(35).fill('Third page content with a different rendered height from the original PDF.').join('\n\n'),
 ].map((body, index) => `<!-- page-marker:${index + 1} -->\n${body}`).join('\n\n---\n\n')
 
-async function workspace(page: Page, content = source) {
+async function workspace(page: Page, content = source, heights = [792, 1100, 850]) {
   await mockWorkspace(page)
-  await page.route('**/api/pdf/*', route => route.fulfill({ contentType: 'application/pdf', body: samplePdf([792, 1100, 850]) }))
+  await page.route('**/api/pdf/*', route => route.fulfill({ contentType: 'application/pdf', body: samplePdf(heights) }))
   await page.route('**/api/document/*', route => route.fulfill({ json: {
     pdf_filename: 'Annual report.pdf', md_filename: 'Annual report_pymupdf4llm.md',
     md_content: content, has_pdf: true, has_markdown: true,
@@ -19,7 +19,7 @@ async function workspace(page: Page, content = source) {
   } }))
   await page.goto('/')
   await openDocument(page)
-  await expect(page.getByRole('group', { name: 'PDF page navigation', exact: true })).toContainText('of 3')
+  await expect(page.getByRole('group', { name: 'PDF page navigation', exact: true })).toContainText(`of ${heights.length}`)
 }
 
 async function pageOffset(page: Page, selector: string, number: number) {
@@ -108,4 +108,23 @@ test('page anchors survive content reflow, PDF zoom, and compact layout changes'
   await page.getByRole('button', { name: 'Source', exact: true }).click()
   await expect(page.getByRole('spinbutton', { name: 'PDF page', exact: true })).toHaveValue('3')
   await expect.poll(() => page.locator('.pdf-container').evaluate(el => Math.abs(el.querySelector('[data-viewer-page="3"]')!.getBoundingClientRect().top - el.getBoundingClientRect().top))).toBeLessThan(3)
+})
+
+
+test('jumping outside the rendered PDF window paints the requested page', async ({ page }) => {
+  const failures: string[] = []
+  page.on('pageerror', error => failures.push(error.message))
+  const longSource = Array.from({ length: 9 }, (_, index) => `<!-- page-marker:${index + 1} -->\n# Page ${index + 1}\n\n` + Array(24).fill('Source paragraph for page navigation.').join('\n\n')).join('\n\n---\n\n')
+  await workspace(page, longSource, Array(9).fill(792))
+  await page.getByRole('spinbutton', { name: 'PDF page', exact: true }).fill('9')
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('spinbutton', { name: 'Markdown page', exact: true })).toHaveValue('9')
+  const canvas = page.locator('.pdf-page').nth(8).locator('canvas')
+  await expect.poll(() => canvas.evaluate(element => {
+    if (!element.width || !element.height) return false
+    const pixels = element.getContext('2d')!.getImageData(0, 0, element.width, element.height).data
+    for (let index = 0; index < pixels.length; index += 4) if (pixels[index + 3] > 0 && pixels[index] < 200) return true
+    return false
+  })).toBe(true)
+  expect(failures).toEqual([])
 })

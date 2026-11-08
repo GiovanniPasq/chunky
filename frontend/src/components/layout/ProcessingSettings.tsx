@@ -1,7 +1,7 @@
 import type { ChunkSettings } from '../../types'
 import { useCapabilities } from '../../hooks/useCapabilities'
 import { chunkingOptions } from '../../utils/chunkingOptions'
-import { IconLayers, IconSparkles } from '../common/Icons'
+import FeatureIcon from '../common/FeatureIcon'
 import './ProcessingSettings.css'
 
 interface Props {
@@ -31,7 +31,7 @@ export default function ProcessingSettings({ settings, onOpenSettings }: Props) 
         title={`Next conversion: ${converter}. Click to change. Existing Markdown keeps its original converter.`}
         onClick={() => onOpenSettings('conversion')}
       >
-        <IconSparkles size={11} />
+        <FeatureIcon feature="convert" size={11} />
         <span className="processing-setting-value">{converter}</span>
       </button>
       <button
@@ -41,7 +41,7 @@ export default function ProcessingSettings({ settings, onOpenSettings }: Props) 
         title={`Generate chunks with ${chunker}${parameters ? ` (${parameters})` : ''}. Click to change. Saved versions retain their own settings.`}
         onClick={() => onOpenSettings('chunking')}
       >
-        <IconLayers size={11} />
+        <FeatureIcon feature="chunk" size={11} />
         <span className="processing-setting-value">{chunker}</span>
       </button>
     </div>

@@ -1,3 +1,4 @@
+import FeatureIcon from '../common/FeatureIcon'
 import { useRef, useEffect, useState, useMemo, memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -13,8 +14,8 @@ import EnrichDiffModal from '../modals/EnrichDiffModal'
 import SummaryReviewModal from '../modals/SummaryReviewModal'
 import { useMarkdownEnrichment } from '../../hooks/useMarkdownEnrichment'
 import {
-  IconSparkles,
   IconPdf,
+  IconWarning,
   IconTrash,
   IconDownload,
   IconEdit,
@@ -341,13 +342,13 @@ function MarkdownViewer({
             <>
               <Button onClick={handleEnterEdit}><IconEdit size={14} />Edit</Button>
               <Button onClick={handleOpenEnrich} disabled={pipelineProgress !== null || pipelineResult !== null || summaryModalOpen} title="Review the summary, then preview Markdown corrections before saving">
-                <IconSparkles size={14} />Enrich
+                <FeatureIcon feature="enrich" size={14} />Enrich
               </Button>
             </>
           )}
           <ActionMenu label="Markdown actions" actions={[
             { label: 'Export Markdown', icon: <IconDownload size={14} />, onSelect: handleDownloadMarkdown, disabled: !content && !editContent },
-            { label: `Convert with ${converterLabel}`, icon: <IconSparkles size={14} />, onSelect: onConvert, disabled: converting || editMode },
+            { label: `Convert with ${converterLabel}`, icon: <FeatureIcon feature="convert" size={14} />, onSelect: onConvert, disabled: converting || editMode },
             { label: 'Delete variant', icon: <IconTrash size={14} />, onSelect: () => setShowDeleteConfirm(true), disabled: editMode, danger: true },
           ]} />
         </div>
@@ -356,7 +357,7 @@ function MarkdownViewer({
       {/* Enrich error banner */}
       {enrichError && (
         <div className="enrich-error-banner">
-          ⚠️ {enrichError}
+          <IconWarning size={14} /> {enrichError}
           <button className="enrich-error-close" onClick={() => setEnrichError(null)}>✕</button>
         </div>
       )}
@@ -371,7 +372,7 @@ function MarkdownViewer({
         return (
           <div className="failed-pages-banner">
             <span>
-              ⚠️ {failedPages.length} page{failedPages.length !== 1 ? 's' : ''} failed transcription:
+              <IconWarning size={14} /> {failedPages.length} page{failedPages.length !== 1 ? 's' : ''} failed transcription:
               {' '}<strong>{formatFailedPages(failedPages)}</strong>
             </span>
             <button
@@ -384,7 +385,7 @@ function MarkdownViewer({
                   : 'Re-run VLM conversion. Checkpoint reuse follows the current Settings choice.'
                 : 'Switch the converter to VLM in Settings to retry failed pages.'}
             >
-              ↻ Retry failed pages
+              <FeatureIcon feature="convert" size={13} /> Retry failed pages
             </button>
           </div>
         )

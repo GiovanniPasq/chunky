@@ -1,3 +1,4 @@
+import { IconWarning } from './common/Icons'
 import { Component, type ReactNode } from 'react'
 import './ErrorBoundary.css'
 
@@ -14,7 +15,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
     if (this.state.error) {
       return (
         <div className="error-boundary">
-          <span className="error-boundary__icon">⚠️</span>
+          <span className="error-boundary__icon"><IconWarning size={40} /></span>
           <h2 className="error-boundary__title">Something went wrong</h2>
           <pre className="error-boundary__message">{this.state.error.message}</pre>
           <button

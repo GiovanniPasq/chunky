@@ -1,3 +1,4 @@
+import FeatureIcon from '../common/FeatureIcon'
 import { useEffect, useMemo, useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import type { BulkProgressFn, BulkResultFn } from '../../hooks/useDocument'
@@ -5,6 +6,7 @@ import type { DeleteDocumentsResponse } from '../../services/documentsApi'
 import BrandLogo from '../common/BrandLogo'
 import {
   IconMenu,
+  IconWarning,
   IconDownload,
   IconSidebarCollapse,
   IconSearch,
@@ -13,8 +15,6 @@ import {
   IconMarkdown,
   IconFile,
   IconTrash,
-  IconSparkles,
-  IconLayers,
   IconSettings,
   IconSpinner,
   IconClose,
@@ -516,7 +516,7 @@ export default function Sidebar({
                           </>
                         ) : (
                           <>
-                            <IconSparkles size={14} />
+                            <FeatureIcon feature="convert" size={14} />
                             <span>Convert{visibleSelectedCount > 0 ? ` (${visibleSelectedCount})` : ''}</span>
                           </>
                         )}
@@ -539,7 +539,7 @@ export default function Sidebar({
                             </>
                           ) : (
                             <>
-                              <IconLayers size={14} />
+                              <FeatureIcon feature="chunk" size={14} />
                               <span>Chunk{chunkable > 0 ? ` (${chunkable})` : ''}</span>
                             </>
                           )}
@@ -563,7 +563,7 @@ export default function Sidebar({
                             </>
                           ) : (
                             <>
-                              <IconSparkles size={14} />
+                              <FeatureIcon feature="enrich" size={14} />
                               <span>Enrich MD{enrichable > 0 ? ` (${enrichable})` : ''}</span>
                             </>
                           )}
@@ -587,7 +587,7 @@ export default function Sidebar({
                             </>
                           ) : (
                             <>
-                              <IconSparkles size={14} />
+                              <FeatureIcon feature="enrich" size={14} />
                               <span>Enrich Chunks{enrichable > 0 ? ` (${enrichable})` : ''}</span>
                             </>
                           )}
@@ -726,21 +726,7 @@ export default function Sidebar({
                               <path d="M20 4v5h-5" />
                             </svg>
                           ) : (
-                            <svg
-                              width="14"
-                              height="14"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2.5"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              aria-hidden="true"
-                            >
-                              <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
-                              <line x1="12" y1="9" x2="12" y2="13" />
-                              <line x1="12" y1="17" x2="12.01" y2="17" />
-                            </svg>
+                            <IconWarning size={14} />
                           )}
                         </span>
                       )}

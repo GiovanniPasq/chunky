@@ -1,3 +1,5 @@
+import { IconWarning } from '../common/Icons'
+import FeatureIcon from '../common/FeatureIcon'
 import Modal from '../common/Modal'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
@@ -272,7 +274,7 @@ export default function SummaryReviewModal({
               </p>
               <div className="summary-empty-actions">
                 <button className="btn-primary" onClick={() => runGenerate(false)}>
-                  ✨ Generate summary
+                  <FeatureIcon feature="enrich" size={14} /> Generate summary
                 </button>
                 <button
                   className="btn-secondary"
@@ -293,7 +295,7 @@ export default function SummaryReviewModal({
 
           {view === 'error' && (
             <div className="summary-state-error">
-              <p>⚠️ {errorMessage}</p>
+              <p><IconWarning size={14} /> {errorMessage}</p>
               <button
                 className="btn-secondary"
                 onClick={handleRetry}
@@ -375,7 +377,7 @@ export default function SummaryReviewModal({
                 disabled={!filename}
                 title="Discard the cached summary and rebuild it from scratch"
               >
-                ↺ Regenerate
+                <FeatureIcon feature="enrich" size={14} /> Regenerate
               </button>
               <div className="modal-footer-spacer" />
               <button className="btn-secondary" onClick={onClose}>Cancel</button>

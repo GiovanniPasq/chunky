@@ -1,3 +1,4 @@
+import FeatureIcon from '../common/FeatureIcon'
 import { useState, useEffect, useRef, memo, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -19,9 +20,8 @@ import ProgressModal from '../modals/ProgressModal'
 import ConfirmDialog from '../modals/ConfirmDialog'
 import {
   IconMerge,
-  IconSparkles,
+  IconWarning,
   IconTrash,
-  IconRefresh,
   IconSave,
   IconDownload,
   IconEdit,
@@ -329,7 +329,7 @@ function ChunkViewer({
                     onClick={handleEnrichSelected}
                     title="Enrich selected chunks with LLM"
                   >
-                    <IconSparkles size={13} />
+                    <FeatureIcon feature="enrich" size={13} />
                     <span>Enrich</span>
                   </button>
                   <button
@@ -348,7 +348,7 @@ function ChunkViewer({
         <div className="md-controls-right">
           {chunksReady && <StatusBadge tone={chunksStale || chunksDirty || !chunksFilename ? 'warning' : 'success'}>{chunksStale ? 'Needs regeneration' : chunksDirty ? 'Unsaved changes' : chunksFilename ? 'Saved' : 'Not saved yet'}</StatusBadge>}
           <Button onClick={onRechunk} disabled={chunking || savingChunks} loading={chunking} title={`Regenerate chunks with ${chunkerLabel}`}>
-            {!chunking && <IconRefresh size={14} />}{chunking ? 'Chunking…' : 'Re-chunk'}
+            {!chunking && <FeatureIcon feature="chunk" size={14} />}{chunking ? 'Chunking…' : 'Re-chunk'}
           </Button>
           <Button variant="primary" onClick={onSaveChunks} loading={savingChunks} disabled={!chunksReady || chunksStale || chunking || (!chunksDirty && !!chunksFilename)} title={chunksStale ? 'Re-chunk this version to match the current Markdown before saving' : 'Save the current chunk set'}>
             {!savingChunks && <IconSave size={14} />}{savingChunks ? 'Saving…' : 'Save chunks'}
@@ -362,7 +362,7 @@ function ChunkViewer({
       {/* Enrich error banner */}
       {enrichError && (
         <div className="enrich-error-banner">
-          ⚠️ {enrichError}
+          <IconWarning size={14} /> {enrichError}
           <button className="enrich-error-close" onClick={() => setEnrichError(null)}>✕</button>
         </div>
       )}
@@ -412,7 +412,7 @@ function ChunkViewer({
                         <span className="chunk-total">{chunks.length}</span>
                       </span>
                       {enriched && (
-                        <span className="chunk-enriched-badge" title="This chunk has been enriched">★ Enriched</span>
+                        <span className="chunk-enriched-badge" title="This chunk has been enriched"><FeatureIcon feature="enrich" size={11} /> Enriched</span>
                       )}
                     </div>
                     <div className="chunk-meta-actions">
@@ -438,7 +438,7 @@ function ChunkViewer({
                           </>
                         ) : (
                           <>
-                            <IconSparkles size={12} />
+                            <FeatureIcon feature="enrich" size={12} />
                             <span>Enrich</span>
                           </>
                         )}
@@ -456,7 +456,7 @@ function ChunkViewer({
                   </div>
                   {enrichErrMsg && (
                     <div className="chunk-enrich-error" title={enrichErrMsg}>
-                      ⚠️ {enrichErrMsg}
+                      <IconWarning size={14} /> {enrichErrMsg}
                     </div>
                   )}
                   <div className="markdown-content">
