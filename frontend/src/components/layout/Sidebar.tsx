@@ -139,21 +139,22 @@ export default function Sidebar({
       if (!event.altKey || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')) return
       if (event.metaKey || event.ctrlKey || event.shiftKey) return
       if (document.querySelector('[aria-modal="true"]')) return
-      if (collapsed || keyboardNavigationDisabled || deleting || bulkOp !== null || uploading) return
+      if (collapsed || selectMode || keyboardNavigationDisabled || deleting || bulkOp !== null || uploading) return
 
       const target = event.target as HTMLElement | null
-      if (target?.closest('input, textarea, select, button, [contenteditable="true"]')) return
+      if (target?.closest('input, textarea, select, [contenteditable="true"]')) return
+      if (target?.closest('button') && !target.closest('.doc-name')) return
       if (!selectedDoc || filtered.length === 0) return
 
       const currentIndex = filtered.indexOf(selectedDoc)
       if (currentIndex === -1) return
 
+      event.preventDefault()
       const nextIndex = event.key === 'ArrowDown'
         ? Math.min(filtered.length - 1, currentIndex + 1)
         : Math.max(0, currentIndex - 1)
       if (nextIndex === currentIndex) return
 
-      event.preventDefault()
       onSelect(filtered[nextIndex])
     }
 
@@ -164,6 +165,7 @@ export default function Sidebar({
     selectedDoc,
     onSelect,
     collapsed,
+    selectMode,
     keyboardNavigationDisabled,
     deleting,
     bulkOp,
@@ -172,7 +174,11 @@ export default function Sidebar({
 
   useEffect(() => {
     if (!selectedDoc || collapsed) return
-    rowRefs.current.get(selectedDoc)?.scrollIntoView({ block: 'nearest' })
+    const row = rowRefs.current.get(selectedDoc)
+    row?.scrollIntoView({ block: 'nearest' })
+    if (document.activeElement?.closest('.doc-name')) {
+      row?.querySelector<HTMLButtonElement>('.doc-name')?.focus({ preventScroll: true })
+    }
   }, [selectedDoc, collapsed])
 
   const handleFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
