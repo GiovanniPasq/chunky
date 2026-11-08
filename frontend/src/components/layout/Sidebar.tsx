@@ -5,6 +5,7 @@ import type { DeleteDocumentsResponse } from '../../services/documentsApi'
 import BrandLogo from '../common/BrandLogo'
 import {
   IconMenu,
+  IconDownload,
   IconSidebarCollapse,
   IconSearch,
   IconUpload,
@@ -51,6 +52,7 @@ interface Props {
    * document, or chunks first when no matching saved set exists.
    */
   onBulkChunkEnrich?: (filenames: string[], onProgress: BulkProgressFn, onResult: BulkResultFn) => Promise<void>
+  onExport?: (filenames: string[]) => void
   onOpenSettings?: () => void
   processingDoc?: string | null
   docsWithMarkdown?: Set<string>
@@ -77,7 +79,7 @@ export default function Sidebar({
   documents, selectedDoc, onSelect, onUpload, uploading,
   collapsed, onToggleCollapse, onDelete,
   onBulkConvert, onBulkChunk, onBulkEnrich, onBulkChunkEnrich,
-  onOpenSettings, processingDoc, docsWithMarkdown, docsWithFailures, docsWithCheckpoints,
+  onExport, onOpenSettings, processingDoc, docsWithMarkdown, docsWithFailures, docsWithCheckpoints,
   keyboardNavigationDisabled = false,
 }: Props) {
   const [search, setSearch] = useState('')
@@ -442,6 +444,10 @@ export default function Sidebar({
                   {filtered.length}{filtered.length !== documents.length ? ` / ${documents.length}` : ''}
                 </span>
               </div>
+              <div className="doc-count-actions">
+              {documents.length > 0 && onExport && !selectMode && (
+                <button type="button" className="select-toggle-btn" onClick={() => onExport(documents)} disabled={isBusy}>Export all</button>
+              )}
               {documents.length > 0 && (
                 <button
                   type="button"
@@ -453,11 +459,13 @@ export default function Sidebar({
                   {selectMode ? 'Cancel' : 'Select'}
                 </button>
               )}
+              </div>
             </div>
 
             {selectMode && (
               <>
                 <div className="bulk-actions">
+                  {onExport && <button type="button" className="bulk-btn" disabled={!visibleSelectedCount || isBusy} onClick={() => onExport(selectedVisible)}><IconDownload size={14} /> Export selected ({visibleSelectedCount})</button>}
                   <button
                     type="button"
                     className="bulk-btn select-all"

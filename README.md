@@ -44,6 +44,7 @@ As [NVIDIA's research](https://developer.nvidia.com/blog/finding-the-best-chunki
 |---|---|
 | 📄 **Document review workspace** | Compare PDF, Markdown, and chunks side by side before indexing |
 | ✨ **Multiple conversion engines** | PyMuPDF, Docling, MarkItDown, LiteParse, VLM, and Cloud API support |
+| 📤 **Bulk export** | Export selected documents or the whole workspace as a ZIP or to a backend folder |
 | 📦 **Batch processing** | Convert, enrich, and chunk multiple documents from the sidebar |
 | ✂️ **Chunking strategy comparison** | Test LangChain, Chonkie, and Docling splitters with configurable size and overlap |
 | 💾 **Saved chunk versions** | Persist and reload chunk sets by Markdown source and splitter configuration |
@@ -135,6 +136,18 @@ can be filtered by conversion and review status.
 The converter and chunker below the document name stay visible in the workspace
 header. Click either to open its settings tab, or hover for details. These are processing
 defaults; saved Markdown and chunk versions retain their original configuration.
+
+Use **Export all**, or **Select → Export selected**, to export saved Markdown,
+chunk JSON, and optional original PDFs. Choose the latest Markdown and its latest
+saved chunks, or all saved versions. A manifest records missing outputs and stale
+chunk warnings. Save or cancel active edits before exporting that document.
+
+**Download ZIP** saves to your computer (with a location picker where supported).
+**Folder on the backend machine** creates a unique export directory under
+`EXPORTS_DIR` (default: `docs/exports`), with an optional subfolder. Set
+`EXPORTS_DIR=/absolute/path/to/exports` in the backend environment to change the
+root. For Docker, configure a matching volume mount for paths outside `/app/docs`.
+Workspace files stay in place; export excludes processing caches and credentials.
 
 Settings are browser defaults for future operations. Changing a converter does
 not reconvert existing files. Changing chunking settings regenerates the active

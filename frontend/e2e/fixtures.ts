@@ -35,6 +35,7 @@ export async function mockWorkspace(page: Page, chunkDelay = 0) {
   await page.route('**/api/**', async (route) => {
     const path = decodeURIComponent(new URL(route.request().url()).pathname)
     const json = (value: unknown) => route.fulfill({ json: value })
+    if (path === '/api/export/config') return json({ directory: '/workspace/exports' })
     if (path === '/api/documents') return json(documents)
     if (path === '/api/documents/metadata')
       return json(

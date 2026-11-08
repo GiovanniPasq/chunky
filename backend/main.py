@@ -17,6 +17,7 @@ from backend.routers.chunks_router import router as chunks_router
 from backend.routers.capabilities_router import router as capabilities_router
 from backend.routers.enrichment_router import router as enrichment_router
 from backend.routers.health_router import router as health_router
+from backend.routers.exports_router import router as exports_router
 
 ALLOWED_ORIGINS = [
     "http://localhost:5173",  # Vite dev server
@@ -78,6 +79,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(health_router)
+    app.include_router(exports_router)
     app.include_router(documents_router)
     app.include_router(chunks_router)
     app.include_router(capabilities_router)

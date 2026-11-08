@@ -23,6 +23,7 @@ import {
 import MarkdownViewer from './components/viewer/MarkdownViewer'
 import ChunkViewer from './components/viewer/ChunkViewer'
 import SettingsModal from './components/modals/SettingsModal'
+import ExportModal from './components/modals/ExportModal'
 import ConverterCompareModal from './components/modals/ConverterCompareModal'
 import ProgressModal from './components/modals/ProgressModal'
 import ConfirmDialog from './components/modals/ConfirmDialog'
@@ -308,6 +309,14 @@ export default function App() {
     runOrConfirm({ kind: 'rechunk' })
   }, [runOrConfirm])
 
+  const [exportFiles, setExportFiles] = useState<string[] | null>(null)
+  const handleExport = (filenames: string[]) => {
+    if (selectedDoc && filenames.includes(selectedDoc) && (hasUnsavedWork || (chunks && !selectedChunks))) {
+      showToast('Save or cancel the active Markdown and chunk changes before exporting. Exports include saved files only.', 'error')
+      return
+    }
+    setExportFiles(filenames)
+  }
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSection, setSettingsSection] = useState<'conversion' | 'chunking'>('conversion')
   const openSettings = (section: 'conversion' | 'chunking' = 'conversion') => {
@@ -737,13 +746,14 @@ export default function App() {
         onBulkChunk={guardedBulkChunk}
         onBulkEnrich={guardedBulkEnrich}
         onBulkChunkEnrich={guardedBulkChunkEnrich}
+        onExport={handleExport}
         onOpenSettings={() => openSettings()}
         processingDoc={converting || convertingToPdf || chunking ? selectedDoc : null}
         docsWithMarkdown={docsWithMarkdown}
         docsWithFailures={docsWithFailures}
         docsWithCheckpoints={docsWithCheckpoints}
         keyboardNavigationDisabled={
-          settingsOpen ||
+          !!exportFiles || settingsOpen ||
           compareOpen ||
           !!pendingDoc ||
           !!pendingChunkAction ||
@@ -985,6 +995,7 @@ export default function App() {
           </>
         )}
 
+        {exportFiles && <ExportModal filenames={exportFiles} onClose={() => setExportFiles(null)} />}
         <SettingsModal
           isOpen={settingsOpen}
           initialTab={settingsSection}

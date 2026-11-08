@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     PDFS_DIR: str = "docs/pdfs"
     MDS_DIR: str = "docs/mds"
     CHUNKS_DIR: str = "docs/chunks"
+    EXPORTS_DIR: str = "docs/exports"
+    """Root for folder exports. Browser requests can select a child folder."""
 
     # ── Logging ────────────────────────────────────────────────
     LOG_LEVEL: str = "INFO"

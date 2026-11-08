@@ -21,7 +21,10 @@ export function downloadTextFile(
   content: string,
   mimeType = 'text/plain;charset=utf-8',
 ): void {
-  const blob = new Blob([content], { type: mimeType })
+  downloadBlob(filename, new Blob([content], { type: mimeType }))
+}
+
+export function downloadBlob(filename: string, blob: Blob): void {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
 
