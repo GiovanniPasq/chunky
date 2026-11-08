@@ -70,7 +70,7 @@ from backend.services.enrichment_context import (
 )
 from backend.services.enrichment_checkpoint import EnrichmentCheckpointStore
 from backend.services.enrichment_pipeline import run_enrichment_pipeline
-from backend.utils.markdown import clean_markdown, split_markdown
+from backend.utils.markdown import clean_markdown, has_model_content, split_markdown
 from backend.services.document_files import document_stem_for_markdown
 from backend.utils.path import safe_filename
 from backend.utils.sse import (
@@ -536,8 +536,7 @@ async def generate_summary(http_request: Request, body: SummaryGenerateRequest):
         {"type": "split_done",       "pieces": N}
         {"type": "summary_progress", "current": i, "total": N, "cached": bool}
           ...
-        {"type": "summary_ready",    "cached": bool, "extractions": N,
-                                     "failed": N, "reduce_failed": bool}
+        {"type": "summary_ready",    "cached": bool}
         {"type": "done", "summary": DocumentSummaryResponse}
     """
 
@@ -566,7 +565,6 @@ async def generate_summary(http_request: Request, body: SummaryGenerateRequest):
         yield _sse({"type": "start", "operation": "generate_summary"})
 
         store = DocumentSummaryStore(doc_stem, _doc_svc._mds_dir)
-        previous_stored = store.load() if body.force else None
 
         http_client = http_request.app.state.http_client_async
         svc = build_enrichment_service(body.settings, http_client)
@@ -595,10 +593,10 @@ async def generate_summary(http_request: Request, body: SummaryGenerateRequest):
                 # functions (no I/O) and cheap.
                 cleaned, report = clean_markdown(source_markdown)
                 _on_progress({"type": "cleanup_done", "report": report.as_dict()})
-                pieces = split_markdown(cleaned)
+                pieces = [piece for piece in split_markdown(cleaned) if has_model_content(piece.content)]
                 _on_progress({"type": "split_done", "pieces": len(pieces)})
 
-                generated = await get_or_generate_summary(
+                await get_or_generate_summary(
                     pieces=pieces,
                     cleaned_source=cleaned,
                     doc_stem=doc_stem,
@@ -610,13 +608,6 @@ async def generate_summary(http_request: Request, body: SummaryGenerateRequest):
                     concurrency=concurrency,
                     force_regenerate=body.force,
                 )
-                if body.force and generated.is_empty() and previous_stored is not None:
-                    store.save(previous_stored)
-                    raise RuntimeError(
-                        "Summary regeneration produced no usable content; "
-                        "the previous summary was preserved"
-                    )
-
                 # Re-load so we serialise the same record the pipeline
                 # would see — the builder's return value is just the
                 # ``DocumentSummary``, but the response needs the full
@@ -630,6 +621,10 @@ async def generate_summary(http_request: Request, body: SummaryGenerateRequest):
                 await queue.put({"type": "cancelled"})
             except HTTPException as exc:
                 await queue.put({"type": "error", "status": exc.status_code, "message": exc.detail})
+            except ValueError:
+                logger.warning("Summary generation returned incomplete or invalid output", exc_info=True)
+                await queue.put({"type": "error", "status": 502,
+                                 "message": "Summary generation did not complete. Please retry; any previous summary was kept."})
             except Exception:
                 logger.exception("Unexpected error during summary generation")
                 await queue.put({"type": "error", "status": 500,

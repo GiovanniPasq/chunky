@@ -46,6 +46,14 @@ _TABLE_LINE_RE = re.compile(r"^\s*\|")
 _TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$")
 _LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]\s|\d+\.\s)")
 _PAGE_MARKER_RE = re.compile(r"^\s*<!--\s*page-marker:\d+\s*-->\s*$")
+_THEMATIC_BREAK_RE = re.compile(r"^(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$")
+
+
+def has_model_content(content: str) -> bool:
+    """Exclude empty segments, page markers, and separator-only pieces from LLM calls."""
+    if _PAGE_MARKER_RE.fullmatch(content):
+        return False
+    return any(line.strip() and not _THEMATIC_BREAK_RE.fullmatch(line.strip()) for line in content.splitlines())
 
 
 # ---------------------------------------------------------------------------

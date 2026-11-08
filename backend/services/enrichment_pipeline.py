@@ -29,14 +29,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from dataclasses import dataclass
 from typing import Callable
 
 from .document_summary import DocumentSummary
 from .enrichment_checkpoint import EnrichmentCheckpointStore, hash_key
 from .enrichment_service import EnrichmentService
-from backend.utils.markdown import CleanupReport, Piece, clean_markdown, rolling_context, split_markdown
+from backend.utils.markdown import CleanupReport, Piece, clean_markdown, has_model_content, rolling_context, split_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -219,7 +218,7 @@ async def run_enrichment_pipeline(
         # call and side-steps the whitespace re-anchoring corner case
         # in ``enrich_piece`` where leading and trailing matches would
         # both grab the whole content and double it on reassembly.
-        if not piece.content.strip() or re.fullmatch(r"<!--\s*page-marker:\d+\s*-->", piece.content.strip()):
+        if not has_model_content(piece.content):
             async with _lock:
                 corrected[piece.index] = piece.content
             _emit({

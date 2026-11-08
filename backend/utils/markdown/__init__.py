@@ -13,12 +13,13 @@ submodule each lives in.
 """
 
 from .cleanup import CleanupReport, clean_markdown
-from .splitter import Piece, rolling_context, split_markdown
+from .splitter import Piece, has_model_content, rolling_context, split_markdown
 
 __all__ = [
     "CleanupReport",
     "Piece",
     "clean_markdown",
+    "has_model_content",
     "rolling_context",
     "split_markdown",
 ]

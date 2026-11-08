@@ -67,6 +67,8 @@ def hash_key(
     path on purpose.
     """
     h = hashlib.sha256()
+    # Invalidate outputs produced before code-fence preservation was fixed.
+    h.update(b"piece-output-v2\x1e")
     h.update(piece_content.encode("utf-8"))
     h.update(b"\x1e")  # ASCII record separator — keeps fields unambiguous
     h.update(prompt.encode("utf-8"))

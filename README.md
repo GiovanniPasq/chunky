@@ -241,9 +241,9 @@ Chunky includes an LLM-powered enrichment layer that operates at two levels of t
 
 Before chunking, you can run enrichment directly on the converted Markdown. The pipeline:
 
-1. **Deterministic cleanup** — removes likely pagination noise, repeated headers/footers, invisible characters, mojibake, and conservative line-wrap artifacts while preserving fenced code
-2. **LLM correction** — splits the document into pieces and sends each to an LLM for contextual cleanup, producing coherent, well-structured Markdown
-3. **Summary** *(optional)* — generates a document-level summary used as context during LLM correction
+1. **Summary** *(optional)* — generate or review the document-level context before correction
+2. **Deterministic cleanup** — removes likely pagination noise, repeated headers/footers, invisible characters, mojibake, and conservative line-wrap artifacts while preserving fenced code
+3. **LLM correction** — splits the document into pieces for conservative repair, followed by a preview you can review before applying
 
 Markdown enrichment is available for both single files and **bulk operations**, so you can clean an entire batch of converted PDFs in one pass.
 

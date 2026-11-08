@@ -186,21 +186,23 @@ _PIECE_SYSTEM_WITH_SUMMARY = (
 # ---------------------------------------------------------------------------
 
 _PIECE_EXTRACT_SYSTEM = (
-    "You extract a compact reference for a section of a longer document. "
+    "Read the supplied document section and summarize its factual content. "
     "Return ONLY valid JSON with EXACTLY these two fields:\n"
     '  "topic_hints":  array of short phrases describing what this section is about\n'
     '  "narrative":    one-sentence summary of what this section covers\n'
-    "\nReturn an empty array / empty string when a field has nothing to "
-    "report — never invent content.  No commentary.  No code fences."
+    "\nUse only information present in the section. Short sections need short "
+    "summaries. Do not invent facts. No commentary or code fences."
 )
 
 _REDUCE_SYSTEM = (
     "You synthesise a document-level summary from per-section extractions. "
     "Return ONLY valid JSON with EXACTLY these two fields:\n"
     '  "topic":      one short phrase capturing what the whole document is about\n'
-    '  "narrative":  a single coherent paragraph (~200 words) summarising the '
+    '  "narrative":  a concise coherent paragraph (at most 200 words) summarising the '
     "document in source order.  Give equal weight to early and late sections — "
-    "do not over-index on the final pieces.  No commentary.  No code fences."
+    "do not over-index on the final pieces. Use only the supplied facts; do not "
+    "invent benefits, examples, or conclusions. Keep summaries of short documents "
+    "short. No commentary or code fences."
 )
 
 
@@ -340,7 +342,10 @@ class EnrichmentService:
 
         self._model = model or _s.ENRICHMENT_DEFAULT_MODEL
         self._temperature = temperature if temperature is not None else _s.ENRICHMENT_DEFAULT_TEMPERATURE
-        self._user_prompt = user_prompt
+        # Settings sends the displayed default prompt as well as real overrides.
+        # Treat unchanged defaults as built-ins so summary/context still applies.
+        prompt = user_prompt.strip() if user_prompt else None
+        self._user_prompt = None if prompt in (None, "", _PIECE_SYSTEM.strip(), _CHUNK_SYSTEM.strip()) else prompt
         self._max_retry_attempts = _s.HTTP_MAX_RETRY_ATTEMPTS
         self._retry_base_delay_s = _s.HTTP_RETRY_BASE_DELAY_S
 
@@ -476,13 +481,10 @@ class EnrichmentService:
         cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.IGNORECASE)
         cleaned = re.sub(r"\s*```$", "", cleaned).strip()
         try:
-            return json.loads(cleaned)
+            parsed = json.loads(cleaned)
         except json.JSONDecodeError:
-            pass
-        repaired = _repair_truncated_json(cleaned)
-        if repaired is not None:
-            return repaired
-        return None
+            parsed = _repair_truncated_json(cleaned)
+        return parsed if isinstance(parsed, dict) else None
 
     # ------------------------------------------------------------------
     # Public API
@@ -564,9 +566,11 @@ class EnrichmentService:
             raise ValueError("LLM returned an empty choices list — no content to extract")
 
         result = response.choices[0].message.content or ""
-        # Strip code-fence wrappers that some models add around the body.
-        result = re.sub(r"^\s*```(?:markdown)?\n?", "", result)
-        result = re.sub(r"\n?```\s*$", "", result)
+        # Only unwrap a complete Markdown wrapper around prose. A section may
+        # itself be a fenced code block; removing its fences corrupts the source.
+        wrapper = re.fullmatch(r"\s*```(?:markdown|md)?[ \t]*\n(.*?)\n```\s*", result, re.DOTALL | re.IGNORECASE)
+        if wrapper and not re.match(r"\s*(?:`{3,}|~{3,})", piece_content):
+            result = wrapper.group(1)
         # Empty / whitespace-only model output would, after re-anchoring,
         # collapse the piece to just its boundary whitespace and silently
         # wipe its body.  Treat this as "no correction" and return the
@@ -596,9 +600,8 @@ class EnrichmentService:
         """Map step of the document-summary pipeline.
 
         Asks the model for structured reference information about a
-        single piece.  Output is parsed defensively — a malformed or
-        truncated response degrades to an empty extraction rather than
-        raising, so one bad piece never aborts the whole map step.
+        single piece. Malformed output raises so a failed extraction cannot
+        be cached as a complete document summary.
         """
         from .document_summary import PieceExtraction  # local import: avoid cycles
 
@@ -609,9 +612,10 @@ class EnrichmentService:
             "<<<SECTION TO ANALYSE>>>\n"
             f"{piece_content}\n"
             "<<<END SECTION TO ANALYSE>>>\n\n"
-            "Return ONE JSON object with EXACTLY the fields topic_hints "
-            "and narrative.  Do not describe the section.  No commentary, "
-            "preamble, or code fences.  Output JSON only."
+            "Identify the main topics and write a one-sentence factual summary "
+            "of the section. Return ONE JSON object with EXACTLY the fields "
+            "topic_hints and narrative. State the subject matter directly. "
+            "No commentary, preamble, or code fences. Output JSON only."
         )
         response = await self._complete(
             [
@@ -626,19 +630,20 @@ class EnrichmentService:
         raw = response.choices[0].message.content or ""
         parsed = self._parse_strict_json(raw)
         if parsed is None:
-            logger.warning(
-                "extract_piece_summary: unparseable JSON, returning empty extraction. Raw: %.200s",
-                raw,
-            )
-            return PieceExtraction()
+            raise ValueError("LLM returned an invalid summary extraction object")
         hints_raw = parsed.get("topic_hints", [])
         topic_hints = (
-            [str(v).strip() for v in hints_raw if isinstance(v, (str, int, float)) and str(v).strip()]
+            [v.strip() for v in hints_raw if isinstance(v, str) and v.strip()]
             if isinstance(hints_raw, list) else []
         )
+        narrative = parsed.get("narrative", "")
+        if not isinstance(narrative, str):
+            raise ValueError("LLM returned a non-text summary narrative")
+        if not topic_hints and not narrative.strip():
+            raise ValueError("LLM returned an empty summary extraction")
         return PieceExtraction(
             topic_hints=topic_hints,
-            narrative=str(parsed.get("narrative", "")).strip(),
+            narrative=narrative.strip(),
         )
 
     async def reduce_extractions(
@@ -654,7 +659,7 @@ class EnrichmentService:
         synthesise a single ~200-word ``narrative``.
 
         Returns a dict with exactly ``topic`` and ``narrative`` string
-        fields (possibly empty on parse failure).
+        fields. Malformed output raises rather than being cached as a valid summary.
         """
         def _list_block(label: str, values: list[str], limit: int = 60) -> str:
             if not values:
@@ -696,14 +701,12 @@ class EnrichmentService:
         raw = response.choices[0].message.content or ""
         parsed = self._parse_strict_json(raw)
         if parsed is None:
-            logger.warning(
-                "reduce_extractions: unparseable JSON, returning empty reduce. Raw: %.200s",
-                raw,
-            )
-            return {"topic": "", "narrative": ""}
+            raise ValueError("LLM returned an invalid document summary object")
+        if any(not isinstance(parsed.get(key, ""), str) for key in ("topic", "narrative")):
+            raise ValueError("LLM returned non-text document summary fields")
         return {
-            "topic": str(parsed.get("topic", "")).strip(),
-            "narrative": str(parsed.get("narrative", "")).strip(),
+            "topic": parsed.get("topic", "").strip(),
+            "narrative": parsed.get("narrative", "").strip(),
         }
 
     async def enrich_chunk(
@@ -734,9 +737,9 @@ class EnrichmentService:
             keywords, questions.
 
         Notes:
-            If the LLM returns invalid JSON the original content is preserved
-            and all enrichment fields are returned as empty defaults rather
-            than raising, so the chunk is never silently dropped from the batch.
+            Incomplete JSON is salvaged where possible. Unrecoverable output
+            raises so the caller can report an error and retain the original
+            chunk. Missing or invalid fields use safe defaults.
         """
         # See the matching comment in ``enrich_piece`` — when the user
         # has supplied a custom system prompt we do not auto-wrap the
@@ -775,36 +778,22 @@ class EnrichmentService:
         if not response.choices:
             raise ValueError("LLM returned an empty choices list — no content to extract")
         raw = (response.choices[0].message.content or "").strip()
-        raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
-        raw = re.sub(r"\s*```$", "", raw).strip()
+        parsed = self._parse_strict_json(raw)
+        if parsed is None:
+            parsed = _extract_fields_regex(raw, content)
+        if parsed is None:
+            raise ValueError("LLM returned unparseable JSON after all recovery attempts")
 
-        # Attempt 1: parse the response as-is.
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError as exc:
-            logger.warning(
-                "enrich_chunk: JSON parse failed (%s) — attempting repair. Raw: %.120s",
-                exc,
-                raw,
-            )
-
-        # Attempt 2: find the last fully-closed JSON object in the response.
-        # Handles the common case where the model is cut off mid-field but an
-        # earlier, complete version of the object exists in the stream.
-        repaired = _repair_truncated_json(raw)
-        if repaired is not None:
-            logger.warning("enrich_chunk: recovered via truncation repair.")
-            return repaired
-
-        # Attempt 3: extract whichever individual fields completed before cut-off.
-        extracted = _extract_fields_regex(raw, content)
-        if extracted is not None:
-            logger.warning("enrich_chunk: recovered partial fields via regex extraction.")
-            return extracted
-
-        # Final fallback: nothing could be salvaged — raise so the caller emits chunk_error.
-        logger.error(
-            "enrich_chunk: could not recover JSON — aborting chunk. Raw: %.200s",
-            raw,
-        )
-        raise ValueError("LLM returned unparseable JSON after all recovery attempts")
+        # Model JSON is untrusted: keep the API's string/list contract, and
+        # never replace source content with null, an object, or an empty body.
+        cleaned = parsed.get("cleaned_chunk")
+        result = {
+            "cleaned_chunk": cleaned if isinstance(cleaned, str) and cleaned.strip() else content,
+        }
+        for field in ("title", "context", "summary"):
+            value = parsed.get(field)
+            result[field] = value.strip() if isinstance(value, str) else ""
+        for field in ("keywords", "questions"):
+            values = parsed.get(field)
+            result[field] = [value.strip() for value in values if isinstance(value, str) and value.strip()] if isinstance(values, list) else []
+        return result

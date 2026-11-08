@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -32,6 +33,22 @@ class _FakeEnrichmentService:
 
 
 class EnrichmentCheckpointTests(unittest.TestCase):
+    def test_pre_fix_cached_corrections_are_not_reused(self) -> None:
+        source = '```python\nprint("hello")\n```\n'
+        service = _FakeEnrichmentService('local')
+        legacy_key = hashlib.sha256('\x1e'.join([
+            source, 'shared prompt', service.model_name, '0.300000', '', 'local', '',
+        ]).encode()).hexdigest()
+        with TemporaryDirectory() as folder:
+            store = EnrichmentCheckpointStore('report', Path(folder))
+            store.set(0, legacy_key, 'python\nprint("hello")\n')
+            result = asyncio.run(run_enrichment_pipeline(
+                source_markdown=source, service=service, checkpoint_store=store,
+            ))
+            self.assertEqual(service.calls, 1)
+            self.assertEqual(result.cached_pieces, 0)
+            self.assertIn('```python', result.corrected_markdown)
+
     def test_endpoint_change_does_not_reuse_checkpoint(self) -> None:
         async def _run() -> tuple[str, int, int]:
             with TemporaryDirectory() as tmp:

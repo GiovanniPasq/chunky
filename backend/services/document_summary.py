@@ -1,78 +1,10 @@
-"""
-Document-level summary store + map-reduce orchestrator.
+"""Cached document summaries built with bounded map/reduce LLM calls.
 
-The summary is the "what is this document about" reference block that gets
-attached to every per-piece correction prompt and chunk-enrichment prompt.
-Generating it once and caching it keeps the marginal
-cost of a re-run negligible: ``topic_hints`` are unioned across pieces in
-pure Python, and a single LLM reduce call picks a final ``topic`` and
-synthesises a ~200-word ``narrative``.
-
-Storage shape — one JSON sibling **per source PDF** (not per converter),
-``mds/{doc_stem}.summary.json``::
-
-    {
-        "source_hash": "sha256(<PDF bytes>, or cleaned MD for bare-MD uploads)",
-        "summary": {
-            "topic":     "<one short phrase>",
-            "narrative": "<~200-word paragraph>"
-        },
-        "generated_at": "2026-05-21T14:22:00Z",
-        "user_edited":  false
-    }
-
-Per-piece extractions are NOT persisted: a Regenerate rebuilds from
-scratch.  The runtime ``PieceExtraction`` dataclass only carries
-``topic_hints`` and a one-sentence ``narrative`` — see ``PieceExtraction``
-below.  This is intentionally a thinner schema than the original design
-notes (no entities / terms / document_type fields); those fields turned
-out to be unreliable to extract and were dropped along with their
-persistence layer.
-
-Lifecycle:
-    * Created on first markdown-enrichment run via the SummaryReviewModal
-      → /api/enrich/summary/generate. Chunk enrichment only attaches an
-      existing cached summary; it never generates one on its own.
-    * The summary is keyed by the source PDF itself: ``source_hash`` is
-      the SHA-256 of the PDF bytes when one exists on disk (the common
-      case), or — when only an uploaded ``.md`` exists — of the cleaned
-      markdown.  Switching converters (e.g. running enrichment on the
-      Cloud variant after the VLM variant) therefore reuses the cached
-      summary without any LLM calls.
-    * ``user_edited=True`` makes a stored summary authoritative: future
-      runs return it verbatim until an explicit Regenerate, a PDF
-      re-upload, or a document delete wipes the file.
-    * Cascade-deleted alongside the .md / chunks / checkpoint dirs on PDF
-      re-upload and document delete (see ``document_service``).
-
-Map-reduce flow:
-    1. Cache check.  Source-hash match AND non-empty summary ⇒ return
-       cached, zero LLM calls.  User-edited records short-circuit even
-       on hash mismatch unless ``force_regenerate=True``.
-    2. Map: extract ``PieceExtraction(topic_hints, narrative)`` from each
-       piece in parallel (semaphore bounded by ``concurrency``).  Failed
-       extractions yield an empty ``PieceExtraction`` so the reduce step
-       still receives the same number of slots.
-    3. Reduce — possibly tiered:
-         * ``len(extractions) <= REDUCE_TIER_THRESHOLD`` (30): single
-           reduce call over all extractions.
-         * Otherwise: groups of ``REDUCE_TIER_SIZE`` (10) reduce in
-           parallel to ``DocumentSummary`` partials, then a final reduce
-           across the partials.  Keeps the reduce prompt within any
-           reasonable context window regardless of document length.
-       Each ``_reduce_once`` first unions topic hints in pure Python
-       (case-insensitive, order-preserving), then asks the LLM for
-       final ``topic`` + ``narrative``.  On LLM failure it returns an
-       empty summary so the run still completes.
-    4. Persist atomically via tmp + ``os.replace``.
-
-Failure handling:
-    * Per-piece extraction failure → empty extraction in its slot;
-      logged at WARNING.
-    * Reduce failure → empty ``{"topic": "", "narrative": ""}`` so the
-      downstream pipeline still runs (just without document-level
-      context).  Logged at WARNING.
-    * Cancellation is checked before every LLM call.
+Summaries are keyed by source-PDF bytes (or cleaned Markdown for standalone
+uploads), shared across converter variants, and stored atomically beside the
+Markdown. User edits remain authoritative until explicit regeneration or source
+replacement. Page markers and separator-only pieces are excluded from the map.
+A failed or cancelled generation leaves the previous record untouched.
 """
 
 from __future__ import annotations
@@ -93,6 +25,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 from backend.utils.files import atomic_write_text
+from backend.utils.markdown import has_model_content
 
 
 # Threshold above which the reduce step is tiered (group-of-N partials
@@ -166,8 +99,8 @@ class DocumentSummary:
         if not isinstance(data, dict):
             return cls()
         return cls(
-            topic=str(data.get("topic", "")),
-            narrative=str(data.get("narrative", "")),
+            topic=data.get("topic", "").strip() if isinstance(data.get("topic", ""), str) else "",
+            narrative=data.get("narrative", "").strip() if isinstance(data.get("narrative", ""), str) else "",
         )
 
     def to_prompt_block(self) -> str:
@@ -426,9 +359,8 @@ async def get_or_generate_summary(
                           rebuild from scratch.
 
     Returns:
-        A :class:`DocumentSummary`.  On full failure (every extraction
-        and the reduce step) returns an empty summary so callers can
-        continue without context.
+        A complete :class:`DocumentSummary`. Extraction or reduction failure
+        raises without replacing the stored record.
     """
     def _emit(event: dict) -> None:
         if on_progress is None:
@@ -457,11 +389,10 @@ async def get_or_generate_summary(
         _emit({"type": "summary_ready", "cached": True, "user_edited": True})
         return existing.summary
 
+    pieces = [piece for piece in pieces if has_model_content(piece.content)]
     total = len(pieces)
     if total == 0:
-        empty = DocumentSummary()
-        _emit({"type": "summary_ready", "cached": False})
-        return empty
+        raise ValueError("The document has no text to summarise")
 
     # Document-level cache: source hash matches AND the cached summary is
     # non-empty.  No per-piece cache anymore (the simplified file schema
@@ -479,6 +410,7 @@ async def get_or_generate_summary(
     extractions: list[PieceExtraction] = [PieceExtraction() for _ in pieces]
     semaphore = asyncio.Semaphore(max(1, concurrency))
     completed = 0
+    failed: list[int] = []
     completed_lock = asyncio.Lock()
 
     async def _extract(i: int) -> None:
@@ -493,12 +425,12 @@ async def get_or_generate_summary(
                 extractions[i] = await service.extract_piece_summary(pieces[i].content)
             except (asyncio.CancelledError, InterruptedError):
                 raise
-            except Exception as exc:  # noqa: BLE001 — degrade gracefully
+            except Exception as exc:  # noqa: BLE001 — collect failures before publishing
                 logger.warning(
-                    "Summary extraction failed for piece %d/%d (continuing with empty): %s",
+                    "Summary extraction failed for piece %d/%d: %s",
                     i + 1, total, exc,
                 )
-                extractions[i] = PieceExtraction()
+                failed.append(i)
 
         async with completed_lock:
             completed += 1
@@ -520,11 +452,15 @@ async def get_or_generate_summary(
             raise InterruptedError("Summary cancelled")
         raise
 
+    if failed:
+        raise ValueError(f"Summary extraction failed for {len(failed)} section(s); retry generation")
+
     # ── Reduce step ───────────────────────────────────────────────────────
     summary = await _reduce_with_tiering(
         extractions=extractions,
         service=service,
         stop_check=stop_check,
+        concurrency=concurrency,
     )
 
     # Give a queued cancellation a chance to run before publishing the final
@@ -539,10 +475,7 @@ async def get_or_generate_summary(
         generated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         user_edited=False,
     )
-    try:
-        store.save(record)
-    except OSError as exc:
-        logger.warning("Failed to persist document summary to %s: %s", store.path, exc)
+    store.save(record)
 
     _emit({"type": "summary_ready", "cached": False})
     return summary
@@ -581,6 +514,7 @@ async def _reduce_with_tiering(
     extractions: list[PieceExtraction],
     service: "EnrichmentService",
     stop_check: Callable[[], bool] | None,
+    concurrency: int = 2,
 ) -> DocumentSummary:
     """Run the reduce step, possibly in two tiers for very long documents.
 
@@ -605,12 +539,25 @@ async def _reduce_with_tiering(
         for i in range(0, len(extractions), REDUCE_TIER_SIZE)
     ]
 
-    async def _partial(group: list[PieceExtraction]) -> DocumentSummary:
-        if stop_check and stop_check():
-            raise InterruptedError("Summary cancelled during tiered reduce")
-        return await _reduce_once(group, service)
+    semaphore = asyncio.Semaphore(max(1, concurrency))
 
-    partial_summaries = await asyncio.gather(*[_partial(g) for g in groups])
+    async def _partial(group: list[PieceExtraction]) -> DocumentSummary:
+        async with semaphore:
+            if stop_check and stop_check():
+                raise InterruptedError("Summary cancelled during tiered reduce")
+            return await _reduce_once(group, service)
+
+    tasks = [asyncio.create_task(_partial(group)) for group in groups]
+    try:
+        partial_summaries = await asyncio.gather(*tasks)
+    except (Exception, asyncio.CancelledError):
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+
+    if stop_check and stop_check():
+        raise InterruptedError("Summary cancelled before final reduce")
 
     # Hoist partial summaries back into PieceExtraction shape so the second
     # reduce call gets the same input contract as the first.
@@ -630,21 +577,15 @@ async def _reduce_once(
 ) -> DocumentSummary:
     """Single reduce call: union topic hints in Python, ask LLM to pick
     the final topic and synthesise the narrative from per-piece
-    narratives.  Falls back to an empty summary if the LLM call fails.
+    narratives. Failures propagate so a partial summary cannot replace a
+    previously complete cached record.
     """
     unioned = _union_extractions(extractions)
-    try:
-        chosen = await service.reduce_extractions(
-            topic_hints=unioned["topic_hints"],
-            narratives=unioned["narratives"],
-        )
-    except (asyncio.CancelledError, InterruptedError):
-        raise
-    except Exception as exc:  # noqa: BLE001 — degrade gracefully
-        logger.warning("Reduce step failed (returning empty summary): %s", exc)
-        chosen = {"topic": "", "narrative": ""}
-
-    return DocumentSummary(
-        topic=str(chosen.get("topic", "")).strip(),
-        narrative=str(chosen.get("narrative", "")).strip(),
+    chosen = await service.reduce_extractions(
+        topic_hints=unioned["topic_hints"],
+        narratives=unioned["narratives"],
     )
+    summary = DocumentSummary.from_dict(chosen)
+    if summary.is_empty():
+        raise ValueError("The model returned an empty document summary; retry generation")
+    return summary
