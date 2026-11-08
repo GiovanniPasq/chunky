@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 from typing import Callable
 
@@ -218,7 +219,7 @@ async def run_enrichment_pipeline(
         # call and side-steps the whitespace re-anchoring corner case
         # in ``enrich_piece`` where leading and trailing matches would
         # both grab the whole content and double it on reassembly.
-        if not piece.content.strip():
+        if not piece.content.strip() or re.fullmatch(r"<!--\s*page-marker:\d+\s*-->", piece.content.strip()):
             async with _lock:
                 corrected[piece.index] = piece.content
             _emit({

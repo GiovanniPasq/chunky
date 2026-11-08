@@ -497,14 +497,18 @@ def split_markdown(
     if not blocks:
         return [Piece(index=0, content=md, start=0, end=len(md))]
 
-    split_indices = _pick_split_points(blocks, target_chars, max_chars)
+    # Keep provenance comments outside model-editable content, and never let
+    # one enrichment piece cross a physical source-page boundary.
+    marker_edges = {edge for index, block in enumerate(blocks) if block.kind == "marker"
+                    for edge in (index, index + 1) if edge > 0}
+    split_indices = sorted(set(_pick_split_points(blocks, target_chars, max_chars)) | marker_edges)
     pieces: list[Piece] = []
     prev_block = 0
     for idx, end_block in enumerate(split_indices):
         first = blocks[prev_block]
         last = blocks[end_block - 1]
         start = first.start
-        end = last.end
+        end = min(last.end, len(md))
         pieces.append(Piece(
             index=idx,
             content=md[start:end],

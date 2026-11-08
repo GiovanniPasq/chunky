@@ -5,6 +5,7 @@ PDF-to-Markdown converter backed by Docling.
 from pathlib import Path
 from backend.registry import register_converter
 from .base import PDFConverter
+from .pages import page_markdown
 
 @register_converter(
     name="docling",
@@ -38,7 +39,14 @@ class DoclingConverter(PDFConverter):
         self.validate_path(pdf_path)
 
         result = self._converter.convert(str(pdf_path))
-        return result.document.export_to_markdown(
-            image_mode=ImageRefMode.PLACEHOLDER,
-            image_placeholder="",
-        )
+        document = result.document
+        # Docling assigns compound items (e.g. merged tables) to their first
+        # provenance page. Serialize them once, without duplicating their rows.
+        if not document.pages:
+            return document.export_to_markdown(image_mode=ImageRefMode.PLACEHOLDER, image_placeholder="")
+        count = total_pages or max(document.pages)
+        return page_markdown((
+            (number, document.export_to_markdown(
+                page_no=number, image_mode=ImageRefMode.PLACEHOLDER, image_placeholder="",
+            )) for number in range(1, count + 1)
+        ), count)

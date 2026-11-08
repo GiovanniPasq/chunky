@@ -10,6 +10,7 @@ from pathlib import Path
 from backend.registry import register_converter
 
 from .base import PDFConverter
+from .pages import page_markdown
 
 
 @register_converter(
@@ -32,4 +33,7 @@ class LiteParseConverter(PDFConverter):
         # running furniture. Preserve it; cleanup is an explicit later step.
         parser = LiteParse(output_format="markdown", keep_headers_footers=True)
         result = parser.parse(str(pdf_path))
-        return result.text
+        return page_markdown(
+            ((page.page_num, page.markdown) for page in result.pages),
+            total_pages or result.total_pages,
+        )

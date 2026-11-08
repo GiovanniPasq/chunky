@@ -173,6 +173,13 @@ Standalone Markdown names that match the generated
 exists. Chunky rejects that ambiguous upload instead of silently treating it
 as converter output.
 
+PyMuPDF, Docling, LiteParse, and VLM preserve physical source-page numbers with
+`<!-- page-marker:N -->` comments, including blank pages. Docling compound items
+such as merged tables remain attached to their first provenance page. Page markers
+stay outside model-editable enrichment pieces. Reconvert older Markdown to add
+page mapping. MarkItDown and arbitrary Cloud API responses can still be used;
+page mapping is available only when the resulting Markdown contains valid markers.
+
 ### VLM converter
 
 The VLM converter rasterises each page at 300 DPI by default and sends it to any OpenAI-compatible vision model. By default it targets a **locally running Ollama instance** — no API key, no internet access required.

@@ -19,7 +19,7 @@ class LiteParseConverterTests(unittest.TestCase):
 
             def parse(self, path: str):
                 parsed_paths.append(path)
-                return SimpleNamespace(text="# Markdown")
+                return SimpleNamespace(pages=[SimpleNamespace(page_num=1, markdown="# Markdown")], total_pages=1)
 
         fake_module = ModuleType("liteparse")
         fake_module.LiteParse = FakeLiteParse
@@ -33,7 +33,7 @@ class LiteParseConverterTests(unittest.TestCase):
 
         self.assertEqual(constructor_options, {"output_format": "markdown", "keep_headers_footers": True})
         self.assertEqual(parsed_paths, [str(pdf_path)])
-        self.assertEqual(result, "# Markdown")
+        self.assertEqual(result, "<!-- page-marker:1 -->\n# Markdown")
 
     def test_preserves_text_on_short_pages_with_repeated_headings(self) -> None:
         import pymupdf
