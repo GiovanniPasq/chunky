@@ -38,10 +38,9 @@ class DoclingChunker(TextChunker):
     """
 
     def __init__(self) -> None:
-        from docling.document_converter import DocumentConverter
         from transformers import AutoTokenizer
 
-        self._converter = DocumentConverter()
+        self._converter = None
         self._auto_tokenizer = AutoTokenizer.from_pretrained(
             "sentence-transformers/all-MiniLM-L6-v2"
         )
@@ -84,18 +83,17 @@ class DoclingChunker(TextChunker):
         ),
     )
     def _split_line_based(self, request: ChunkRequest) -> list[ChunkItem]:
-        from docling.datamodel.base_models import DocumentStream
         from docling_core.transforms.chunker.line_chunker import LineBasedTokenChunker
 
         chunker = LineBasedTokenChunker(tokenizer=self._make_tokenizer(request.chunk_size))
-
-        stream = DocumentStream(
-            name="content.md",
-            stream=io.BytesIO(request.content.encode("utf-8")),
-        )
-        doc = self._converter.convert(source=stream).document
-        raw_chunks = list(chunker.chunk(dl_doc=doc))
-        return self._chunks_from_docling(chunker, raw_chunks, request.content)
+        # Re-parsing Markdown first collapses plain log/code line breaks.
+        # The public chunk_text API preserves the actual input lines.
+        splits = chunker.chunk_text(request.content.splitlines(keepends=True))
+        items = self.build_chunks(request.content, splits, char_overlap=0)
+        for item in items:
+            item.metadata['contextualized'] = item.content
+            item.metadata['token_count'] = chunker.tokenizer.count_tokens(item.content)
+        return items
 
     @register_chunker(
         library=_LIB, library_label=_LIB_LABEL,
@@ -109,6 +107,10 @@ class DoclingChunker(TextChunker):
     def _split_hybrid(self, request: ChunkRequest) -> list[ChunkItem]:
         from docling.datamodel.base_models import DocumentStream
         from docling.chunking import HybridChunker
+        from docling.document_converter import DocumentConverter
+
+        if self._converter is None:
+            self._converter = DocumentConverter()
 
         chunker = HybridChunker(
             tokenizer=self._make_tokenizer(request.chunk_size),

@@ -26,3 +26,5 @@ Thumbs.db
 *.swp
 *.swo
 docs/
+frontend/test-results/
+frontend/playwright-report/

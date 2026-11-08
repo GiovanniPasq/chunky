@@ -51,9 +51,9 @@ def normalise_converter(converter: str | None) -> str:
 KNOWN_LIBRARIES: frozenset[str] = frozenset({"langchain", "chonkie", "docling"})
 
 # Chonkie algorithms that don't accept ``chunk_overlap`` (kept in sync with
-# the frontend's CHONKIE_NO_OVERLAP set in SettingsModal.tsx).
+# the frontend's chunkingOptions helper).
 _CHONKIE_NO_OVERLAP: frozenset[str] = frozenset({
-    "recursive", "fast", "table", "code", "late", "neural", "slumber",
+    "recursive", "fast", "table", "code", "semantic", "neural",
 })
 _CHONKIE_NO_SIZE: frozenset[str] = frozenset({"table", "neural"})
 

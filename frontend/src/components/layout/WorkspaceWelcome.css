@@ -1,0 +1,135 @@
+.workspace-welcome {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  padding: clamp(24px, 5vw, 72px);
+}
+.welcome-content {
+  width: min(760px, 100%);
+  margin: auto;
+}
+.welcome-intro {
+  position: relative;
+  padding: 28px 0 40px;
+  border-top: 1px solid var(--border-default);
+}
+.welcome-intro::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: 0;
+  width: 40px;
+  height: 3px;
+  background: var(--brand-decoration);
+}
+.welcome-eyebrow {
+  display: block;
+  max-width: calc(100% - 112px);
+  color: var(--text-muted);
+  font: 10px/1.6 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.welcome-mascot {
+  position: absolute;
+  top: 20px;
+  right: 0;
+  object-fit: contain;
+}
+.welcome-intro h2 {
+  margin-top: 40px;
+  color: var(--text-primary);
+  font-size: clamp(28px, 3.5vw, 44px);
+  font-weight: 550;
+  letter-spacing: -0.045em;
+  line-height: 1.12;
+}
+.welcome-intro p {
+  max-width: 440px;
+  margin-top: 20px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.8;
+}
+.welcome-action {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 28px;
+}
+.welcome-file-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.welcome-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  list-style: none;
+  border-block: 1px solid var(--border-subtle);
+}
+.welcome-steps li {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 20px;
+}
+.welcome-steps li:first-child {
+  padding-left: 0;
+}
+.welcome-steps li + li {
+  border-left: 1px solid var(--border-subtle);
+}
+.welcome-step-number {
+  color: var(--brand-primary);
+  font: 10px/1.5 var(--font-mono);
+}
+.welcome-steps strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+.welcome-steps li > span:last-child {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+@media (max-width: 640px) {
+  .workspace-welcome {
+    padding: 24px 16px;
+  }
+  .welcome-mascot {
+    width: 72px;
+    height: 72px;
+  }
+  .welcome-eyebrow {
+    max-width: calc(100% - 80px);
+    font-size: 9px;
+  }
+  .welcome-intro h2 {
+    margin-top: 56px;
+    font-size: clamp(25px, 5vw, 32px);
+  }
+  .welcome-intro p {
+    font-size: 13px;
+  }
+  .welcome-steps {
+    grid-template-columns: 1fr;
+  }
+  .welcome-steps li,
+  .welcome-steps li:first-child {
+    display: grid;
+    grid-template-columns: 24px 1fr;
+    gap: 4px 10px;
+    padding: 14px 0;
+  }
+  .welcome-step-number {
+    grid-row: span 2;
+    padding-top: 2px;
+  }
+  .welcome-steps li + li {
+    border-left: 0;
+    border-top: 1px solid var(--border-subtle);
+  }
+}

@@ -1,4 +1,5 @@
 import type { ChunksVersion, MarkdownVersion } from '../../types'
+import { chunkingOptions } from '../../utils/chunkingOptions'
 
 interface MarkdownVersionPickerProps {
   versions: MarkdownVersion[]
@@ -26,6 +27,7 @@ export function MarkdownVersionPicker({
         onSelectIdentifier(identifier)
       }}
       title="Switch between Markdown versions for this document"
+      aria-label="Markdown version"
     >
       {versions.map(version => {
         const baseLabel = version.source === 'converted' && version.converter
@@ -57,12 +59,18 @@ export function ChunksVersionPicker({
       value={selectedFilename ?? ''}
       onChange={e => { if (e.target.value) onLoadSavedChunks(e.target.value) }}
       title="Load a previously saved chunk version"
+      aria-label="Saved chunk version"
     >
       {!selectedFilename && <option value="" disabled hidden>{'\u2014 select a saved version \u2014'}</option>}
       {versions.map(version => {
+        const { usesSize, usesOverlap } = chunkingOptions({
+          chunkerLibrary: version.library,
+          chunkerType: version.algorithm,
+          enableMarkdownSizing: version.chunk_size != null,
+        })
         const params: string[] = []
-        if (version.chunk_size != null) params.push(`size ${version.chunk_size}`)
-        if (version.chunk_overlap != null) params.push(`overlap ${version.chunk_overlap}`)
+        if (usesSize && version.chunk_size != null) params.push(`size ${version.chunk_size}`)
+        if (usesOverlap && version.chunk_overlap != null) params.push(`overlap ${version.chunk_overlap}`)
         const suffix = params.length > 0 ? ` (${params.join(', ')})` : ''
         return (
           <option key={version.filename} value={version.filename}>
@@ -82,53 +90,9 @@ interface ZoomControlProps {
 export function ZoomControl({ scale, onScaleChange }: ZoomControlProps) {
   return (
     <div className="panel-zoom" title="Zoom">
-      <button onClick={() => onScaleChange(Math.max(0.5, scale - 0.1))} disabled={scale <= 0.5}>{'\u2212'}</button>
+      <button aria-label="Zoom out" onClick={() => onScaleChange(Math.max(0.5, scale - 0.1))} disabled={scale <= 0.5}>{'\u2212'}</button>
       <span>{(scale * 100).toFixed(0)}%</span>
-      <button onClick={() => onScaleChange(Math.min(3, scale + 0.1))} disabled={scale >= 3}>+</button>
-    </div>
-  )
-}
-
-interface MarkdownOptionsButtonProps {
-  onToggle: () => void
-}
-
-export function MarkdownOptionsButton({ onToggle }: MarkdownOptionsButtonProps) {
-  return (
-    <button
-      className="panel-options-btn"
-      onClick={onToggle}
-      title="View options"
-    >{'\u2699'}</button>
-  )
-}
-
-interface MarkdownOptionsPopoverProps {
-  isOpen: boolean
-  padding: number
-  onPaddingChange: (padding: number) => void
-}
-
-export function MarkdownOptionsPopover({
-  isOpen,
-  padding,
-  onPaddingChange,
-}: MarkdownOptionsPopoverProps) {
-  if (!isOpen) return null
-
-  return (
-    <div className="panel-options-popover" onClick={e => e.stopPropagation()}>
-      <label>
-        <span>Padding</span>
-        <span>{padding}px</span>
-      </label>
-      <input
-        type="range"
-        min={0}
-        max={100}
-        value={padding}
-        onChange={e => onPaddingChange(+e.target.value)}
-      />
+      <button aria-label="Zoom in" onClick={() => onScaleChange(Math.min(3, scale + 0.1))} disabled={scale >= 3}>+</button>
     </div>
   )
 }

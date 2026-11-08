@@ -154,6 +154,9 @@ export function useChunks(
     if (!chunkingEnabled) {
       chunkAbortRef.current?.abort()
       loadAbortRef.current?.abort()
+      // An interrupted first render has no reusable result. Let the next
+      // visit retry instead of treating the cancelled signature as complete.
+      if (chunks === null) chunkedSigRef.current = ''
       return
     }
     // Include availableChunks.length and currentMdSource in the signature

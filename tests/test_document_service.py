@@ -42,9 +42,9 @@ class _FakeVLMConverter:
 class DocumentServiceConversionTests(unittest.TestCase):
     @staticmethod
     def _pdf_bytes(page_count: int = 1) -> bytes:
-        import fitz
+        import pymupdf
 
-        pdf = fitz.open()
+        pdf = pymupdf.open()
         for _ in range(page_count):
             pdf.new_page()
         data = pdf.tobytes()
@@ -204,9 +204,9 @@ class DocumentServiceConversionTests(unittest.TestCase):
             pdfs_dir = service._pdfs_dir
             mds_dir = service._mds_dir
 
-            import fitz
+            import pymupdf
 
-            pdf = fitz.open()
+            pdf = pymupdf.open()
             pdf.new_page()
             pdf.save(pdfs_dir / "report.pdf")
             pdf.close()
@@ -246,11 +246,11 @@ class DocumentServiceConversionTests(unittest.TestCase):
 
             class _PreviewConverter:
                 def convert(self, pdf_path: Path, total_pages: int | None = None) -> str:
-                    import fitz
+                    import pymupdf
 
                     seen["exists_during_convert"] = pdf_path.exists()
                     seen["total_pages"] = total_pages or 0
-                    with fitz.open(str(pdf_path)) as doc:
+                    with pymupdf.open(str(pdf_path)) as doc:
                         seen["sliced_pages"] = doc.page_count
                     return "preview markdown"
 
@@ -321,9 +321,9 @@ class DocumentServiceConversionTests(unittest.TestCase):
             pdfs_dir = service._pdfs_dir
             mds_dir = service._mds_dir
 
-            import fitz
+            import pymupdf
 
-            pdf = fitz.open()
+            pdf = pymupdf.open()
             pdf.new_page()
             pdf.save(pdfs_dir / "report.pdf")
             pdf.close()
@@ -389,9 +389,9 @@ class DocumentServiceConversionTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             service = _make_service(Path(tmp))
 
-            import fitz
+            import pymupdf
 
-            pdf = fitz.open()
+            pdf = pymupdf.open()
             for _ in range(3):
                 pdf.new_page()
             pdf.save(service._pdfs_dir / "report.pdf")

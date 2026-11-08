@@ -5,6 +5,7 @@ Abstract base class for text chunkers.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import re
 
 from backend.models.schemas import ChunkItem, ChunkRequest
 
@@ -48,9 +49,8 @@ class TextChunker(ABC):
             splits:       List of text fragments produced by the chunker.
             char_overlap: Overlap size **in characters** used during chunking.
                           Controls how far back the search window rewinds before
-                          looking for the next chunk.  For token-based chunkers,
-                          pass the measured character overlap (not the token count)
-                          — see :meth:`measure_char_overlap`.
+                          looking for the next chunk. Token windows use their
+                          native token-to-source mapping instead.
 
         Returns:
             :class:`ChunkItem` list with ``start`` / ``end`` positions filled in.
@@ -59,31 +59,28 @@ class TextChunker(ABC):
         search_start = 0
 
         for i, text in enumerate(splits):
-            start = original.find(text, search_start)
-            if start == -1:
-                start = search_start
-            end = start + len(text)
-            chunks.append(ChunkItem(index=i, content=text, start=start, end=end))
-            search_start = max(0, end - char_overlap)
+            # Markdown splitters can normalize indentation and line breaks.
+            # Match those whitespace changes against the source rather than
+            # assigning a guessed cursor position to the resulting chunk.
+            pattern = re.compile(''.join(
+                r'\s+' if part.isspace() else re.escape(part)
+                for part in re.split(r'(\s+)', text)
+            ))
+            match = pattern.search(original, search_start)
+            if match:
+                start = match.start()
+                end = match.end()
+                if original.startswith(text, start):
+                    end = start + len(text)
+                chunks.append(ChunkItem(index=i, content=text, start=start, end=end))
+                search_start = min(len(original), max(start + 1, end - char_overlap))
+            else:
+                # Serializers can transform tables or aggregate non-contiguous
+                # sections. Do not invent offsets that would attach unrelated
+                # source text during highlighting or enrichment.
+                chunks.append(ChunkItem(
+                    index=i, content=text, start=0, end=0,
+                    metadata={'source_span_available': False},
+                ))
 
         return chunks
-
-    @staticmethod
-    def measure_char_overlap(splits: list[str]) -> int:
-        """Return the character length of the overlap between the first two splits.
-
-        Token-based chunkers report ``chunk_overlap`` in tokens, but
-        :meth:`build_chunks` needs the equivalent in *characters*.  Measuring
-        the longest common suffix/prefix of the first two adjacent chunks gives
-        the exact value without any token-to-character estimation.
-
-        Returns 0 when fewer than two splits exist or when no overlap is found.
-        """
-        if len(splits) < 2:
-            return 0
-        a, b = splits[0], splits[1]
-        limit = min(len(a), len(b))
-        for n in range(limit, 0, -1):
-            if a[-n:] == b[:n]:
-                return n
-        return 0

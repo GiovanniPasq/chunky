@@ -1,41 +1,31 @@
-/* ============================================
-   SummaryReviewModal.css
-
-   Inherits the shared modal scaffolding from ``SettingsModal.css``
-   (``.modal-overlay``, ``.modal-header``, ``.modal-body``,
-   ``.modal-footer``, ``.modal-close``, ``.form-group``, ``.btn-primary``,
-   ``.btn-secondary``).  The rules below provide the wider container
-   (the term list needs more horizontal room than the settings panel),
-   the progress bar styling, the warning / info banners, and the chip /
-   term list editors — all using the app's warm brown + cream palette.
-   ============================================ */
-
-
-/* ── Modal box ─────────────────────────────────────────────────────────
-   Same visual treatment as ``.settings-modal`` (gradient, border,
-   shadow, slide-in animation), but wider so the editable term rows
-   don't squeeze into uselessly small inputs.  ``overflow: hidden``
-   clips the rounded corners against the footer's cream background. */
+/* Summary review uses the shared Modal frame and theme-aware form styles.
+   Its wider container accommodates the editable summary, progress indicators,
+   and status banners. */
 
 .summary-modal {
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 248, 235, 0.97) 100%);
-  backdrop-filter: blur(20px);
-  border-radius: 16px;
+  background: var(--bg-surface);
+
+  border-radius: var(--radius-lg);
   width: min(760px, 100%);
   max-height: min(90vh, calc(100dvh - 32px));
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: 0 30px 80px rgba(139, 69, 19, 0.28), 0 8px 24px rgba(0, 0, 0, 0.1);
-  border: 2px solid rgba(255, 255, 255, 0.4);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-subtle);
   animation: summarySlideIn 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 @keyframes summarySlideIn {
-  from { transform: translateY(-40px) scale(0.96); opacity: 0; }
-  to   { transform: translateY(0) scale(1); opacity: 1; }
+  from {
+    transform: translateY(-40px) scale(0.96);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
 }
-
 
 /* ── State containers (loading / empty / generating / saving / error) ── */
 
@@ -48,7 +38,7 @@
   text-align: center;
   gap: 14px;
   padding: 48px 24px;
-  color: #5C2E0A;
+  color: var(--text-secondary);
 }
 
 .summary-state-empty p,
@@ -56,13 +46,13 @@
   margin: 0;
   font-size: 13px;
   line-height: 1.6;
-  color: #7A5035;
+  color: var(--text-secondary);
   max-width: 480px;
 }
 
 .summary-state-empty .label-hint {
   font-size: 12px;
-  color: #9A7050;
+  color: var(--text-muted);
   line-height: 1.55;
 }
 
@@ -72,7 +62,7 @@
 }
 
 /* Two side-by-side actions for the "no summary cached" path: the
-   primary brown gradient leads (Generate); the secondary white-outline
+   primary action leads (Generate); the secondary outlined
    button offers the explicit Skip escape hatch.  Stacks on narrow
    viewports so neither button ever truncates. */
 .summary-empty-actions {
@@ -85,7 +75,7 @@
 
 @media (max-width: 640px) {
   .summary-modal {
-    border-radius: 12px;
+    border-radius: var(--radius-lg);
     max-height: calc(100dvh - 16px);
   }
 
@@ -104,10 +94,7 @@
   }
 }
 
-
-/* ── Progress bar ──────────────────────────────────────────────────────
-   Matches the app's brown-gradient idiom rather than the solid blue of
-   the previous draft.  Used while ``/summary/generate`` streams events. */
+/* Progress while /summary/generate streams events. */
 
 .summary-progress {
   display: flex;
@@ -121,7 +108,7 @@
   margin: 0;
   font-size: 13px;
   font-weight: 600;
-  color: #7A5035;
+  color: var(--text-secondary);
   letter-spacing: 0.2px;
   text-align: center;
 }
@@ -131,18 +118,18 @@
   width: 100%;
   max-width: 440px;
   height: 8px;
-  background: #F0E6D6;
+  background: var(--border-subtle);
   border-radius: 999px;
   overflow: hidden;
-  box-shadow: inset 0 1px 2px rgba(139, 69, 19, 0.08);
+  box-shadow: var(--shadow-sm);
 }
 
 .summary-progress-fill {
   height: 100%;
-  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
+  background: var(--brand-primary);
   border-radius: 999px;
   transition: width 280ms ease-out;
-  box-shadow: 0 0 8px rgba(139, 69, 19, 0.3);
+  box-shadow: var(--shadow-sm);
 }
 
 .summary-progress-fill--indeterminate {
@@ -151,44 +138,42 @@
 }
 
 @keyframes summaryProgressSlide {
-  0%   { transform: translateX(-110%); }
-  100% { transform: translateX(330%); }
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(330%);
+  }
 }
 
-
-/* ── Inline banners ───────────────────────────────────────────────────
-   Status hints surfaced above the editable form when the cached
-   summary was built with failures, or has been user-edited.  Warning
-   keeps the universal amber to read as a problem cue; the info banner
-   uses brown tones so it sits inside the app palette. */
+/* Status hints for partial generation and user-edited summaries. */
 
 .summary-warning-banner {
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.14) 0%, rgba(245, 158, 11, 0.08) 100%);
-  border: 1.5px solid rgba(245, 158, 11, 0.45);
-  color: #7C4A00;
+  background: var(--status-warning-bg);
+  border: 1px solid var(--status-warning-border);
+  color: var(--status-warning);
   padding: 10px 14px;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   font-size: 12.5px;
   line-height: 1.5;
   font-weight: 500;
 }
 
 .summary-warning-banner strong {
-  font-weight: 700;
-  color: #5A3500;
+  font-weight: 600;
+  color: var(--status-warning);
 }
 
 .summary-info-banner {
-  background: linear-gradient(135deg, rgba(139, 69, 19, 0.08) 0%, rgba(210, 105, 30, 0.06) 100%);
-  border: 1.5px solid rgba(139, 69, 19, 0.22);
-  color: #5C2E0A;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
   padding: 10px 14px;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   font-size: 12.5px;
   line-height: 1.5;
   font-weight: 500;
 }
-
 
 /* ── Multiline narrative textarea ─────────────────────────────────────
    ``.form-group input`` is already styled for short single-line
@@ -196,10 +181,10 @@
    a sensible minimum height. */
 
 .summary-modal .form-group textarea {
-  background: white;
-  border: 2px solid #E8D5C0;
-  border-radius: 8px;
-  color: #3B1A05;
+  background: var(--bg-control);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
   padding: 10px 12px;
   font-size: 13px;
   font-weight: 500;
@@ -214,176 +199,34 @@
 }
 
 .summary-modal .form-group textarea:hover {
-  border-color: rgba(139, 69, 19, 0.4);
+  border-color: var(--border-hover);
 }
 
 .summary-modal .form-group textarea:focus {
-  border-color: #8B4513;
-  box-shadow: 0 0 0 3px rgba(139, 69, 19, 0.1);
+  border-color: var(--brand-primary);
+  box-shadow: 0 0 0 2px var(--brand-ring);
 }
-
 
 /* ── Footer-meta line ─────────────────────────────────────────────────
    The "Generated 2026-… · model X · N extractions cached" caption that
    sits at the very bottom of the editable form. */
 
 .summary-meta {
-  color: #B08060;
+  color: var(--text-muted);
   font-size: 11px;
   font-weight: 500;
   margin: 8px 0 0;
   letter-spacing: 0.2px;
 }
 
-
 /* ── Footer layout — extends the shared .modal-footer ────────────────
-   The shared rule already provides the cream background and the 2px
-   border-top; we just need the three-button distribution (Regenerate
+   The shared rule provides the footer background and separator; we just need the three-button distribution (Regenerate
    left, Cancel + Confirm right). */
 
 .summary-modal-footer {
   justify-content: flex-start;
 }
 
-.modal-footer-spacer { flex: 1; }
-
-
-/* ── Chip list (entities, structure) ─────────────────────────────────
-   Pill-shaped chips with the cream / brown palette, sitting in a
-   bordered well so they read as their own field rather than free-form
-   text.  The "add" input + button row below uses the same shape as
-   any other ``.form-group input``. */
-
-.chip-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px 10px;
-  min-height: 36px;
-  background: #FFFBF3;
-  border: 2px solid #F0E6D6;
-  border-radius: 8px;
-  margin-bottom: 6px;
-}
-
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 6px 3px 10px;
-  background: linear-gradient(135deg, rgba(139, 69, 19, 0.10) 0%, rgba(210, 105, 30, 0.08) 100%);
-  border: 1px solid rgba(139, 69, 19, 0.18);
-  color: #3D2A18;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.25;
-}
-
-.chip-remove {
-  appearance: none;
-  background: transparent;
-  border: none;
-  color: #9A7050;
-  font-size: 14px;
-  line-height: 1;
-  padding: 2px 6px;
-  cursor: pointer;
-  border-radius: 50%;
-  transition: all 0.2s ease;
-  font-family: inherit;
-}
-
-.chip-remove:hover {
-  background: rgba(204, 34, 0, 0.12);
-  color: #CC2200;
-}
-
-.chip-list-empty {
-  color: #B08060;
-  font-style: italic;
-  font-size: 12px;
-  align-self: center;
-}
-
-.chip-add-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.chip-add-row input {
+.modal-footer-spacer {
   flex: 1;
-}
-
-.chip-add-btn {
-  white-space: nowrap;
-  padding: 8px 14px !important;
-  font-size: 11px !important;
-}
-
-
-/* ── Term list (term + definition pairs) ─────────────────────────────
-   Same well treatment as the chip list, but each row is a 2-input grid
-   so the user can edit term and definition independently. */
-
-.term-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 8px 10px;
-  background: #FFFBF3;
-  border: 2px solid #F0E6D6;
-  border-radius: 8px;
-  margin-bottom: 6px;
-}
-
-.term-row,
-.term-add-row {
-  display: grid;
-  grid-template-columns: minmax(140px, 1fr) minmax(220px, 2.4fr) auto;
-  gap: 8px;
-  align-items: center;
-}
-
-.term-row-term,
-.term-row-def {
-  width: 100%;
-}
-
-.term-row input {
-  font-size: 12.5px !important;
-  padding: 7px 10px !important;
-}
-
-.term-remove {
-  appearance: none;
-  background: transparent;
-  border: none;
-  color: #9A7050;
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 6px;
-  transition: all 0.2s ease;
-  font-family: inherit;
-}
-
-.term-remove:hover {
-  background: rgba(204, 34, 0, 0.12);
-  color: #CC2200;
-}
-
-.term-add-row {
-  padding-top: 4px;
-  border-top: 1px dashed #F0E6D6;
-  margin-top: 4px;
-}
-
-
-/* ── Tighten label-hint spacing under the chip / term wells ────────── */
-
-.summary-modal .form-group > .label-hint {
-  margin-bottom: 4px;
 }

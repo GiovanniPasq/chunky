@@ -8,22 +8,11 @@
    to write THAT content to disk (not the raw pipeline output).
 */
 
-.enrich-diff-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 2000;
-  background: rgba(20, 8, 2, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-}
-
 .enrich-diff-modal {
-  background: #FBF6EE;
-  border: 1.5px solid rgba(139, 69, 19, 0.18);
-  border-radius: 10px;
-  box-shadow: 0 20px 60px rgba(20, 8, 2, 0.30);
+  background: var(--bg-main);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
   width: min(1600px, 100%);
   height: min(900px, calc(100dvh - 40px));
   display: flex;
@@ -35,74 +24,30 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1.5px solid rgba(139, 69, 19, 0.12);
+  padding: 12px var(--modal-gutter);
+  border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
 }
 
-.enrich-diff-title {
-  margin: 0;
-  font-size: 16px;
-  color: #3D2A18;
-  font-weight: 700;
-}
-
 .enrich-diff-stats {
-  margin-top: 6px;
+  margin-top: 0;
   font-size: 12px;
-  color: #6A5238;
+  color: var(--text-secondary);
 }
 
 .enrich-diff-stats strong {
-  color: #3D2A18;
+  color: var(--text-primary);
 }
 
 .enrich-diff-stats .enrich-diff-failed {
-  color: #A85F00;
-}
-
-.enrich-diff-close {
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 16px;
-  padding: 2px 8px;
-  color: #6A5238;
-}
-
-.enrich-diff-close:hover {
-  color: #3D2A18;
+  color: var(--status-warning);
 }
 
 /* Tabs */
 
 .enrich-diff-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 8px 20px 0;
-  border-bottom: 1.5px solid rgba(139, 69, 19, 0.12);
+  margin: 12px var(--modal-gutter);
   flex-shrink: 0;
-}
-
-.enrich-diff-tab {
-  background: transparent;
-  border: none;
-  border-bottom: 2.5px solid transparent;
-  padding: 8px 14px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #6A5238;
-  cursor: pointer;
-  margin-bottom: -1.5px;
-}
-
-.enrich-diff-tab.active {
-  color: #3D2A18;
-  border-bottom-color: #8B4513;
-}
-
-.enrich-diff-tab:hover:not(.active) {
-  color: #3D2A18;
 }
 
 /* ── Body ── */
@@ -110,13 +55,13 @@
 .enrich-diff-body {
   flex: 1;
   overflow: auto;
-  background: #FFFBF4;
+  background: var(--bg-surface);
 }
 
 .enrich-diff-notice {
   padding: 24px;
   text-align: center;
-  color: #6A5238;
+  color: var(--text-secondary);
   font-size: 13px;
 }
 
@@ -128,25 +73,25 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
   line-height: 1.55;
-  color: #3D2A18;
+  color: var(--text-primary);
 }
 
 .enrich-diff-col-header {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: #FBF6EE;
-  border-bottom: 1.5px solid rgba(139, 69, 19, 0.18);
+  background: var(--bg-main);
+  border-bottom: 1px solid var(--border-subtle);
   padding: 8px 12px;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: #6A5238;
+  color: var(--text-secondary);
 }
 
 .enrich-diff-col-header + .enrich-diff-col-header {
-  border-left: 1px solid rgba(139, 69, 19, 0.18);
+  border-left: 1px solid var(--border-subtle);
 }
 
 /* One cell per side per row.  Each cell is a single line and pairs with
@@ -155,23 +100,23 @@
   display: grid;
   grid-template-columns: 44px 1fr;
   padding: 0 8px 0 0;
-  min-height: 1.55em;       /* keep blank-line cells visible */
-  border-bottom: 1px solid rgba(139, 69, 19, 0.06);
+  min-height: 1.55em; /* keep blank-line cells visible */
+  border-bottom: 1px solid var(--border-subtle);
   background: transparent;
 }
 
 .enrich-diff-cell + .enrich-diff-cell {
-  border-left: 1px solid rgba(139, 69, 19, 0.10);
+  border-left: 1px solid var(--border-subtle);
 }
 
 .enrich-diff-cell.empty {
-  background: rgba(139, 69, 19, 0.04);
+  background: var(--bg-subtle);
   background-image: repeating-linear-gradient(
-    -45deg,
+    135deg,
     transparent,
-    transparent 6px,
-    rgba(139, 69, 19, 0.05) 6px,
-    rgba(139, 69, 19, 0.05) 12px
+    transparent 4px,
+    var(--border-subtle) 4px,
+    var(--border-subtle) 8px
   );
 }
 
@@ -179,15 +124,15 @@
      changed-left  = deleted-from-original (or "old" side of a modify)
      changed-right = inserted (or "new" side of a modify) */
 .enrich-diff-cell.changed-left {
-  background: rgba(180, 50, 30, 0.10);
+  background: var(--status-danger-bg);
 }
 
 .enrich-diff-cell.changed-right {
-  background: rgba(60, 140, 60, 0.13);
+  background: var(--status-success-bg);
 }
 
 .enrich-diff-line-num {
-  color: #B8A989;
+  color: var(--text-muted);
   font-size: 10px;
   text-align: right;
   padding-right: 8px;
@@ -205,10 +150,10 @@
 .enrich-diff-skip-row {
   padding: 6px 16px;
   font-style: italic;
-  color: #B8A989;
-  background: rgba(139, 69, 19, 0.04);
-  border-top: 1px dashed rgba(139, 69, 19, 0.15);
-  border-bottom: 1px dashed rgba(139, 69, 19, 0.15);
+  color: var(--text-muted);
+  background: var(--bg-subtle);
+  border-top: 1px dashed var(--border-default);
+  border-bottom: 1px dashed var(--border-default);
   text-align: center;
   font-size: 11px;
   user-select: none;
@@ -221,10 +166,10 @@
   align-items: center;
   justify-content: flex-end;
   padding: 6px 16px;
-  border-bottom: 1px solid rgba(139, 69, 19, 0.10);
-  background: #FBF6EE;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-main);
   font-size: 12px;
-  color: #6A5238;
+  color: var(--text-secondary);
   flex-shrink: 0;
 }
 
@@ -244,7 +189,7 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   grid-template-rows: auto 1fr;
-  height: calc(100% - 33px);  /* leave room for the toolbar */
+  height: calc(100% - 33px); /* leave room for the toolbar */
   /* Body's overflow:auto wraps this; let the textareas handle scrolling. */
   align-items: stretch;
 }
@@ -253,10 +198,10 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
   line-height: 1.55;
-  color: #3D2A18;
-  background: #FFFBF4;
+  color: var(--text-primary);
+  background: var(--bg-surface);
   border: none;
-  border-top: 1px solid rgba(139, 69, 19, 0.10);
+  border-top: 1px solid var(--border-subtle);
   padding: 12px 16px;
   resize: none;
   outline: none;
@@ -265,13 +210,13 @@
 }
 
 .enrich-diff-textarea + .enrich-diff-textarea {
-  border-left: 1px solid rgba(139, 69, 19, 0.10);
-  background: #FFFFFF;     /* subtle distinction for the editable side */
+  border-left: 1px solid var(--border-subtle);
+  background: var(--bg-surface); /* subtle distinction for the editable side */
 }
 
 .enrich-diff-textarea:focus {
-  background: #FFFFFF;
-  box-shadow: inset 0 0 0 1px rgba(139, 69, 19, 0.25);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
 }
 
 .enrich-diff-textarea[readonly] {
@@ -284,10 +229,10 @@
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding: 12px 20px;
-  border-top: 1.5px solid rgba(139, 69, 19, 0.12);
+  padding: 12px var(--modal-gutter);
+  border-top: 1px solid var(--border-subtle);
   flex-shrink: 0;
-  background: #FBF6EE;
+  background: var(--bg-main);
 }
 
 .enrich-diff-reject,
@@ -297,27 +242,29 @@
   font-weight: 600;
   border-radius: 6px;
   cursor: pointer;
-  transition: background 0.15s, transform 0.05s;
+  transition:
+    background 0.15s,
+    transform 0.05s;
 }
 
 .enrich-diff-reject {
   background: transparent;
-  border: 1.5px solid rgba(139, 69, 19, 0.30);
-  color: #6A5238;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
 }
 
 .enrich-diff-reject:hover:not(:disabled) {
-  background: rgba(139, 69, 19, 0.08);
+  background: var(--bg-subtle);
 }
 
 .enrich-diff-accept {
-  background: linear-gradient(135deg, #8B4513 0%, #A05A28 100%);
-  border: 1.5px solid #6A3410;
+  background: var(--button-primary);
+  border: 1px solid var(--button-primary);
   color: white;
 }
 
 .enrich-diff-accept:hover:not(:disabled) {
-  background: linear-gradient(135deg, #7A3D11 0%, #8C4D20 100%);
+  background: var(--button-primary-hover);
 }
 
 .enrich-diff-reject:disabled,
@@ -327,20 +274,12 @@
 }
 
 @media (max-width: 900px) {
-  .enrich-diff-overlay {
-    padding: 10px;
-  }
-
   .enrich-diff-modal {
     height: calc(100dvh - 20px);
   }
 
   .enrich-diff-header {
-    padding: 12px 14px;
-  }
-
-  .enrich-diff-tabs {
-    padding: 6px 14px 0;
+    padding: 12px var(--modal-gutter);
   }
 
   .enrich-diff-grid,
@@ -360,7 +299,7 @@
 
   .enrich-diff-footer {
     flex-wrap: wrap;
-    padding: 10px 14px;
+    padding: 10px var(--modal-gutter);
   }
 }
 

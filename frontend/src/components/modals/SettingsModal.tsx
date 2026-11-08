@@ -1,6 +1,9 @@
-import { useState, useEffect, useCallback } from 'react'
+import Modal from '../common/Modal'
+import Button from '../common/Button'
+import ViewTabs from '../common/ViewTabs'
+import { useState, useEffect } from 'react'
 import type { ChunkSettings, Capabilities, CapabilityLibrary, EnrichmentSettings } from '../../types'
-import { capabilityService } from '../../services/apiService'
+import { useCapabilities } from '../../hooks/useCapabilities'
 import {
   DEFAULT_SETTINGS,
   DEFAULT_VLM_MODEL,
@@ -10,20 +13,18 @@ import {
 } from '../../hooks/useSettings'
 import EnrichmentSettingsPanel from './EnrichmentSettings'
 import LLMSettingsPanel from './LLMSettingsPanel'
+import { chunkingOptions } from '../../utils/chunkingOptions'
 import './SettingsModal.css'
-
-// Module-level cache — capabilities never change while the backend is running,
-// so we only ever fetch them once per page load.
-let capabilitiesCache: Capabilities | null = null
 
 interface Props {
   isOpen: boolean
   onClose: () => void
   onSave: (settings: ChunkSettings) => void
   current: ChunkSettings
+  hasActiveDocument?: boolean
+  initialTab?: TabId
 }
 
-type LoadState = 'loading' | 'ok' | 'error'
 type TabId = 'conversion' | 'chunking' | 'enrichment'
 
 function strategiesFor(caps: Capabilities, library: string) {
@@ -35,60 +36,30 @@ function resolveStrategy(caps: Capabilities, library: string, current: string): 
   return strats.some(s => s.strategy === current) ? current : (strats[0]?.strategy ?? current)
 }
 
-// Chunkers that don't support chunk_overlap per Chonkie docs
-const CHONKIE_NO_OVERLAP = new Set(['recursive', 'fast', 'table', 'code', 'late', 'neural', 'slumber'])
-const CHONKIE_NO_SIZE = new Set(['table', 'neural'])
-
-export default function SettingsModal({ isOpen, onClose, onSave, current }: Props) {
+export default function SettingsModal({ isOpen, onClose, onSave, current, hasActiveDocument = false, initialTab = 'conversion' }: Props) {
   const [settings, setSettings] = useState<ChunkSettings>(current)
   const [chunkSizeDraft, setChunkSizeDraft] = useState(String(current.chunkSize))
   const [chunkOverlapDraft, setChunkOverlapDraft] = useState(String(current.chunkOverlap))
-  const [caps, setCaps] = useState<Capabilities | null>(null)
-  const [loadState, setLoadState] = useState<LoadState>('loading')
-  const [activeTab, setActiveTab] = useState<TabId>('conversion')
-
-  const fetchCaps = useCallback(() => {
-    // Serve from cache on subsequent opens — capabilities don't change at runtime.
-    if (capabilitiesCache) {
-      const data = capabilitiesCache
-      setCaps(data)
-      setLoadState('ok')
-      setSettings(prev => {
-        const lib = data.chunkers.some(l => l.library === prev.chunkerLibrary)
-          ? prev.chunkerLibrary
-          : (data.chunkers[0]?.library ?? prev.chunkerLibrary)
-        const strategy = resolveStrategy(data, lib, prev.chunkerType)
-        const converter = data.converters.some(c => c.name === prev.converter)
-          ? prev.converter
-          : (data.converters[0]?.name ?? prev.converter)
-        return { ...prev, chunkerLibrary: lib, chunkerType: strategy, converter }
-      })
-      return
-    }
-    setLoadState('loading')
-    setCaps(null)
-    capabilityService.get()
-      .then(data => {
-        capabilitiesCache = data
-        setCaps(data)
-        setLoadState('ok')
-        setSettings(prev => {
-          const lib = data.chunkers.some(l => l.library === prev.chunkerLibrary)
-            ? prev.chunkerLibrary
-            : (data.chunkers[0]?.library ?? prev.chunkerLibrary)
-          const strategy = resolveStrategy(data, lib, prev.chunkerType)
-          const converter = data.converters.some(c => c.name === prev.converter)
-            ? prev.converter
-            : (data.converters[0]?.name ?? prev.converter)
-          return { ...prev, chunkerLibrary: lib, chunkerType: strategy, converter }
-        })
-      })
-      .catch(() => setLoadState('error'))
-  }, [])
+  const { caps, loadState, retry: fetchCaps } = useCapabilities(isOpen)
+  const [activeTab, setActiveTab] = useState<TabId>(initialTab)
 
   useEffect(() => {
-    if (isOpen) fetchCaps()
-  }, [isOpen, fetchCaps])
+    if (isOpen) setActiveTab(initialTab)
+  }, [isOpen, initialTab])
+
+  useEffect(() => {
+    if (!isOpen || !caps) return
+    setSettings(prev => {
+      const lib = caps.chunkers.some(item => item.library === prev.chunkerLibrary)
+        ? prev.chunkerLibrary
+        : (caps.chunkers[0]?.library ?? prev.chunkerLibrary)
+      const strategy = resolveStrategy(caps, lib, prev.chunkerType)
+      const converter = caps.converters.some(item => item.name === prev.converter)
+        ? prev.converter
+        : (caps.converters[0]?.name ?? prev.converter)
+      return { ...prev, chunkerLibrary: lib, chunkerType: strategy, converter }
+    })
+  }, [isOpen, caps])
 
   useEffect(() => {
     if (!isOpen) setSettings(current)
@@ -119,10 +90,6 @@ export default function SettingsModal({ isOpen, onClose, onSave, current }: Prop
     setSettings(prev => ({ ...prev, chunkerLibrary: lib, chunkerType: strategy }))
   }
 
-  const handleOverlay = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) onClose()
-  }
-
   const handleSave = () => {
     onSave(normaliseChunkSettings(settings))
     onClose()
@@ -151,31 +118,19 @@ export default function SettingsModal({ isOpen, onClose, onSave, current }: Prop
   const availableStrategies = caps ? strategiesFor(caps, settings.chunkerLibrary) : []
   const currentStrategy = availableStrategies.find(s => s.strategy === settings.chunkerType)
 
-  const isDocling = settings.chunkerLibrary === 'docling'
   const isMarkdownSizeDisabled =
     settings.chunkerType === 'markdown' && !settings.enableMarkdownSizing
+  const { usesSize, usesOverlap, unit: sizeUnit } = chunkingOptions(settings)
+  const isTable = settings.chunkerLibrary === 'chonkie' && settings.chunkerType === 'table'
   const isChunkerSizeDisabled =
-    settings.chunkerLibrary === 'chonkie' && CHONKIE_NO_SIZE.has(settings.chunkerType)
-  const isSizeDisabled = isMarkdownSizeDisabled || isChunkerSizeDisabled
-  const isOverlapDisabled =
-    isSizeDisabled ||
-    isDocling ||
-    (settings.chunkerLibrary === 'chonkie' && CHONKIE_NO_OVERLAP.has(settings.chunkerType))
-  const sizeUnit = isDocling || settings.chunkerType === 'token'
-    ? 'tokens'
-    : settings.chunkerLibrary === 'chonkie' && settings.chunkerType === 'fast'
-      ? 'bytes'
-      : 'chars'
+    settings.chunkerLibrary === 'chonkie' && !usesSize
 
   return (
-    <div className="modal-overlay" onClick={handleOverlay}>
-      <div className="settings-modal">
-
-        {/* Header */}
-        <div className="modal-header">
-          <h2>Settings</h2>
-          <button className="modal-close" onClick={onClose}>✕</button>
-        </div>
+    <Modal open={isOpen} onClose={onClose} title="Settings" className="settings-modal">
+      <div className="settings-scope">
+        <strong>Saved in this browser for future processing.</strong> Changing the converter does not reconvert files.
+        {hasActiveDocument && ' Changing chunking settings regenerates chunks when the Chunks view is open. You will be asked to save or discard any unsaved edits first.'}
+      </div>
 
         {/* Loading state */}
         {loadState === 'loading' && (
@@ -198,26 +153,11 @@ export default function SettingsModal({ isOpen, onClose, onSave, current }: Prop
         {loadState === 'ok' && caps && (
           <>
             {/* Tab bar */}
-            <div className="settings-tabs">
-              <button
-                className={`settings-tab${activeTab === 'conversion' ? ' active' : ''}`}
-                onClick={() => setActiveTab('conversion')}
-              >
-                Conversion
-              </button>
-              <button
-                className={`settings-tab${activeTab === 'chunking' ? ' active' : ''}`}
-                onClick={() => setActiveTab('chunking')}
-              >
-                Chunking
-              </button>
-              <button
-                className={`settings-tab${activeTab === 'enrichment' ? ' active' : ''}`}
-                onClick={() => setActiveTab('enrichment')}
-              >
-                Enrichment
-              </button>
-            </div>
+            <ViewTabs label="Settings section" value={activeTab} onChange={setActiveTab} variant="segmented" className="settings-tabs" items={[
+              { value: 'conversion', label: 'Conversion' },
+              { value: 'chunking', label: 'Chunking' },
+              { value: 'enrichment', label: 'Enrichment' },
+            ]} />
 
             <div className="modal-body">
 
@@ -232,6 +172,7 @@ export default function SettingsModal({ isOpen, onClose, onSave, current }: Prop
                         <button
                           key={c.name}
                           className={`converter-option${settings.converter === c.name ? ' selected' : ''}`}
+                          aria-pressed={settings.converter === c.name}
                           onClick={() => set('converter', c.name)}
                         >
                           <span className="converter-label">{c.label}</span>
@@ -312,6 +253,7 @@ export default function SettingsModal({ isOpen, onClose, onSave, current }: Prop
                         <button
                           key={lib.library}
                           className={`library-option${settings.chunkerLibrary === lib.library ? ' selected' : ''}`}
+                          aria-pressed={settings.chunkerLibrary === lib.library}
                           onClick={() => handleLibraryChange(lib.library)}
                         >
                           <span className="library-label">{lib.label}</span>
@@ -322,8 +264,10 @@ export default function SettingsModal({ isOpen, onClose, onSave, current }: Prop
                   </div>
 
                   <div className="form-group">
-                    <label>Chunker Type</label>
+                    <label htmlFor="chunker-type">Chunker Type</label>
                     <select
+                      id="chunker-type"
+                      aria-describedby={currentStrategy ? 'chunker-type-description' : undefined}
                       value={settings.chunkerType}
                       onChange={e => set('chunkerType', e.target.value)}
                     >
@@ -331,7 +275,7 @@ export default function SettingsModal({ isOpen, onClose, onSave, current }: Prop
                         <option key={s.strategy} value={s.strategy}>{s.label}</option>
                       ))}
                     </select>
-                    {currentStrategy && <small>{currentStrategy.description}</small>}
+                    {currentStrategy && <small id="chunker-type-description">{currentStrategy.description}</small>}
                   </div>
 
                   {settings.chunkerType === 'markdown' && (
@@ -349,23 +293,27 @@ export default function SettingsModal({ isOpen, onClose, onSave, current }: Prop
 
                   <div className="form-row">
                     <div className="form-group">
-                      <label>Chunk Size <span className="label-hint">({sizeUnit})</span></label>
+                      <label htmlFor="chunk-size">Chunk Size {(usesSize || isTable) && <span className="label-hint">({sizeUnit})</span>}</label>
                       <input
+                        id="chunk-size"
                         type="number"
-                        value={chunkSizeDraft}
+                        value={usesSize ? chunkSizeDraft : isTable ? '3' : ''}
+                        placeholder="Not used"
                         onChange={e => handleChunkSizeChange(e.target.value)}
                         min={100} max={10000} step={100}
-                        disabled={isSizeDisabled}
+                        disabled={!usesSize}
                       />
                     </div>
                     <div className="form-group">
-                      <label>Overlap <span className="label-hint">({sizeUnit})</span></label>
+                      <label htmlFor="chunk-overlap">Overlap {usesOverlap && <span className="label-hint">({sizeUnit})</span>}</label>
                       <input
+                        id="chunk-overlap"
                         type="number"
-                        value={chunkOverlapDraft}
+                        value={usesOverlap ? chunkOverlapDraft : ''}
+                        placeholder="Not used"
                         onChange={e => handleChunkOverlapChange(e.target.value)}
                         min={0} max={Math.floor(settings.chunkSize / 2)} step={50}
-                        disabled={isOverlapDisabled}
+                        disabled={!usesOverlap}
                       />
                     </div>
                   </div>
@@ -374,9 +322,9 @@ export default function SettingsModal({ isOpen, onClose, onSave, current }: Prop
                     <small className="size-hint">Enable sizing above to set chunk size and overlap.</small>
                   )}
                   {isChunkerSizeDisabled && (
-                    <small className="size-hint">This chunker determines its own boundaries and does not use size or overlap.</small>
+                    <small className="size-hint">{isTable ? 'Tables use 3 data rows per chunk with repeated headers. Size and overlap settings are not used.' : 'This chunker determines its own boundaries and does not use size or overlap.'}</small>
                   )}
-                  {!isSizeDisabled && isOverlapDisabled && (
+                  {usesSize && !usesOverlap && (
                     <small className="size-hint">This chunker does not support chunk overlap.</small>
                   )}
 
@@ -423,14 +371,13 @@ export default function SettingsModal({ isOpen, onClose, onSave, current }: Prop
             <div className="modal-footer">
               <button className="btn-reset" onClick={handleReset}>Reset to defaults</button>
               <div className="modal-footer-actions">
-                <button className="btn-secondary" onClick={onClose}>Cancel</button>
-                <button className="btn-primary" onClick={handleSave}>Apply Settings</button>
+                <Button size="md" onClick={onClose}>Cancel</Button>
+                <Button size="md" variant="primary" onClick={handleSave}>Apply settings</Button>
               </div>
             </div>
           </>
         )}
 
-      </div>
-    </div>
+    </Modal>
   )
 }

@@ -1,439 +1,146 @@
-/* ============================================
-   ChunkViewer.css
-   ============================================ */
-
-/* ── Chunk list container ── */
 .chunk-list {
   padding: 16px;
+  background: var(--bg-main);
 }
-
-/* ── Action button variants (chunk-specific) ── */
-.md-action-btn.save-chunks {
-  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
-  color: white;
-  box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.3);
-}
-
-.md-action-btn.save-chunks:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0px 4px 12px rgba(139, 69, 19, 0.4);
-}
-
-.md-action-btn.save-chunks:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  transform: none;
-}
-
-/* Re-run the chunker against the current Markdown — green palette
-   inherited from the previous "Reconvert" button so the action reads as
-   "regenerate" without inventing a new colour. */
-.md-action-btn.rechunk {
-  background: white;
-  border: 1.5px solid rgba(61, 107, 39, 0.3);
-  color: #3D6B27;
-  box-shadow: 0 1px 4px rgba(61, 107, 39, 0.1);
-}
-
-.md-action-btn.rechunk:hover:not(:disabled) {
-  background: linear-gradient(135deg, #3D6B27 0%, #5A8C3E 100%);
-  border-color: transparent;
-  color: white;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(61, 107, 39, 0.3);
-}
-
-.md-action-btn.rechunk:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.md-action-btn.cancel-chunking {
-  background: transparent;
-  border: 1.5px solid rgba(139, 69, 19, 0.4);
-  color: #8B4513;
-}
-
-.md-action-btn.cancel-chunking:hover {
-  background: rgba(139, 69, 19, 0.08);
-  border-color: #8B4513;
-}
-
-.md-action-btn.merge-chunks {
-  background: linear-gradient(135deg, #1E5A8C 0%, #2A7AC4 100%);
-  color: white;
-  box-shadow: 0px 2px 8px rgba(30, 90, 140, 0.3);
-}
-
-.md-action-btn.merge-chunks:hover {
-  transform: translateY(-1px);
-  box-shadow: 0px 4px 12px rgba(30, 90, 140, 0.4);
-}
-
-.md-action-btn.enrich-chunks {
-  background: linear-gradient(135deg, #1E5A8C 0%, #2A7AC4 100%);
-  color: white;
-  box-shadow: 0px 2px 8px rgba(30, 90, 140, 0.3);
-}
-
-.md-action-btn.enrich-chunks:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0px 4px 12px rgba(30, 90, 140, 0.4);
-}
-
-.md-action-btn.enrich-chunks:disabled,
-.md-action-btn.enrich-chunks.loading {
-  opacity: 0.65;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.md-action-btn.delete-chunks {
-  background: linear-gradient(135deg, #CC2200 0%, #A81B00 100%);
-  color: white;
-  box-shadow: 0px 2px 8px rgba(204, 34, 0, 0.3);
-}
-
-.md-action-btn.delete-chunks:hover {
-  transform: translateY(-1px);
-  box-shadow: 0px 4px 12px rgba(204, 34, 0, 0.4);
-}
-
-/* ── Chunk blocks ── */
 .chunk-block {
-  border-radius: 8px;
-  padding: 18px 22px;
-  margin-bottom: 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 18px 20px;
+  margin-bottom: 16px;
   position: relative;
-  transition: box-shadow 0.2s;
 }
-
-.chunk-block:hover {
-  box-shadow: 0 2px 12px rgba(139, 69, 19, 0.12);
-}
-
 .chunk-block--enriched {
-  border-left-color: #3D6B27 !important;
+  border-left-color: var(--status-success) !important;
 }
-
 .chunk-block--selected {
-  outline: 2px solid #1E5A8C;
+  outline: 2px solid var(--brand-primary);
   outline-offset: 1px;
 }
-
-/* ── Chunk meta row ── */
 .chunk-meta {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid rgba(139, 69, 19, 0.12);
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-subtle);
 }
-
 .chunk-meta-left {
   display: flex;
   align-items: center;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
 }
-
 .chunk-meta-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
 }
-
-/* ── Chunk badge (N / Total) ── */
 .chunk-badge {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
-  border-radius: 20px;
-  padding: 4px 12px;
-  font-size: 12px;
-  font-weight: 800;
-  color: white;
-  letter-spacing: 0.3px;
-  box-shadow: 0 2px 6px rgba(139, 69, 19, 0.3);
+  gap: 4px;
+  background: var(--bg-subtle);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
   user-select: none;
 }
-
-.chunk-label {
-  font-size: 11px;
-  font-weight: 700;
-  color: rgba(255, 255, 255, 0.85);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-right: 3px;
-}
-
-.chunk-current {
-  font-size: 13px;
-  font-weight: 900;
-  color: #fff;
-}
-
+.chunk-label,
+.chunk-total,
 .chunk-sep {
-  margin: 0 4px;
-  color: rgba(255, 255, 255, 0.6);
-  font-weight: 400;
-  font-size: 12px;
+  color: var(--text-muted);
 }
-
-.chunk-total {
-  font-size: 12px;
+.chunk-current {
+  color: var(--text-primary);
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.8);
 }
-
-/* ── Enriched badge ── */
 .chunk-enriched-badge {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  background: linear-gradient(135deg, #3D6B27 0%, #5A8C3E 100%);
-  color: white;
+  gap: 4px;
+  background: var(--status-success-bg);
+  border: 1px solid var(--status-success-border);
+  color: var(--status-success);
   font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
-  padding: 3px 9px;
-  border-radius: 20px;
-  box-shadow: 0 1px 4px rgba(61, 107, 39, 0.3);
+  font-weight: 500;
+  padding: 3px 7px;
+  border-radius: var(--radius-sm);
   user-select: none;
 }
-
-/* ── Checkbox ── */
 .chunk-checkbox {
-  width: 16px;
-  height: 16px;
-  accent-color: #8B4513;
+  width: 15px;
+  height: 15px;
   cursor: pointer;
   flex-shrink: 0;
 }
-
-/* ── Per-chunk action buttons ── */
-.chunk-edit-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: white;
-  border: 1.5px solid rgba(139, 69, 19, 0.25);
-  border-radius: 6px;
-  padding: 4px 12px;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  color: #5C2E0A;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  font-family: inherit;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
-  box-shadow: 0 1px 4px rgba(139, 69, 19, 0.12);
-}
-
-.chunk-edit-btn:hover {
-  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
-  border-color: transparent;
-  color: white;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(139, 69, 19, 0.3);
-}
-
-.chunk-enrich-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: linear-gradient(135deg, #1E5A8C 0%, #2A7AC4 100%);
-  border: none;
-  border-radius: 6px;
-  padding: 4px 12px;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  color: white;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  font-family: inherit;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
-  box-shadow: 0 1px 4px rgba(30, 90, 140, 0.25);
-}
-
-.chunk-enrich-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(30, 90, 140, 0.4);
-}
-
-.chunk-enrich-btn:disabled,
-.chunk-enrich-btn.loading {
-  opacity: 0.65;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.chunk-delete-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: white;
-  border: 1.5px solid rgba(204, 34, 0, 0.25);
-  border-radius: 6px;
-  padding: 4px 12px;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  color: #CC2200;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  font-family: inherit;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
-  box-shadow: 0 1px 4px rgba(204, 34, 0, 0.08);
-}
-
-.chunk-delete-btn:hover {
-  background: linear-gradient(135deg, #CC2200 0%, #A81B00 100%);
-  border-color: transparent;
-  color: white;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(204, 34, 0, 0.3);
-}
-
-/* ── Per-chunk enrich error ── */
-.chunk-enrich-error {
-  font-size: 11px;
-  color: #A81B00;
-  background: rgba(204, 34, 0, 0.07);
-  border-radius: 5px;
-  padding: 5px 10px;
-  margin-bottom: 8px;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* ── Select all / count in controls bar ── */
+.chunk-edit-btn,
+.chunk-enrich-btn,
+.chunk-delete-btn,
 .chunk-select-btn {
-  font-size: 11px;
-  font-weight: 700;
-  color: #5C2E0A;
-  background: rgba(139, 69, 19, 0.07);
-  border: 1.5px solid rgba(139, 69, 19, 0.18);
-  border-radius: 6px;
-  padding: 4px 12px;
-  cursor: pointer;
-  transition: all 0.15s;
-  font-family: inherit;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
-}
-
-.chunk-select-btn:hover {
-  background: rgba(139, 69, 19, 0.13);
-  border-color: rgba(139, 69, 19, 0.3);
-}
-
-.chunk-select-count {
-  font-size: 11px;
-  font-weight: 600;
-  color: #9A7050;
-}
-
-/* ── Interrupt-enrichment confirmation dialog ── */
-.confirm-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 2100;
-  background: rgba(20, 8, 2, 0.72);
-  backdrop-filter: blur(8px);
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  animation: pmFadeIn 0.18s ease-out;
-}
-
-.confirm-card {
-  background: linear-gradient(145deg, #ffffff 0%, #FFF8EC 100%);
-  border-radius: 16px;
-  width: min(420px, 92vw);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  box-shadow:
-    0 40px 100px rgba(20, 8, 2, 0.5),
-    0 8px 32px rgba(139, 69, 19, 0.18),
-    0 0 0 1px rgba(255, 255, 255, 0.15);
-  animation: pmSlideIn 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-.confirm-card-header {
-  padding: 20px 26px 14px;
-  background: linear-gradient(135deg, rgba(139, 69, 19, 0.07) 0%, rgba(210, 105, 30, 0.07) 100%);
-  border-bottom: 2px solid #F0E6D6;
-}
-
-.confirm-title {
-  margin: 0;
-  font-size: 17px;
-  font-weight: 800;
-  letter-spacing: -0.3px;
-  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.confirm-card-body {
-  padding: 18px 26px;
-}
-
-.confirm-message {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: #5C2E0A;
-  line-height: 1.6;
-}
-
-.confirm-card-footer {
-  padding: 12px 26px 20px;
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-}
-
-.confirm-btn {
-  border: none;
-  border-radius: 9px;
-  padding: 9px 28px;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
+  gap: 5px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 5px 8px;
+  min-height: 28px;
+  font-size: 11px;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  font-family: inherit;
+  color: var(--text-secondary);
+  transition:
+    background 0.15s,
+    border-color 0.15s;
 }
-
-.confirm-btn--cancel {
-  background: rgba(139, 69, 19, 0.08);
-  color: #8B4513;
-  border: 1.5px solid rgba(139, 69, 19, 0.2);
+.chunk-edit-btn:hover:not(:disabled),
+.chunk-select-btn:hover:not(:disabled) {
+  background: var(--bg-subtle);
+  border-color: var(--border-default);
 }
-
-.confirm-btn--cancel:hover {
-  background: rgba(139, 69, 19, 0.14);
-  border-color: rgba(139, 69, 19, 0.35);
+.chunk-enrich-btn {
+  color: var(--brand-primary);
 }
-
-.confirm-btn--ok {
-  background: linear-gradient(135deg, #CC2200 0%, #A81B00 100%);
-  color: white;
-  box-shadow: 0 4px 14px rgba(204, 34, 0, 0.32);
+.chunk-enrich-btn:hover:not(:disabled) {
+  background: var(--brand-subtle);
+  border-color: var(--brand-border);
 }
-
-.confirm-btn--ok:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(204, 34, 0, 0.46);
+.chunk-delete-btn {
+  color: var(--status-danger);
+}
+.chunk-delete-btn:hover:not(:disabled) {
+  background: var(--status-danger-bg);
+  border-color: var(--status-danger-border);
+}
+.chunk-enrich-error {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--status-danger);
+  background: var(--status-danger-bg);
+  border: 1px solid var(--status-danger-border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  overflow-wrap: anywhere;
+}
+.chunk-select-count {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+@media (max-width: 640px) {
+  .chunk-list {
+    padding: 10px;
+  }
+  .chunk-block {
+    padding: 14px;
+  }
 }

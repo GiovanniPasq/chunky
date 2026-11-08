@@ -1,92 +1,56 @@
-/* ============================================
-   Toast.css
-   ============================================ */
-
 .toast {
   position: fixed;
-  top: 24px;
+  top: 20px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 10000;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 14px 20px;
-  border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-  border: 2px solid rgba(255, 255, 255, 0.25);
-  font-weight: 600;
+  gap: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-lg);
   font-size: 13px;
-  letter-spacing: 0.3px;
   min-width: 260px;
-  max-width: 440px;
-  animation: toastSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  font-family: 'Work Sans', Helvetica, Arial, sans-serif;
+  max-width: min(480px, calc(100vw - 32px));
+  animation: fadeIn 0.2s ease-out;
 }
-
-/* Success: warm brown theme */
-.toast--success {
-  background: linear-gradient(135deg, rgba(59, 26, 5, 0.97) 0%, rgba(139, 69, 19, 0.97) 100%);
-  color: white;
-}
-
-/* Error: red */
-.toast--error {
-  background: linear-gradient(135deg, rgba(140, 20, 0, 0.97) 0%, rgba(200, 40, 10, 0.97) 100%);
-  color: white;
-}
-
-@keyframes toastSlideIn {
-  from {
-    transform: translateX(-50%) translateY(-80px);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(-50%) translateY(0);
-    opacity: 1;
-  }
-}
-
 .toast-content {
   display: flex;
   align-items: center;
   gap: 10px;
   flex: 1;
+  min-width: 0;
 }
-
 .toast-icon {
-  font-size: 18px;
+  display: flex;
   flex-shrink: 0;
-  line-height: 1;
+  color: var(--status-success);
 }
-
+.toast--error .toast-icon {
+  color: var(--status-danger);
+}
 .toast-message {
-  line-height: 1.4;
-  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
 }
-
 .toast-close {
-  background: rgba(255, 255, 255, 0.15);
-  border: none;
-  color: rgba(255, 255, 255, 0.8);
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 700;
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s;
+  width: 28px;
+  height: 28px;
   flex-shrink: 0;
-  font-family: inherit;
-  padding: 0;
+  background: transparent;
+  color: var(--text-muted);
+  border: 0;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
 }
-
 .toast-close:hover {
-  background: rgba(255, 255, 255, 0.28);
-  color: white;
-  transform: scale(1.1);
+  background: var(--bg-subtle);
+  color: var(--text-primary);
 }

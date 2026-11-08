@@ -1,12 +1,25 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, type CSSProperties } from 'react'
 import Sidebar from './components/layout/Sidebar'
+import WorkspaceWelcome from './components/layout/WorkspaceWelcome'
+import ProcessingSettings from './components/layout/ProcessingSettings'
+import ThemeMenu from './components/common/ThemeMenu'
+import StatusBadge from './components/common/StatusBadge'
+import ViewTabs from './components/common/ViewTabs'
+import { useMediaQuery } from './hooks/useMediaQuery'
 import {
   ChunksVersionPicker,
-  MarkdownOptionsButton,
-  MarkdownOptionsPopover,
   MarkdownVersionPicker,
   ZoomControl,
 } from './components/layout/PanelControls'
+import {
+  IconPdf,
+  IconMarkdown,
+  IconSparkles,
+  IconSpinner,
+  IconClose,
+  IconCompare,
+  IconLayers,
+} from './components/common/Icons'
 import MarkdownViewer from './components/viewer/MarkdownViewer'
 import ChunkViewer from './components/viewer/ChunkViewer'
 import SettingsModal from './components/modals/SettingsModal'
@@ -69,11 +82,25 @@ export default function App() {
   } = useDocument(toastCallbacks)
 
   // ── UI state ─────────────────────────────────────────────────
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.matchMedia('(max-width: 640px)').matches)
+  const narrowViewport = useMediaQuery('(max-width: 900px)')
+  const mobileViewport = useMediaQuery('(max-width: 640px)')
+  const [compact, setCompact] = useState(narrowViewport)
+  const [compactView, setCompactView] = useState<'pdf' | 'markdown' | 'chunks'>('markdown')
   const [scrollSync, setScrollSync] = useState(true)
   const [leftView, setLeftView] = useState<'pdf' | 'markdown'>('pdf')
   const [rightView, setRightView] = useState<'markdown' | 'chunks'>('markdown')
   const [markdownDirty, setMarkdownDirty] = useState(false)
+
+  // Keep the editing viewer mounted until its draft is saved or cancelled.
+  // Switching the layout can move Markdown between the two panel trees.
+  useEffect(() => {
+    if (!markdownDirty) setCompact(narrowViewport)
+  }, [narrowViewport, markdownDirty])
+
+  useEffect(() => {
+    if (mobileViewport) setSidebarCollapsed(true)
+  }, [mobileViewport])
 
   // Set of PDF filenames that have a corresponding markdown file.
   const [docsWithMarkdown, setDocsWithMarkdown] = useState<Set<string>>(new Set())
@@ -118,10 +145,11 @@ export default function App() {
     applySettings, editChunk, deleteChunk, deleteChunks, mergeChunks, saveChunks, cancelChunking,
     enrichChunk, loadSavedChunks, rechunk,
   } = useChunks(
-    documentData, selectedDoc, rightView === 'chunks', toastCallbacks,
+    documentData, selectedDoc, compact ? compactView === 'chunks' : rightView === 'chunks', toastCallbacks,
     availableChunks, currentMdSource, setSelectedChunks,
   )
   const hasUnsavedWork = markdownDirty || chunksDirty
+  const chunksStale = availableChunks.some(version => version.filename === selectedChunks && version.is_stale)
 
   useEffect(() => {
     if (!hasUnsavedWork) return
@@ -281,14 +309,14 @@ export default function App() {
   }, [runOrConfirm])
 
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsSection, setSettingsSection] = useState<'conversion' | 'chunking'>('conversion')
+  const openSettings = (section: 'conversion' | 'chunking' = 'conversion') => {
+    setSettingsSection(section)
+    setSettingsOpen(true)
+  }
   const [compareOpen, setCompareOpen] = useState(false)
   const [pdfScale, setPdfScale] = useState(1.0)
   const [mdScale, setMdScale] = useState(1.0)
-  const [mdPadding, setMdPadding] = useState(20)
-  // Tracks which panel ('left' | 'right') currently has the view-options
-  // popover open; null means closed.  Only the MD viewer surfaces this
-  // popover (PDF only needs zoom, which sits inline in the panel header).
-  const [optionsOpenIn, setOptionsOpenIn] = useState<null | 'left' | 'right'>(null)
   const [splitPct, setSplitPct] = useState(() => loadSplitPct())
   const [isDragging, setIsDragging] = useState(false)
   const leftPanelRef = useRef<HTMLDivElement>(null)
@@ -327,6 +355,20 @@ export default function App() {
     if (view === 'markdown' && leftView === 'markdown') setLeftView('pdf')
     setRightView(view)
   }
+
+  const effectiveLeftView = compact ? 'pdf' : leftView
+  const effectiveRightView = compact ? (compactView === 'chunks' ? 'chunks' : 'markdown') : rightView
+  const handleCompactView = (view: 'pdf' | 'markdown' | 'chunks') => {
+    if (markdownDirty && view !== compactView) {
+      showUnsavedMarkdownWarning()
+      return
+    }
+    setCompactView(view)
+  }
+
+  useEffect(() => {
+    if (documentData) setCompactView(documentData.has_markdown ? 'markdown' : 'pdf')
+  }, [selectedDoc, documentData?.has_pdf, documentData?.has_markdown])
 
   // ── Track which docs have markdown ────────────────────────────
   // Derive a stable string key so the fetch only fires when the document list
@@ -395,7 +437,7 @@ export default function App() {
   splitPctRef.current = splitPct
   useEffect(() => {
     if (!isDragging) saveSplitPct(splitPctRef.current)
-  }, [isDragging])
+  }, [isDragging, splitPct])
 
   const handleToggleScrollSync = useCallback(() => setScrollSync(v => !v), [])
 
@@ -408,7 +450,12 @@ export default function App() {
       const rect = container.getBoundingClientRect()
       const pct = Math.min(100, Math.max(0, ((e.clientX - rect.left) / rect.width) * 100))
       splitPctRef.current = pct
-      if (leftPanelRef.current) leftPanelRef.current.style.width = `${pct}%`
+      container.style.setProperty('--split-pct', `${pct}%`)
+      if (leftPanelRef.current) {
+        leftPanelRef.current.style.width = `${pct}%`
+        leftPanelRef.current.classList.toggle('viewer-panel--collapsed', pct === 0)
+      }
+      container.lastElementChild?.classList.toggle('viewer-panel--collapsed', pct === 100)
     }
     const onUp = () => {
       setIsDragging(false)
@@ -456,6 +503,7 @@ export default function App() {
 
   // ── Document selection with in-progress guard ─────────────────
   const handleSelectDocument = useCallback((filename: string) => {
+    if (window.matchMedia('(max-width: 640px)').matches) setSidebarCollapsed(true)
     if (converting || convertingToPdf || chunking) {
       setPendingDoc(filename)
     } else {
@@ -558,11 +606,13 @@ export default function App() {
     if (!documentData?.has_markdown) {
       return (
         <div className="md-not-found">
-          <span className="static-icon">📄</span>
+          <div className="md-not-found-icon-wrap">
+            <IconMarkdown size={36} />
+          </div>
           <h2>Markdown not found</h2>
           <p>This document hasn't been converted yet.</p>
-          <button onClick={handleConvert} disabled={converting}>
-            ✨ Convert with {converterLabel}
+          <button onClick={handleConvert} disabled={converting} className="btn-primary">
+            <IconSparkles size={16} /> Convert with {converterLabel}
           </button>
         </div>
       )
@@ -572,7 +622,6 @@ export default function App() {
         content={documentData.md_content}
         documentName={selectedDoc!}
         scale={mdScale}
-        padding={mdPadding}
         scrollSyncEnabled={scrollSync}
         onSaveMarkdown={saveMarkdown}
         onDeleteMarkdown={handleDeleteMarkdown}
@@ -688,7 +737,8 @@ export default function App() {
         onBulkChunk={guardedBulkChunk}
         onBulkEnrich={guardedBulkEnrich}
         onBulkChunkEnrich={guardedBulkChunkEnrich}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSettings={() => openSettings()}
+        processingDoc={converting || convertingToPdf || chunking ? selectedDoc : null}
         docsWithMarkdown={docsWithMarkdown}
         docsWithFailures={docsWithFailures}
         docsWithCheckpoints={docsWithCheckpoints}
@@ -704,14 +754,47 @@ export default function App() {
         }
       />
 
-      <div className="main-content">
+      {!sidebarCollapsed && (
+        <button
+          className="sidebar-backdrop"
+          aria-label="Close documents sidebar"
+          onClick={() => setSidebarCollapsed(true)}
+        />
+      )}
+      <main className="main-content" id="workspace">
+        <header className="workspace-header">
+          <div className="workspace-context">
+            <h1 title={selectedDoc ?? undefined}>{selectedDoc ?? 'Overview'}</h1>
+            <ProcessingSettings settings={settings} onOpenSettings={openSettings} />
+          </div>
+          <div className="workspace-header-actions">
+          {selectedDoc && documentData && (
+            <span role="status" className="workspace-save-state">
+              <StatusBadge tone={savingMd || savingChunks ? 'info' : hasUnsavedWork || chunksStale || (chunks && !selectedChunks) ? 'warning' : 'success'}>
+                {savingMd || savingChunks ? 'Saving…' : hasUnsavedWork ? 'Unsaved changes' : chunksStale ? 'Chunks need regeneration' : chunks && !selectedChunks ? 'Chunks not saved' : 'All changes saved'}
+              </StatusBadge>
+            </span>
+          )}
+          <div className="workspace-meta">
+            {selectedDoc && documentData ? (
+              <>
+                {documentData.has_pdf && <span className="workspace-format">PDF</span>}
+                {documentData.has_markdown && <span className="workspace-format">Markdown</span>}
+              </>
+            ) : (
+              <span>{documents.length} {documents.length === 1 ? 'document' : 'documents'}</span>
+            )}
+          </div>
+          <ThemeMenu />
+          </div>
+        </header>
         {loading && <div className="loading-overlay" />}
 
         {!loading && !selectedDoc && (
-          <div className="placeholder">
-            <span>📄</span>
-            <p>Select a document to get started</p>
-          </div>
+          <WorkspaceWelcome
+            uploading={uploading}
+            onUpload={() => document.getElementById('file-upload')?.click()}
+          />
         )}
 
         {!loading && selectedDoc && documentData && (
@@ -719,54 +802,47 @@ export default function App() {
             {/* ErrorBoundary resets when the selected document changes so a bad
                 document doesn't permanently break the viewer. */}
             <ErrorBoundary key={selectedDoc}>
-              <div className="viewers">
+              {compact && (
+                <ViewTabs label="Document view" value={compactView} onChange={handleCompactView} className="compact-view-tabs" items={[
+                  { value: 'pdf', label: 'Source', icon: <IconPdf size={14} /> },
+                  { value: 'markdown', label: 'Markdown', icon: <IconMarkdown size={14} /> },
+                  { value: 'chunks', label: 'Chunks', icon: <IconLayers size={14} />, disabled: !documentData.has_markdown },
+                ]} />
+              )}
+              <div className={`viewers${compact ? ' viewers--compact' : ''}`} style={{ '--split-pct': `${splitPct}%` } as CSSProperties}>
                 {/* ── Left panel ── */}
-                <div ref={leftPanelRef} className="viewer-panel" style={{ width: `${splitPct}%`, maxWidth: 'calc(100% - 8px)' }}>
+                <div ref={leftPanelRef} className={`viewer-panel${compact && compactView !== 'pdf' ? ' viewer-panel--hidden' : ''}${!compact && splitPct === 0 ? ' viewer-panel--collapsed' : ''}`} style={{ width: `${splitPct}%`, maxWidth: 'calc(100% - 8px)' }}>
                   <div className="panel-label">
-                    <button
-                      className={`panel-view-tab${leftView === 'pdf' ? ' active' : ''}`}
-                      onClick={() => handleSetLeftView('pdf')}
-                    >PDF</button>
-                    <button
-                      className={`panel-view-tab${leftView === 'markdown' ? ' active' : ''}`}
-                      onClick={() => handleSetLeftView('markdown')}
-                    >Markdown</button>
+                    {!compact && <ViewTabs label="Left panel view" value={leftView} onChange={handleSetLeftView} items={[
+                      { value: 'pdf', label: 'PDF' }, { value: 'markdown', label: 'Markdown' },
+                    ]} />}
                     <div className="panel-label-tools">
-                      {leftView === 'markdown' && documentData.has_markdown && (
+                      {effectiveLeftView === 'markdown' && documentData.has_markdown && (
                         <MarkdownVersionPicker
                           versions={availableMarkdowns}
                           selectedFilename={selectedMarkdown}
                           onSelectIdentifier={handleSelectMarkdownVersion}
                         />
                       )}
-                      {leftView === 'pdf' && documentData.has_pdf && (
+                      {effectiveLeftView === 'pdf' && documentData.has_pdf && (
                         <button
-                          className="panel-view-tab"
+                          className="panel-view-tab panel-action-tab"
                           onClick={() => setCompareOpen(true)}
                           title="Compare converters on selected pages"
                         >
-                          Compare converters
+                          <IconCompare size={13} />
+                          <span>Compare</span>
                         </button>
                       )}
-                      {leftView === 'pdf' && documentData.has_pdf && (
+                      {effectiveLeftView === 'pdf' && documentData.has_pdf && (
                         <ZoomControl scale={pdfScale} onScaleChange={setPdfScale} />
                       )}
-                      {leftView === 'markdown' && documentData.has_markdown && (
+                      {effectiveLeftView === 'markdown' && documentData.has_markdown && (
                         <ZoomControl scale={mdScale} onScaleChange={setMdScale} />
-                      )}
-                      {leftView === 'markdown' && documentData.has_markdown && (
-                        <MarkdownOptionsButton
-                          onToggle={() => setOptionsOpenIn(prev => (prev === 'left' ? null : 'left'))}
-                        />
                       )}
                     </div>
                   </div>
-                  <MarkdownOptionsPopover
-                    isOpen={optionsOpenIn === 'left'}
-                    padding={mdPadding}
-                    onPaddingChange={setMdPadding}
-                  />
-                  {leftView === 'pdf' ? (
+                  {effectiveLeftView === 'pdf' ? (
                     documentData.has_pdf ? (
                       <PDFViewer
                         filename={selectedDoc}
@@ -778,18 +854,26 @@ export default function App() {
                       <div className="md-not-found">
                         {convertingToPdf ? (
                           <>
-                            <span className="hourglass-icon">⏳</span>
+                            <div className="md-not-found-icon-wrap">
+                              <IconSpinner size={32} />
+                            </div>
                             <h2>Converting to PDF…</h2>
                             <p>Please wait while we generate your PDF.</p>
                             <div className="converting-bar" />
-                            <button className="btn-cancel-op" onClick={cancelMdToPdfConversion}>✕ Cancel</button>
+                            <button className="btn-cancel-op" onClick={cancelMdToPdfConversion}>
+                              <IconClose size={13} /> Cancel
+                            </button>
                           </>
                         ) : (
                           <>
-                            <span className="static-icon">📝</span>
+                            <div className="md-not-found-icon-wrap">
+                              <IconPdf size={36} />
+                            </div>
                             <h2>No PDF available</h2>
                             <p>This document only has a Markdown file.</p>
-                            <button onClick={handleConvertMdToPdf}>✨ Convert to PDF</button>
+                            <button onClick={handleConvertMdToPdf} className="btn-primary">
+                              <IconSparkles size={16} /> Convert to PDF
+                            </button>
                           </>
                         )}
                       </div>
@@ -802,8 +886,26 @@ export default function App() {
                 {/* ── Divider ── */}
                 <div
                   className="viewer-divider"
-                  onMouseDown={() => setIsDragging(true)}
-                  title="Drag to resize"
+                  onMouseDown={e => { if (e.target === e.currentTarget) setIsDragging(true) }}
+                  title="Drag to resize, or use the arrow keys"
+                  role="separator"
+                  aria-label="Resize document panels"
+                  aria-orientation="vertical"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(splitPct)}
+                  tabIndex={0}
+                  onKeyDown={e => {
+                    if (e.target !== e.currentTarget) return
+                    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                      e.preventDefault()
+                      setSplitPct(value => Math.max(0, Math.min(100, value + (e.key === 'ArrowRight' ? 5 : -5))))
+                    }
+                    if (e.key === 'Home' || e.key === 'End') {
+                      e.preventDefault()
+                      setSplitPct(e.key === 'Home' ? 0 : 100)
+                    }
+                  }}
                 >
                   <div className="viewer-divider-grip">
                     <span /><span />
@@ -822,49 +924,33 @@ export default function App() {
                 </div>
 
                 {/* ── Right panel ── */}
-                <div className="viewer-panel" style={{ flex: '1 1 0', minWidth: 0 }}>
+                <div className={`viewer-panel${compact && compactView === 'pdf' ? ' viewer-panel--hidden' : ''}${!compact && splitPct === 100 ? ' viewer-panel--collapsed' : ''}`} style={{ flex: '1 1 0', minWidth: 0 }}>
                   <div className="panel-label">
-                    <button
-                      className={`panel-view-tab${rightView === 'markdown' ? ' active' : ''}`}
-                      onClick={() => handleSetRightView('markdown')}
-                    >Markdown</button>
-                    {documentData.has_markdown && (
-                      <button
-                        className={`panel-view-tab${rightView === 'chunks' ? ' active' : ''}`}
-                        onClick={() => handleSetRightView('chunks')}
-                      >Chunks</button>
-                    )}
+                    {!compact && <ViewTabs label="Right panel view" value={rightView} onChange={handleSetRightView} items={[
+                      { value: 'markdown', label: 'Markdown' },
+                      ...(documentData.has_markdown ? [{ value: 'chunks' as const, label: 'Chunks' }] : []),
+                    ]} />}
                     <div className="panel-label-tools">
-                      {rightView === 'markdown' && documentData.has_markdown && (
+                      {effectiveRightView === 'markdown' && documentData.has_markdown && (
                         <MarkdownVersionPicker
                           versions={availableMarkdowns}
                           selectedFilename={selectedMarkdown}
                           onSelectIdentifier={handleSelectMarkdownVersion}
                         />
                       )}
-                      {rightView === 'chunks' && (
+                      {effectiveRightView === 'chunks' && (
                         <ChunksVersionPicker
                           versions={chunksForCurrentMd}
                           selectedFilename={selectedChunks}
                           onLoadSavedChunks={handleLoadSavedChunks}
                         />
                       )}
-                      {rightView === 'markdown' && documentData.has_markdown && (
+                      {effectiveRightView === 'markdown' && documentData.has_markdown && (
                         <ZoomControl scale={mdScale} onScaleChange={setMdScale} />
-                      )}
-                      {rightView === 'markdown' && documentData.has_markdown && (
-                        <MarkdownOptionsButton
-                          onToggle={() => setOptionsOpenIn(prev => (prev === 'right' ? null : 'right'))}
-                        />
                       )}
                     </div>
                   </div>
-                  <MarkdownOptionsPopover
-                    isOpen={optionsOpenIn === 'right'}
-                    padding={mdPadding}
-                    onPaddingChange={setMdPadding}
-                  />
-                  {rightView === 'markdown' ? (
+                  {effectiveRightView === 'markdown' ? (
                     renderMarkdownPanel()
                   ) : (
                     <ChunkViewer
@@ -875,6 +961,8 @@ export default function App() {
                       chunksReady={!!chunks}
                       chunking={chunking}
                       savingChunks={savingChunks}
+                      chunksDirty={chunksDirty}
+                      chunksStale={chunksStale}
                       chunkEnrichment={settings.chunkEnrichment}
                       mdFilename={documentData.md_filename}
                       chunksFilename={selectedChunks}
@@ -899,9 +987,11 @@ export default function App() {
 
         <SettingsModal
           isOpen={settingsOpen}
+          initialTab={settingsSection}
           onClose={() => setSettingsOpen(false)}
           onSave={handleApplySettings}
           current={settings}
+          hasActiveDocument={!!selectedDoc}
         />
         {selectedDoc && (
           <ConverterCompareModal
@@ -911,7 +1001,7 @@ export default function App() {
             onClose={() => setCompareOpen(false)}
           />
         )}
-      </div>
+      </main>
     </div>
   )
 }

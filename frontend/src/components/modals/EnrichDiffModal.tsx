@@ -1,3 +1,5 @@
+import Modal from '../common/Modal'
+import ViewTabs from '../common/ViewTabs'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { PipelineResult } from '../../services/apiService'
 import './EnrichDiffModal.css'
@@ -221,11 +223,9 @@ export default function EnrichDiffModal({
   if (!isOpen || !result) return null
 
   return (
-    <div className="enrich-diff-overlay" onClick={onClose}>
-      <div className="enrich-diff-modal" onClick={e => e.stopPropagation()} role="dialog" aria-label="Enrichment diff preview">
+    <Modal open={isOpen} onClose={onClose} title="Review enrichment changes" className="enrich-diff-modal" dismissible={!saving}>
         <div className="enrich-diff-header">
           <div>
-            <h3 className="enrich-diff-title">Review enrichment changes</h3>
             {stats && (
               <div className="enrich-diff-stats">
                 <span><strong>{stats.pieces}</strong> piece{stats.pieces !== 1 ? 's' : ''}</span>
@@ -239,17 +239,13 @@ export default function EnrichDiffModal({
               </div>
             )}
           </div>
-          <button className="enrich-diff-close" onClick={onClose} aria-label="Close">✕</button>
         </div>
 
-        <div className="enrich-diff-tabs">
-          <button className={`enrich-diff-tab${tab === 'diff' ? ' active' : ''}`} onClick={() => setTab('diff')}>
-            Side-by-side diff
-          </button>
-          <button className={`enrich-diff-tab${tab === 'edit' ? ' active' : ''}`} onClick={() => setTab('edit')}>
-            Edit
-          </button>
-        </div>
+        <ViewTabs label="Enrichment review view" value={tab} onChange={setTab}
+          variant="segmented" className="enrich-diff-tabs" items={[
+            { value: 'diff', label: 'Side-by-side diff' },
+            { value: 'edit', label: 'Edit' },
+          ]} />
 
         {tab === 'diff'
           ? <DiffView rows={rows} tooLarge={tooLarge} hasChanges={hasChanges} />
@@ -262,8 +258,7 @@ export default function EnrichDiffModal({
             {saving ? 'Saving…' : 'Accept and save'}
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   )
 }
 

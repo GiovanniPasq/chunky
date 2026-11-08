@@ -88,6 +88,8 @@ def _range_matches(candidate: str, content: str) -> bool:
         return True
     candidate_norm = " ".join(candidate.split())
     content_norm = " ".join(content.split())
+    if not candidate_norm:
+        return False
     if candidate_norm == content_norm:
         return True
     return content_norm in candidate_norm or candidate_norm in content_norm

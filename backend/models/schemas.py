@@ -5,12 +5,12 @@ Pydantic schemas for request / response models.
 from __future__ import annotations
 
 from enum import Enum
-from pathlib import Path
 from typing import Any
 
 from backend.config import get_settings as _get_settings
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, model_validator
+from backend.utils.naming import params_used_by
 
 
 # ---------------------------------------------------------------------------
@@ -229,13 +229,12 @@ class ChunkRequest(BaseModel):
     chunk_overlap: int = Field(default_factory=lambda: _get_settings().DEFAULT_CHUNK_OVERLAP, ge=0)
     enable_markdown_sizing: bool = Field(default=False)
 
-    @field_validator("chunk_overlap")
-    @classmethod
-    def overlap_smaller_than_size(cls, v: int, info) -> int:
-        chunk_size = info.data.get("chunk_size")
-        if chunk_size is not None and v >= chunk_size:
+    @model_validator(mode='after')
+    def overlap_smaller_than_size(self):
+        _, uses_overlap = params_used_by(self.chunker_library, self.chunker_type, self.enable_markdown_sizing)
+        if uses_overlap and self.chunk_overlap >= self.chunk_size:
             raise ValueError("chunk_overlap must be less than chunk_size")
-        return v
+        return self
 
 
 class ChunkFilesRequest(BaseModel):
@@ -276,13 +275,12 @@ class ChunkFilesRequest(BaseModel):
         ),
     )
 
-    @field_validator("chunk_overlap")
-    @classmethod
-    def overlap_smaller_than_size(cls, v: int, info) -> int:
-        chunk_size = info.data.get("chunk_size")
-        if chunk_size is not None and v >= chunk_size:
+    @model_validator(mode='after')
+    def overlap_smaller_than_size(self):
+        _, uses_overlap = params_used_by(self.chunker_library, self.chunker_type, self.enable_markdown_sizing)
+        if uses_overlap and self.chunk_overlap >= self.chunk_size:
             raise ValueError("chunk_overlap must be less than chunk_size")
-        return v
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -300,8 +298,8 @@ class ChunkItem(BaseModel):
     keywords: list[str] = Field(default_factory=list)
     questions: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
-    start: int = 0
-    end: int = 0
+    start: int = Field(default=0, description="Character offset in the source; 0/0 when no contiguous source span is available.")
+    end: int = Field(default=0, description="Exclusive source offset. Unavailable spans are flagged in metadata.")
 
 
 class ChunkResponse(BaseModel):

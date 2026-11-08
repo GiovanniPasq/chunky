@@ -5,6 +5,7 @@ import { clamp, SCROLL_DEBOUNCE_MS } from '../../hooks/useScrollSync'
 import { VIEWER_SCROLL } from '../../utils/viewerEvents'
 import { PDF_DIM_BATCH as DIM_BATCH, PDF_RENDER_BUFFER as BUFFER } from '../../config'
 import Toast from '../Toast'
+import { IconLink, IconLinkBroken } from '../common/Icons'
 import './PDFViewer.css'
 
 // Bundle the worker locally — no CDN dependency at runtime.
@@ -322,9 +323,10 @@ function PDFViewer({ filename, scale = 1.0, scrollSyncEnabled = true, onToggleSc
               className={`pdf-sync-btn${scrollSyncEnabled ? ' active' : ''}`}
               onClick={onToggleScrollSync}
               title="Toggle scroll synchronization"
+              aria-pressed={scrollSyncEnabled}
             >
-              <span className="pdf-sync-icon">{scrollSyncEnabled ? '🔗' : '⛓️‍💥'}</span>
-              <span className="pdf-sync-label">Sync</span>
+              {scrollSyncEnabled ? <IconLink size={14} /> : <IconLinkBroken size={14} />}
+              <span className="pdf-sync-label">Scroll sync</span>
               <span className={`pdf-sync-status${scrollSyncEnabled ? ' on' : ' off'}`}>
                 {scrollSyncEnabled ? 'ON' : 'OFF'}
               </span>

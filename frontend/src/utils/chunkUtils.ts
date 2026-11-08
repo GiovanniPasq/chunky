@@ -1,4 +1,5 @@
 import type { Chunk, ChunkSettings, ChunksVersion } from '../types'
+import { chunkingOptions } from './chunkingOptions'
 
 /**
  * Stable signature describing the (document, MD source, splitter config) tuple
@@ -16,15 +17,16 @@ export function buildChunkConfigSignature(
   availableChunksCount: number,
   mdContentRevision: string,
 ): string {
+  const { usesSize, usesOverlap } = chunkingOptions(settings)
   return JSON.stringify([
     selectedDoc,
     mdFilename,
     currentMdSource,
     settings.chunkerType,
     settings.chunkerLibrary,
-    settings.chunkSize,
-    settings.chunkOverlap,
-    settings.enableMarkdownSizing,
+    usesSize ? settings.chunkSize : null,
+    usesOverlap ? settings.chunkOverlap : null,
+    settings.chunkerLibrary === 'langchain' && settings.chunkerType === 'markdown' && settings.enableMarkdownSizing,
     availableChunksCount,
     mdContentRevision,
   ])
@@ -172,6 +174,7 @@ export function findMatchingSavedChunks(
 /** True when a saved chunks version was produced by the active chunker config. */
 export function isChunksVersionForSettings(v: ChunksVersion, settings: ChunkSettings): boolean {
   if (v.is_stale) return false
+  const { usesSize, usesOverlap } = chunkingOptions(settings)
   if (
     v.library === 'langchain' &&
     v.algorithm === 'markdown' &&
@@ -187,8 +190,8 @@ export function isChunksVersionForSettings(v: ChunksVersion, settings: ChunkSett
   return (
     v.library === settings.chunkerLibrary &&
     v.algorithm === settings.chunkerType &&
-    (v.chunk_size === null || v.chunk_size === settings.chunkSize) &&
-    (v.chunk_overlap === null || v.chunk_overlap === settings.chunkOverlap)
+    (!usesSize || v.chunk_size === null || v.chunk_size === settings.chunkSize) &&
+    (!usesOverlap || v.chunk_overlap === null || v.chunk_overlap === settings.chunkOverlap)
   )
 }
 

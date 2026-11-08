@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import type { EnrichmentSettings } from '../../types'
 
 interface Props {
@@ -26,6 +26,7 @@ export default function LLMSettingsPanel({
   promptLabel = 'System Prompt',
   promptRows = 4,
 }: Props) {
+  const id = useId()
   const [showApiKey, setShowApiKey] = useState(false)
 
   const set = (key: keyof EnrichmentSettings, v: string | number | undefined) =>
@@ -38,9 +39,10 @@ export default function LLMSettingsPanel({
       {title && <div className="enrichment-settings-title">{title}</div>}
 
       <div className="form-group">
-        <label>Model</label>
+        <label htmlFor={`${id}-model`}>Model</label>
         <input
           type="text"
+          id={`${id}-model`}
           placeholder={defaultModel ?? 'e.g. gpt-4o, llama3.1'}
           value={value.model ?? ''}
           onChange={e => set('model', e.target.value)}
@@ -48,9 +50,10 @@ export default function LLMSettingsPanel({
       </div>
 
       <div className="form-group">
-        <label>Base URL</label>
+        <label htmlFor={`${id}-url`}>Base URL</label>
         <input
           type="text"
+          id={`${id}-url`}
           placeholder={defaultBaseUrl ?? 'e.g. https://api.openai.com/v1'}
           value={value.base_url ?? ''}
           onChange={e => set('base_url', e.target.value)}
@@ -58,9 +61,10 @@ export default function LLMSettingsPanel({
       </div>
 
       <div className="form-group">
-        <label>API Key <span className="label-hint">(leave empty for Ollama)</span></label>
+        <label htmlFor={`${id}-key`}>API Key <span className="label-hint">(leave empty for Ollama)</span></label>
         <div className="api-key-wrapper">
           <input
+            id={`${id}-key`}
             type={showApiKey ? 'text' : 'password'}
             placeholder="sk-… / AIza… / (empty for Ollama)"
             value={value.api_key ?? ''}
@@ -91,10 +95,13 @@ export default function LLMSettingsPanel({
         </div>
       </div>
 
+      <details className="advanced-settings">
+        <summary>Advanced model options</summary>
       <div className="form-group">
-        <label>Temperature <span className="label-hint">(0 = deterministic, 1 = creative, default: {defaultTemperature.toFixed(2)})</span></label>
+        <label htmlFor={`${id}-temperature`}>Temperature <span className="label-hint">(0 = deterministic, 1 = creative, default: {defaultTemperature.toFixed(2)})</span></label>
         <div className="temperature-control">
           <input
+            id={`${id}-temperature`}
             type="range"
             min={0} max={1} step={0.01}
             value={temperature}
@@ -105,8 +112,9 @@ export default function LLMSettingsPanel({
       </div>
 
       <div className="form-group">
-        <label>{promptLabel} <span className="label-hint">(optional — overrides built-in instructions)</span></label>
+        <label htmlFor={`${id}-prompt`}>{promptLabel} <span className="label-hint">(optional — overrides built-in instructions)</span></label>
         <textarea
+          id={`${id}-prompt`}
           className="enrichment-textarea"
           placeholder="Leave blank to use the built-in system prompt…"
           value={value.user_prompt ?? ''}
@@ -114,6 +122,7 @@ export default function LLMSettingsPanel({
           rows={promptRows}
         />
       </div>
+      </details>
     </div>
   )
 }

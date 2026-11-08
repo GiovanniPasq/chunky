@@ -6,7 +6,7 @@
   height: 100%;
   min-height: 300px;
   padding: 40px 32px;
-  background: #FDF6EC;
+  background: var(--bg-main);
   text-align: center;
   gap: 16px;
 }
@@ -20,19 +20,19 @@
   margin: 0;
   font-size: 1.15rem;
   font-weight: 600;
-  color: #3B1A05;
+  color: var(--text-primary);
 }
 
 .error-boundary__message {
   margin: 0;
   max-width: 480px;
   padding: 12px 16px;
-  background: #fff0f0;
-  border: 1px solid #f5c6c6;
-  border-radius: 8px;
+  background: var(--status-danger-bg);
+  border: 1px solid var(--status-danger-border);
+  border-radius: var(--radius-md);
   font-size: 0.8rem;
   font-family: 'Courier New', Courier, monospace;
-  color: #c0392b;
+  color: var(--status-danger);
   white-space: pre-wrap;
   word-break: break-word;
   text-align: left;
@@ -41,10 +41,10 @@
 .error-boundary__btn {
   margin-top: 4px;
   padding: 8px 22px;
-  background: linear-gradient(135deg, #8B4513, #D2691E);
+  background: var(--button-primary);
   color: #fff;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-size: 0.875rem;
   font-weight: 500;
   cursor: pointer;

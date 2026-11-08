@@ -1,3 +1,4 @@
+import Modal from '../common/Modal'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   DocumentSummary,
@@ -254,13 +255,7 @@ export default function SummaryReviewModal({
   const isWorking = view === 'loading' || view === 'generating' || view === 'saving'
 
   return (
-    <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="summary-modal" role="dialog" aria-modal="true" aria-label="Document summary review">
-        <div className="modal-header">
-          <h2>Review document summary</h2>
-          <button className="modal-close" onClick={onClose}>✕</button>
-        </div>
-
+    <Modal open={isOpen} onClose={onClose} title="Review document summary" className="summary-modal">
         <div className="modal-body" ref={bodyRef}>
           {view === 'loading' && (
             <div className="summary-state-empty">Loading…</div>
@@ -395,7 +390,6 @@ export default function SummaryReviewModal({
             </>
           )}
         </div>
-      </div>
-    </div>
+    </Modal>
   )
 }

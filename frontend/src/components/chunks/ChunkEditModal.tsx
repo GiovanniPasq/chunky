@@ -1,3 +1,6 @@
+import Modal from '../common/Modal'
+import Button from '../common/Button'
+import ViewTabs from '../common/ViewTabs'
 import { useState, useEffect } from 'react'
 import type { Chunk } from '../../types'
 import { isChunkEnriched } from '../../utils/chunkUtils'
@@ -36,8 +39,8 @@ export default function ChunkEditModal({ isOpen, onClose, chunkIndex, chunk, onS
   }, [chunk])
 
   if (!isOpen) return null
-
   const enriched = isChunkEnriched(chunk)
+
 
   const handleSave = () => {
     const metadataUpdates: Partial<Chunk> = {
@@ -57,39 +60,11 @@ export default function ChunkEditModal({ isOpen, onClose, chunkIndex, chunk, onS
   }
 
   return (
-    <div className="chunk-edit-overlay" onClick={handleCancel}>
-      <div className="chunk-edit-modal" onClick={e => e.stopPropagation()}>
-
-        {/* Header */}
-        <div className="chunk-edit-header">
-          <div className="chunk-edit-title-row">
-            <h2>Edit Chunk</h2>
-            <span className="chunk-edit-badge">
-              <span className="chunk-edit-current">{chunkIndex + 1}</span>
-              <span className="chunk-edit-sep">/</span>
-              <span className="chunk-edit-total">{totalChunks}</span>
-            </span>
-            {enriched && <span className="chunk-edit-enriched-badge">✓ Enriched</span>}
-          </div>
-          <button className="chunk-edit-close" onClick={handleCancel}>✕</button>
-        </div>
-
-        {/* Tab bar */}
-        <div className="chunk-edit-tabs">
-          <button
-            className={`chunk-edit-tab${activeTab === 'content' ? ' active' : ''}`}
-            onClick={() => setActiveTab('content')}
-          >
-            Content
-          </button>
-          <button
-            className={`chunk-edit-tab${activeTab === 'enrichment' ? ' active' : ''}${enriched ? ' has-data' : ''}`}
-            onClick={() => setActiveTab('enrichment')}
-          >
-            Enrichment
-            {enriched && <span className="chunk-edit-tab-dot" />}
-          </button>
-        </div>
+    <Modal open={isOpen} onClose={handleCancel} title="Edit chunk" description={`Chunk ${chunkIndex + 1} of ${totalChunks}`} className="chunk-edit-modal">
+        <ViewTabs label="Chunk editor section" value={activeTab} onChange={setActiveTab} variant="segmented" className="chunk-edit-tabs" items={[
+          { value: 'content', label: 'Content' },
+          { value: 'enrichment', label: <>{'Enrichment'}{enriched && <span className="chunk-edit-tab-dot" aria-hidden="true" />}</> },
+        ]} />
 
         {/* Body */}
         <div className="chunk-edit-body">
@@ -99,10 +74,10 @@ export default function ChunkEditModal({ isOpen, onClose, chunkIndex, chunk, onS
             <>
               <textarea
                 className="chunk-edit-textarea"
+                aria-label="Chunk content"
                 value={content}
                 onChange={e => setContent(e.target.value)}
                 placeholder="Edit chunk content…"
-                autoFocus
               />
               <div className="chunk-edit-info">
                 <span>{content.length.toLocaleString()} characters</span>
@@ -199,11 +174,10 @@ export default function ChunkEditModal({ isOpen, onClose, chunkIndex, chunk, onS
 
         {/* Footer */}
         <div className="chunk-edit-footer">
-          <button className="btn-secondary" onClick={handleCancel}>Cancel</button>
-          <button className="btn-primary" onClick={handleSave}>Save Changes</button>
+          <Button size="md" onClick={handleCancel}>Cancel</Button>
+          <Button size="md" variant="primary" onClick={handleSave}>Save changes</Button>
         </div>
 
-      </div>
-    </div>
+    </Modal>
   )
 }

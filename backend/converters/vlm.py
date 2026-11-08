@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-import fitz  # PyMuPDF — required for rasterising pages
+import pymupdf  # PyMuPDF — required for rasterising pages
 import httpx
 
 from backend.registry import register_converter
@@ -205,7 +205,7 @@ class VLMConverter(PDFConverter):
         Args:
             pdf_path:    Path to the PDF file to convert.
             total_pages: Pre-computed page count from the caller (avoids a
-                         redundant ``fitz.open()`` solely to read page count).
+                         redundant ``pymupdf.open()`` solely to read page count).
 
         Returns:
             Full document as Markdown, pages separated by ``\\n\\n---\\n\\n``.
@@ -246,7 +246,7 @@ class VLMConverter(PDFConverter):
             total = total_pages
         else:
             def _get_page_count() -> int:
-                with fitz.open(str(pdf_path)) as doc:
+                with pymupdf.open(str(pdf_path)) as doc:
                     return doc.page_count
             total = await loop.run_in_executor(None, _get_page_count)
 
@@ -305,9 +305,9 @@ class VLMConverter(PDFConverter):
                         return _PageResult(page_num=page_num, markdown=cached_md, error=None, cached=True)
 
                 # Render this page in the executor (CPU-bound, releases GIL).
-                # Re-opening the PDF is cheap — fitz uses OS-level page caching.
+                # Re-opening the PDF is cheap — pymupdf uses OS-level page caching.
                 def _render_one() -> str:
-                    with fitz.open(str(pdf_path)) as doc:
+                    with pymupdf.open(str(pdf_path)) as doc:
                         if self._stop_event and self._stop_event.is_set():
                             raise InterruptedError("Conversion cancelled during rendering")
                         return self._render_page_as_b64(doc[page_num])
@@ -426,9 +426,9 @@ class VLMConverter(PDFConverter):
 
     @staticmethod
     def _render_page_as_b64(page) -> str:
-        """Rasterise a fitz page and return a base64-encoded PNG string."""
-        dpi_scale = _get_render_dpi() / 72  # fitz uses 72 DPI as its baseline
-        matrix = fitz.Matrix(dpi_scale, dpi_scale)
+        """Rasterise a pymupdf page and return a base64-encoded PNG string."""
+        dpi_scale = _get_render_dpi() / 72  # pymupdf uses 72 DPI as its baseline
+        matrix = pymupdf.Matrix(dpi_scale, dpi_scale)
         pix = page.get_pixmap(matrix=matrix)
         return base64.b64encode(pix.tobytes("png")).decode("utf-8")
 

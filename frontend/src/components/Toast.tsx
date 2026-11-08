@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { IconCheck, IconClose } from './common/Icons'
 import './Toast.css'
 
 interface Props {
@@ -18,12 +19,12 @@ export default function Toast({ message, type = 'success', duration = 3000, onCl
   }, [duration])
 
   return (
-    <div className={`toast toast--${type}`}>
+    <div className={`toast toast--${type}`} role={type === 'error' ? 'alert' : 'status'}>
       <div className="toast-content">
-        <span className="toast-icon">{type === 'success' ? '✅' : '❌'}</span>
+        <span className="toast-icon">{type === 'success' ? <IconCheck size={18} /> : <IconClose size={18} />}</span>
         <span className="toast-message">{message}</span>
       </div>
-      <button className="toast-close" onClick={onClose}>✕</button>
+      <button className="toast-close" onClick={onClose} aria-label="Dismiss notification"><IconClose size={14} /></button>
     </div>
   )
 }

@@ -13,16 +13,15 @@ from typing import Callable
 
 from fastapi import HTTPException
 from langchain_text_splitters import (
-    CharacterTextSplitter,
     Language,
     MarkdownHeaderTextSplitter,
     RecursiveCharacterTextSplitter,
-    TokenTextSplitter,
 )
 
 from backend.models.schemas import ChunkItem, ChunkRequest, ChunkerType
 from backend.registry import register_chunker
 from .base import TextChunker
+from .source_windows import token_windows
 
 # Headers recognised by the Markdown splitter (H1 → H3).
 _MARKDOWN_HEADERS = [
@@ -43,14 +42,13 @@ class LangChainChunker(TextChunker):
     Strategies
     ----------
     token
-        :class:`~langchain_text_splitters.TokenTextSplitter` — splits on token
-        boundaries using tiktoken; ideal for LLM context-window management.
+        GPT-2 windows through tiktoken, with complete Unicode characters and
+        source offsets mapped directly from token boundaries.
     recursive
         :class:`~langchain_text_splitters.RecursiveCharacterTextSplitter` —
-        tries paragraph, sentence, word boundaries in order.
+        tries Markdown structures, paragraphs, lines, and word boundaries.
     character
-        :class:`~langchain_text_splitters.CharacterTextSplitter` — splits on
-        ``\\n\\n`` paragraphs, then falls back to ``chunk_size`` characters.
+        Splits on ``\\n\\n`` paragraphs, then falls back to characters.
     markdown
         Two-phase split: headers via
         :class:`~langchain_text_splitters.MarkdownHeaderTextSplitter`, then
@@ -75,24 +73,15 @@ class LangChainChunker(TextChunker):
     @register_chunker(
         library=_LIB, library_label=_LIB_LABEL,
         strategy="token", label="Token",
-        description="Splits on token boundaries via tiktoken. Ideal for LLM context-window management.",
+        description="GPT-2 token windows with Unicode-safe boundaries. Overlap may be smaller to keep characters intact.",
     )
     def _split_token(self, request: ChunkRequest) -> list[ChunkItem]:
-        splitter = TokenTextSplitter(
-            chunk_size=request.chunk_size,
-            chunk_overlap=request.chunk_overlap,
-        )
-        splits = splitter.split_text(request.content)
-        # chunk_overlap is in *tokens*; build_chunks needs *characters*.
-        # Measure the actual character overlap from the first adjacent pair
-        # rather than estimating a token→char ratio.
-        char_overlap = self.measure_char_overlap(splits)
-        return self.build_chunks(request.content, splits, char_overlap)
+        return token_windows(request.content, request.chunk_size, request.chunk_overlap)
 
     @register_chunker(
         library=_LIB, library_label=_LIB_LABEL,
         strategy="recursive", label="Recursive",
-        description="Tries paragraph → sentence → word boundaries in order.",
+        description="Splits Markdown headings, code fences, paragraphs, lines, and words using a character target.",
     )
     def _split_recursive(self, request: ChunkRequest) -> list[ChunkItem]:
         # Use markdown-aware separators: headings, fences, horizontal rules,
@@ -115,10 +104,11 @@ class LangChainChunker(TextChunker):
         description="Splits on \\n\\n paragraphs, falls back to chunk_size characters.",
     )
     def _split_character(self, request: ChunkRequest) -> list[ChunkItem]:
-        splitter = CharacterTextSplitter(
+        splitter = RecursiveCharacterTextSplitter(
             chunk_size=request.chunk_size,
             chunk_overlap=request.chunk_overlap,
-            separator="\n\n",
+            separators=["\n\n", ""],
+            keep_separator=False,
         )
         return self.build_chunks(
             request.content,
@@ -161,9 +151,8 @@ class LangChainChunker(TextChunker):
             )
             docs = secondary.split_documents(docs)
 
-        # MarkdownHeaderTextSplitter preserves header text in page_content
-        # (strip_headers=False), so each page_content is a verbatim substring
-        # of the original — build_chunks can locate real character offsets.
+        # Headers are retained, but the library normalizes whitespace;
+        # build_chunks maps those normalized fragments back to the source.
         # Phase-1 splits have no overlap; phase-2 inherits request.chunk_overlap.
         char_overlap = request.chunk_overlap if request.enable_markdown_sizing else 0
         chunks = self.build_chunks(

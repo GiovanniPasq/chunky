@@ -1,23 +1,23 @@
 <p align="center">
-  <img alt="Chunky Logo" src="assets/logo.png" width="350px">
+  <img alt="Chunky Logo" src="frontend/src/assets/logo.png" width="180px">
 </p>
-<h1 align="center">Chunky – RAG Chunking & Markdown Processing Toolkit</h1>
+<h1 align="center">Chunky</h1>
 <p align="center">
-    <strong>Convert PDFs, clean Markdown, inspect chunks, and enrich metadata for reliable RAG pipelines.</strong>
+    <strong>See what happens to your documents before they enter your RAG pipeline.</strong>
+</p>
+<p align="center">
+  A local, open-source workspace to inspect PDF conversion, refine Markdown, compare chunking strategies, and review chunks before indexing.
 </p>
 <p align="center">
 <img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white"/>
 <img src="https://img.shields.io/badge/Node.js-24+-339933?style=for-the-badge&logo=node.js&logoColor=white"/>
-<img src="https://img.shields.io/badge/FastAPI-0.143+-009688?style=for-the-badge&logo=fastapi&logoColor=white"/>
+<img src="https://img.shields.io/badge/FastAPI-0.162+-009688?style=for-the-badge&logo=fastapi&logoColor=white"/>
 <img src="https://img.shields.io/badge/React-19+-61DAFB?style=for-the-badge&logo=react&logoColor=white"/>
 <img src="https://img.shields.io/badge/Vite-8+-646CFF?style=for-the-badge&logo=vite&logoColor=white"/>
 <img src="https://img.shields.io/badge/License-MIT-D2691E?style=for-the-badge"/>
 </p>
 <p align="center">
-  <img src="assets/demo.gif" width="600">
-</p>
-<p align="center">
-<strong>If you like this project, a star ⭐️ would mean a lot :)</strong>
+  <img src="assets/demo.gif" width="800" alt="Chunky demo: upload a PDF, convert and edit Markdown, configure chunks, and enrich them with a local model">
 </p>
 
 ---
@@ -26,7 +26,7 @@
 
 Chunky is a local, open-source workspace for preparing documents for Retrieval-Augmented Generation (RAG). It combines PDF-to-Markdown conversion, Markdown cleanup, chunk visualization, chunking strategy comparison, and LLM-powered enrichment in one workflow.
 
-Most RAG failures start before retrieval: broken tables, scrambled layouts, noisy Markdown, or chunks that look fine in code but fail in context. Chunky makes those steps visible so you can inspect and fix the document before it reaches your vector store.
+Broken tables, scrambled layouts, noisy Markdown, and poor chunk boundaries can undermine retrieval. Chunky makes those problems visible so you can inspect and fix the document before it reaches your vector store.
 
 As [NVIDIA's research](https://developer.nvidia.com/blog/finding-the-best-chunking-strategy-for-accurate-ai-responses/) shows, no chunking strategy wins universally. Chunky helps you compare strategies on the actual document instead of treating chunking as a hidden parameter.
 
@@ -92,6 +92,8 @@ docker compose up --build
 | Backend  | http://localhost:8000      |
 | Swagger  | http://localhost:8000/docs |
 
+If Chunky is useful to you, a star on GitHub helps others discover the project.
+
 ---
 
 ## Development checks
@@ -112,7 +114,31 @@ Run frontend type checking and production build from `frontend/`:
 npm test
 npm run typecheck
 npm run build
+
+# Browser regression tests (install the browser once):
+npx playwright install chromium
+npm run test:e2e
+# To use an installed Google Chrome instead:
+PLAYWRIGHT_CHANNEL=chrome npm run test:e2e
 ```
+
+---
+
+## Workspace appearance and controls
+
+Use **Appearance** in the workspace header to choose Light, Dark, or System.
+The choice is saved in this browser. On narrow screens, Source, Markdown, and
+Chunks tabs show one viewer at a time. Markdown and chunk actions include export
+menus, visible save states, and protection for unsaved edits. The document list
+can be filtered by conversion and review status.
+
+The converter and chunker below the document name stay visible in the workspace
+header. Click either to open its settings tab, or hover for details. These are processing
+defaults; saved Markdown and chunk versions retain their original configuration.
+
+Settings are browser defaults for future operations. Changing a converter does
+not reconvert existing files. Changing chunking settings regenerates the active
+chunk view; unsaved work is guarded before applying those changes.
 
 ---
 
@@ -154,8 +180,8 @@ Chunky supports three splitting libraries, each exposing multiple strategies. Th
 
 | Strategy | Description |
 |----------|-------------|
-| **Token** | Splits on token boundaries via tiktoken. Ideal for LLM context-window management. |
-| **Recursive** | Tries paragraph → sentence → word boundaries in order. |
+| **Token** | GPT-2 token windows with Unicode-safe boundaries and matching source offsets. |
+| **Recursive** | Tries Markdown structures, paragraphs, lines, words, and finally characters. Size and overlap are in characters. |
 | **Character** | Splits on `\n\n` paragraphs, falls back to `chunk_size` characters. |
 | **Markdown** | Two-phase split: H1/H2/H3 headers first, then optional size cap via `RecursiveCharacterTextSplitter`. |
 
@@ -163,16 +189,18 @@ Chunky supports three splitting libraries, each exposing multiple strategies. Th
 
 | Strategy | Description |
 |----------|-------------|
-| **Token** | Splits on GPT-2 token boundaries via tiktoken. |
-| **Fast** | SIMD-accelerated byte-based chunking. Uses `chunk_size` as a byte target and does not support overlap. |
-| **Sentence** | Splits at sentence boundaries. Preserves semantic completeness. |
-| **Recursive** | Recursively splits using structural delimiters (paragraphs → sentences → words). Note: `chunk_overlap` is not supported. |
-| **Table** | Splits Markdown tables using Chonkie's row-based defaults; size and overlap controls do not apply. |
-| **Code** | Splits source code using AST structure and a size target; overlap does not apply. |
-| **Semantic** | Groups content by embedding similarity with a size target; overlap does not apply. |
+| **Token** | GPT-2 token windows with Unicode-safe boundaries and matching source offsets. |
+| **Fast** | SIMD-accelerated byte-based chunking. Uses a byte target; keeping a UTF-8 character intact may add up to 3 bytes. No overlap. |
+| **Sentence** | Uses a character target and keeps whole sentences. A long sentence can exceed the target; overlap includes only whole sentences that fit. |
+| **Recursive** | Splits using structural delimiters (paragraphs → sentences → words) and a character target. No overlap. |
+| **Table** | Splits Markdown tables into 3 data rows per chunk, repeats headers, and preserves surrounding prose. Size and overlap controls do not apply. |
+| **Code** | Splits source code using AST structure and a character target; overlap does not apply. Requires optional `chonkie[code]` dependencies. |
+| **Semantic** | Groups content by embedding similarity with a token target measured by the embedding model's tokenizer. Long sentences may exceed it. No overlap. |
 | **Neural** | Uses a fine-tuned BERT model to detect semantic shifts; size and overlap controls do not apply. |
 
-> **Note:** The **Semantic** and **Neural** strategies download ML models on first use and may be slow to initialise.
+> **Note:** The **Semantic** and **Neural** strategies download ML models on first use and may be slow to initialise. Code chunking may also download parser grammars on first use.
+
+Token overlap is a target: boundaries move to keep complete Unicode characters, so actual overlap can be smaller. Both Token implementations use the same GPT-2 encoding, which may differ from your embedding model's tokenizer.
 
 ### Docling (`docling`)
 
@@ -181,7 +209,9 @@ Chunky supports three splitting libraries, each exposing multiple strategies. Th
 | **Hybrid** | Document-structure-aware chunking that respects headings, tables, and lists while enforcing a token limit. |
 | **Line-Based** | Preserves line boundaries while enforcing a token limit. Best for tables, code, and logs where line integrity matters. |
 
-> **Note:** Both **Docling** strategies operate on `DoclingDocument` objects and require the `docling` library. The **Hybrid** strategy downloads a tokenizer model on first use.
+> **Note:** Hybrid operates on a parsed `DoclingDocument`; Line-Based uses the original source lines. Both require `docling` and may download their tokenizer on first use.
+
+Some serializers transform content, such as converting a table into descriptive text. When no contiguous source span can be located, chunks use `start: 0`, `end: 0` and `metadata.source_span_available: false` instead of guessed offsets. Regenerate previously saved chunks to apply updated splitting and source-span behavior.
 
 ### Cancellation behavior
 

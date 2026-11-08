@@ -28,6 +28,8 @@ class LiteParseConverter(PDFConverter):
         self.validate_path(pdf_path)
         from liteparse import LiteParse  # local import — optional dependency
 
-        parser = LiteParse(output_format="markdown")
+        # Native header/footer removal can classify all text on short pages as
+        # running furniture. Preserve it; cleanup is an explicit later step.
+        parser = LiteParse(output_format="markdown", keep_headers_footers=True)
         result = parser.parse(str(pdf_path))
         return result.text

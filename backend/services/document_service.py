@@ -53,7 +53,6 @@ from backend.services.chunk_storage_service import delete_chunks_for_markdown
 from backend.services.document_files import (
     document_stem_for_markdown,
     file_has_failure_markers as _file_has_failure_markers,
-    find_markdown_for_document,
     markdown_belongs_to_stem as _markdown_belongs_to_stem,
     md_files_for_stem as _md_files_for_stem,
     preferred_markdown_for_stem as _preferred_markdown_for_stem,
@@ -150,9 +149,9 @@ def publish_pdf_without_overwrite(temp_path: Path, pdf_path: Path) -> None:
 
 def _slice_pdf_pages(pdf_path: Path, start_page: int, end_page: int) -> tuple[Path, int]:
     """Copy a 1-indexed inclusive page range into a caller-deleted temp PDF."""
-    import fitz
+    import pymupdf
 
-    with fitz.open(str(pdf_path)) as source:
+    with pymupdf.open(str(pdf_path)) as source:
         page_count = source.page_count
         if start_page > end_page:
             raise HTTPException(status_code=422, detail="start_page must be less than or equal to end_page.")
@@ -166,7 +165,7 @@ def _slice_pdf_pages(pdf_path: Path, start_page: int, end_page: int) -> tuple[Pa
         os.close(fd)
         temp_path = Path(temp_name)
         try:
-            with fitz.open() as preview:
+            with pymupdf.open() as preview:
                 preview.insert_pdf(source, from_page=start_page - 1, to_page=end_page - 1)
                 preview.save(str(temp_path))
         except Exception:
@@ -882,8 +881,8 @@ class DocumentService:
 
         page_count: int | None = None
         try:
-            import fitz
-            with fitz.open(str(pdf_path)) as doc:
+            import pymupdf
+            with pymupdf.open(str(pdf_path)) as doc:
                 page_count = doc.page_count
             if settings.MAX_PAGE_COUNT > 0 and page_count > settings.MAX_PAGE_COUNT:
                 raise HTTPException(

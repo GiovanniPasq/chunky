@@ -1,3 +1,5 @@
+import Modal from '../common/Modal'
+import Button from '../common/Button'
 import './ProgressModal.css'
 
 interface Props {
@@ -19,11 +21,7 @@ export default function ProgressModal({ isOpen, title, detail, current, total, o
   const pct = indeterminate ? 0 : Math.min(100, Math.round((current / total) * 100))
 
   return (
-    <div className="progress-overlay">
-      <div className="progress-card" role="dialog" aria-modal="true" aria-label={title}>
-        <div className="progress-card-header">
-          <h3 className="progress-title">{title}</h3>
-        </div>
+    <Modal open={isOpen} onClose={onInterrupt} title={title} className="progress-card" dismissible={false}>
 
         <div className="progress-card-body">
           {errorMessage ? (
@@ -32,7 +30,7 @@ export default function ProgressModal({ isOpen, title, detail, current, total, o
             <>
               {detail && <p className="progress-detail">{detail}</p>}
 
-              <div className="progress-track">
+              <div className="progress-track" role="progressbar" aria-label={title} aria-valuemin={0} aria-valuemax={100} aria-valuenow={indeterminate ? undefined : pct}>
                 <div
                   className={`progress-fill${indeterminate ? ' progress-fill--indeterminate' : ''}`}
                   style={!indeterminate ? { width: `${pct}%` } : undefined}
@@ -49,11 +47,10 @@ export default function ProgressModal({ isOpen, title, detail, current, total, o
         </div>
 
         <div className="progress-card-footer">
-          <button className="progress-interrupt-btn" onClick={onInterrupt}>
-            {errorMessage ? '✕ Close' : '✕ Interrupt'}
-          </button>
+          <Button size="md" variant="danger" onClick={onInterrupt}>
+            {errorMessage ? 'Close' : 'Interrupt'}
+          </Button>
         </div>
-      </div>
-    </div>
+    </Modal>
   )
 }

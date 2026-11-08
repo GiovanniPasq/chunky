@@ -2,7 +2,24 @@ import { useEffect, useMemo, useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import type { BulkProgressFn, BulkResultFn } from '../../hooks/useDocument'
 import type { DeleteDocumentsResponse } from '../../services/documentsApi'
-import logoSrc from '../../assets/logo.png'
+import BrandLogo from '../common/BrandLogo'
+import {
+  IconMenu,
+  IconSidebarCollapse,
+  IconSearch,
+  IconUpload,
+  IconPdf,
+  IconMarkdown,
+  IconFile,
+  IconTrash,
+  IconSparkles,
+  IconLayers,
+  IconSettings,
+  IconSpinner,
+  IconClose,
+} from '../common/Icons'
+import StatusBadge from '../common/StatusBadge'
+import { getDocumentStatus, type DocumentStage } from '../../utils/documentStatus'
 import './Sidebar.css'
 
 const FAILED_TOOLTIP_TEXT =
@@ -35,6 +52,7 @@ interface Props {
    */
   onBulkChunkEnrich?: (filenames: string[], onProgress: BulkProgressFn, onResult: BulkResultFn) => Promise<void>
   onOpenSettings?: () => void
+  processingDoc?: string | null
   docsWithMarkdown?: Set<string>
   /** PDFs whose saved VLM Markdown contains failed-page placeholders. */
   docsWithFailures?: Set<string>
@@ -59,10 +77,11 @@ export default function Sidebar({
   documents, selectedDoc, onSelect, onUpload, uploading,
   collapsed, onToggleCollapse, onDelete,
   onBulkConvert, onBulkChunk, onBulkEnrich, onBulkChunkEnrich,
-  onOpenSettings, docsWithMarkdown, docsWithFailures, docsWithCheckpoints,
+  onOpenSettings, processingDoc, docsWithMarkdown, docsWithFailures, docsWithCheckpoints,
   keyboardNavigationDisabled = false,
 }: Props) {
   const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<DocumentStage | 'all'>('all')
   const [selectMode, setSelectMode] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [deleting, setDeleting] = useState(false)
@@ -83,9 +102,15 @@ export default function Sidebar({
   }
   const hideWarningTip = () => setWarningTip(null)
 
+  const statuses = useMemo(() => new Map(documents.map(doc => [doc, getDocumentStatus(doc, {
+    hasMarkdown: docsWithMarkdown?.has(doc) ?? false,
+    hasFailures: docsWithFailures?.has(doc),
+    hasCheckpoint: docsWithCheckpoints?.has(doc),
+    processing: doc === processingDoc || doc === bulkOp?.currentFile,
+  })])), [documents, docsWithMarkdown, docsWithFailures, docsWithCheckpoints, processingDoc, bulkOp?.currentFile])
   const filtered = useMemo(
-    () => documents.filter(d => d.toLowerCase().includes(search.toLowerCase())),
-    [documents, search],
+    () => documents.filter(doc => doc.toLowerCase().includes(search.toLowerCase()) && (statusFilter === 'all' || statuses.get(doc)?.stage === statusFilter)),
+    [documents, search, statusFilter, statuses],
   )
   const selectedVisible = useMemo(
     () => filtered.filter(doc => selected.has(doc)),
@@ -156,7 +181,7 @@ export default function Sidebar({
 
   const acceptFile = (f: File) => /\.(pdf|md)$/i.test(f.name)
 
-  const handleDragEnter = (e: React.DragEvent<HTMLLabelElement>) => {
+  const handleDragEnter = (e: React.DragEvent<HTMLButtonElement>) => {
     e.preventDefault()
     e.stopPropagation()
     if (uploading) return
@@ -164,7 +189,7 @@ export default function Sidebar({
     setDragOver(true)
   }
 
-  const handleDragOver = (e: React.DragEvent<HTMLLabelElement>) => {
+  const handleDragOver = (e: React.DragEvent<HTMLButtonElement>) => {
     e.preventDefault()
     e.stopPropagation()
     if (uploading) {
@@ -174,14 +199,14 @@ export default function Sidebar({
     }
   }
 
-  const handleDragLeave = (e: React.DragEvent<HTMLLabelElement>) => {
+  const handleDragLeave = (e: React.DragEvent<HTMLButtonElement>) => {
     e.preventDefault()
     e.stopPropagation()
     dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
     if (dragDepthRef.current === 0) setDragOver(false)
   }
 
-  const handleDrop = (e: React.DragEvent<HTMLLabelElement>) => {
+  const handleDrop = (e: React.DragEvent<HTMLButtonElement>) => {
     e.preventDefault()
     e.stopPropagation()
     dragDepthRef.current = 0
@@ -294,76 +319,138 @@ export default function Sidebar({
   return (
     <div className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
 
+      <input
+        ref={fileInputRef}
+        type="file"
+        id="file-upload"
+        accept=".pdf,.md"
+        multiple
+        onChange={handleFiles}
+        hidden
+        disabled={uploading}
+        aria-label="Upload documents"
+      />
       {/* ── Fixed top ── */}
       <div className="sidebar-fixed">
 
-        <div className="sidebar-brand">
-          <img src={logoSrc} alt="logo" className="sidebar-logo" />
-          {!collapsed && <span className="sidebar-app-name">Chunky</span>}
-        </div>
-
         {collapsed ? (
-          <div className="sidebar-collapsed-toggle">
-            <button className="menu-toggle" onClick={onToggleCollapse} title="Expand sidebar">☰</button>
+          <div className="sidebar-brand-collapsed">
+            <button
+              type="button"
+              className="sidebar-collapsed-logo-btn"
+              onClick={onToggleCollapse}
+              title="Expand sidebar"
+              aria-label="Expand sidebar"
+              aria-expanded={false}
+            >
+              <BrandLogo className="sidebar-logo" size={44} />
+              <span className="sidebar-logo-hover-icon" aria-hidden="true">
+                <IconMenu size={20} />
+              </span>
+            </button>
           </div>
         ) : (
           <>
-            <div className="sidebar-divider" />
-
-            <div className="sidebar-section-row">
-              <button className="menu-toggle" onClick={onToggleCollapse} title="Collapse sidebar">☰</button>
-              <span className="sidebar-section-label">Documents</span>
+            <div className="sidebar-brand">
+              <div className="sidebar-brand-main">
+                <BrandLogo className="sidebar-logo" />
+                <div className="sidebar-brand-meta">
+                  <span className="sidebar-app-name">Chunky</span>
+                  <span className="sidebar-app-tag">RAG Studio</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="menu-toggle"
+                onClick={onToggleCollapse}
+                title="Collapse sidebar"
+                aria-label="Collapse sidebar"
+                aria-expanded={true}
+              >
+                <IconSidebarCollapse size={18} />
+              </button>
             </div>
 
             <div className="sidebar-upload">
-              <input
-                ref={fileInputRef}
-                type="file"
-                id="file-upload"
-                accept=".pdf,.md"
-                multiple
-                onChange={handleFiles}
-                style={{ display: 'none' }}
-              />
-              <label
-                htmlFor="file-upload"
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
                 className={`upload-btn${dragOver ? ' drag-over' : ''}`}
                 onDragEnter={handleDragEnter}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
               >
-                {uploading
-                  ? <><span>⏳</span> Uploading…</>
-                  : dragOver
-                    ? <><span>📥</span> Drop to upload</>
-                    : <><span>📤</span> Upload PDF / MD</>}
-              </label>
+                {uploading ? (
+                  <>
+                    <IconSpinner size={15} />
+                    <span>Uploading…</span>
+                  </>
+                ) : dragOver ? (
+                  <>
+                    <IconUpload size={15} />
+                    <span>Drop to upload</span>
+                  </>
+                ) : (
+                  <>
+                    <IconUpload size={15} />
+                    <span>Upload PDF / MD</span>
+                  </>
+                )}
+              </button>
             </div>
 
             <div className="sidebar-search">
+              <IconSearch size={14} className="search-icon" />
               <input
                 type="text"
                 placeholder="Search documents…"
+                aria-label="Search documents"
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 className="search-input"
               />
+              {search && (
+                <button
+                  type="button"
+                  className="search-clear-btn"
+                  onClick={() => setSearch('')}
+                  title="Clear search"
+                  aria-label="Clear search"
+                >
+                  <IconClose size={12} />
+                </button>
+              )}
             </div>
 
+            {documents.length > 0 && <div className="sidebar-filter">
+              <select aria-label="Filter documents by status" value={statusFilter} onChange={e => setStatusFilter(e.target.value as DocumentStage | 'all')}>
+                <option value="all">All documents</option>
+                <option value="needs-conversion">Needs conversion</option>
+                <option value="ready">Markdown ready</option>
+                <option value="review">Needs review</option>
+                <option value="resume">Resume conversion</option>
+                <option value="processing">Processing</option>
+              </select>
+            </div>}
+
             <div className="doc-count-row">
-              <span className="doc-count">
-                {filtered.length} / {documents.length}{' '}
-                {documents.length === 1 ? 'document' : 'documents'}
-              </span>
+              <div className="doc-count-info">
+                <span className="sidebar-section-label">Documents</span>
+                <span className="doc-count">
+                  {filtered.length}{filtered.length !== documents.length ? ` / ${documents.length}` : ''}
+                </span>
+              </div>
               {documents.length > 0 && (
                 <button
+                  type="button"
                   className={`select-toggle-btn ${selectMode ? 'active' : ''}`}
                   onClick={toggleSelectMode}
                   title={selectMode ? 'Cancel selection' : 'Select documents'}
                   disabled={isBusy}
                 >
-                  {selectMode ? '✕' : 'Select'}
+                  {selectMode ? 'Cancel' : 'Select'}
                 </button>
               )}
             </div>
@@ -372,6 +459,7 @@ export default function Sidebar({
               <>
                 <div className="bulk-actions">
                   <button
+                    type="button"
                     className="bulk-btn select-all"
                     onClick={toggleSelectAll}
                     disabled={filtered.length === 0 || isBusy}
@@ -379,13 +467,22 @@ export default function Sidebar({
                     {allFilteredSelected ? 'Deselect all' : 'Select all'}
                   </button>
                   <button
+                    type="button"
                     className="bulk-btn delete-selected"
                     onClick={handleDeleteSelected}
                     disabled={visibleSelectedCount === 0 || isBusy}
                   >
-                    {deleting
-                      ? '⏳ Deleting…'
-                      : `🗑 Delete${visibleSelectedCount > 0 ? ` (${visibleSelectedCount})` : ''}`}
+                    {deleting ? (
+                      <>
+                        <IconSpinner size={14} />
+                        <span>Deleting…</span>
+                      </>
+                    ) : (
+                      <>
+                        <IconTrash size={14} />
+                        <span>Delete{visibleSelectedCount > 0 ? ` (${visibleSelectedCount})` : ''}</span>
+                      </>
+                    )}
                   </button>
                 </div>
 
@@ -393,27 +490,45 @@ export default function Sidebar({
                   <div className="bulk-actions bulk-actions-secondary">
                     {onBulkConvert && (
                       <button
+                        type="button"
                         className="bulk-btn convert-selected"
                         onClick={() => runBulkOp('convert', onBulkConvert)}
                         disabled={visibleSelectedCount === 0 || isBusy}
                       >
-                        {bulkOp?.type === 'convert'
-                          ? `⏳ ${bulkOp.current}/${bulkOp.total}`
-                          : `✨ Convert${visibleSelectedCount > 0 ? ` (${visibleSelectedCount})` : ''}`}
+                        {bulkOp?.type === 'convert' ? (
+                          <>
+                            <IconSpinner size={14} />
+                            <span>{bulkOp.current}/{bulkOp.total}</span>
+                          </>
+                        ) : (
+                          <>
+                            <IconSparkles size={14} />
+                            <span>Convert{visibleSelectedCount > 0 ? ` (${visibleSelectedCount})` : ''}</span>
+                          </>
+                        )}
                       </button>
                     )}
                     {onBulkChunk && (() => {
                       const chunkable = selectedVisible.filter(f => docsWithMarkdown?.has(f)).length
                       return (
                         <button
+                          type="button"
                           className="bulk-btn chunk-selected"
                           onClick={() => runBulkOp('chunk', onBulkChunk)}
                           disabled={chunkable === 0 || isBusy}
                           title={visibleSelectedCount > chunkable ? `${visibleSelectedCount - chunkable} visible selected file(s) have no markdown and will be skipped` : undefined}
                         >
-                          {bulkOp?.type === 'chunk'
-                            ? `⏳ ${bulkOp.current}/${bulkOp.total}`
-                            : `⛓ Chunk${chunkable > 0 ? ` (${chunkable})` : ''}`}
+                          {bulkOp?.type === 'chunk' ? (
+                            <>
+                              <IconSpinner size={14} />
+                              <span>{bulkOp.current}/{bulkOp.total}</span>
+                            </>
+                          ) : (
+                            <>
+                              <IconLayers size={14} />
+                              <span>Chunk{chunkable > 0 ? ` (${chunkable})` : ''}</span>
+                            </>
+                          )}
                         </button>
                       )
                     })()}
@@ -421,14 +536,23 @@ export default function Sidebar({
                       const enrichable = selectedVisible.filter(f => docsWithMarkdown?.has(f)).length
                       return (
                         <button
+                          type="button"
                           className="bulk-btn enrich-selected"
                           onClick={() => runBulkOp('enrich', onBulkEnrich)}
                           disabled={enrichable === 0 || isBusy}
                           title={visibleSelectedCount > enrichable ? `${visibleSelectedCount - enrichable} visible selected file(s) have no markdown and will be skipped` : 'Bulk enrichment skips the summary review modal and uses any cached summary silently.'}
                         >
-                          {bulkOp?.type === 'enrich'
-                            ? `⏳ ${bulkOp.current}/${bulkOp.total}`
-                            : `✨ Enrich MD${enrichable > 0 ? ` (${enrichable})` : ''}`}
+                          {bulkOp?.type === 'enrich' ? (
+                            <>
+                              <IconSpinner size={14} />
+                              <span>{bulkOp.current}/{bulkOp.total}</span>
+                            </>
+                          ) : (
+                            <>
+                              <IconSparkles size={14} />
+                              <span>Enrich MD{enrichable > 0 ? ` (${enrichable})` : ''}</span>
+                            </>
+                          )}
                         </button>
                       )
                     })()}
@@ -436,14 +560,23 @@ export default function Sidebar({
                       const enrichable = selectedVisible.filter(f => docsWithMarkdown?.has(f)).length
                       return (
                         <button
+                          type="button"
                           className="bulk-btn chunk-enrich-selected"
                           onClick={() => runBulkOp('chunk-enrich', onBulkChunkEnrich)}
                           disabled={enrichable === 0 || isBusy}
                           title={visibleSelectedCount > enrichable ? `${visibleSelectedCount - enrichable} visible selected file(s) have no markdown and will be skipped` : 'Enrich saved chunks, or chunk first when no matching saved chunks exist.'}
                         >
-                          {bulkOp?.type === 'chunk-enrich'
-                            ? `⏳ ${bulkOp.current}/${bulkOp.total}`
-                            : `✨ Enrich Chunks${enrichable > 0 ? ` (${enrichable})` : ''}`}
+                          {bulkOp?.type === 'chunk-enrich' ? (
+                            <>
+                              <IconSpinner size={14} />
+                              <span>{bulkOp.current}/{bulkOp.total}</span>
+                            </>
+                          ) : (
+                            <>
+                              <IconSparkles size={14} />
+                              <span>Enrich Chunks{enrichable > 0 ? ` (${enrichable})` : ''}</span>
+                            </>
+                          )}
                         </button>
                       )
                     })()}
@@ -485,7 +618,7 @@ export default function Sidebar({
         <div className="sidebar-list-scroll">
           <ul className="doc-list">
             {filtered.length === 0
-              ? <li className="no-docs">No results</li>
+              ? <li className="no-docs">{search || statusFilter !== 'all' ? 'No matching documents' : 'Your library is empty. Upload a PDF or Markdown file to begin.'}</li>
               : filtered.map(doc => {
                   const isSelected = selected.has(doc)
                   const isActive = selectedDoc === doc
@@ -525,8 +658,29 @@ export default function Sidebar({
                           }}
                         />
                       )}
-                      <span className="doc-icon">📄</span>
-                      <span className="doc-name">{doc}</span>
+                      <span className="doc-icon">
+                        {doc.toLowerCase().endsWith('.pdf') ? (
+                          <IconPdf size={15} className="doc-icon-svg pdf" />
+                        ) : doc.toLowerCase().endsWith('.md') ? (
+                          <IconMarkdown size={15} className="doc-icon-svg md" />
+                        ) : (
+                          <IconFile size={15} className="doc-icon-svg" />
+                        )}
+                      </span>
+                      <button
+                        type="button"
+                        className="doc-name"
+                        aria-label={doc}
+                        aria-description={statuses.get(doc)?.label}
+                        aria-current={isActive ? 'true' : undefined}
+                        onClick={e => {
+                          e.stopPropagation()
+                          selectMode ? toggleDoc(doc, e.shiftKey) : onSelect(doc)
+                        }}
+                      >
+                        <span className="doc-title">{doc}</span>
+                        <span className="doc-stage">{statuses.get(doc)?.label}</span>
+                      </button>
                       {statusText && (
                         <span
                           className={`doc-warning-badge${hasCheckpointOnly ? ' checkpoint' : ''}`}
@@ -577,16 +731,18 @@ export default function Sidebar({
                         </span>
                       )}
                       {docsWithMarkdown?.has(doc) && (
-                        <span className="doc-md-badge" title="Markdown available">MD</span>
+                        <StatusBadge tone="success" title="Markdown available">MD</StatusBadge>
                       )}
                       {!selectMode && (
                         <button
+                          type="button"
                           className="doc-delete-btn"
                           onClick={e => handleDeleteSingle(e, doc)}
                           title={`Delete ${doc}`}
+                          aria-label={`Delete ${doc}`}
                           disabled={deleting}
                         >
-                          🗑
+                          <IconTrash size={13} />
                         </button>
                       )}
                     </li>
@@ -609,11 +765,13 @@ export default function Sidebar({
       {onOpenSettings && (
         <div className={`sidebar-settings-footer ${collapsed ? 'collapsed' : ''}`}>
           <button
+            type="button"
             className="sidebar-settings-btn"
             onClick={onOpenSettings}
             title="Settings"
+            aria-label="Settings"
           >
-            <span className="sidebar-settings-icon">⚙️</span>
+            <IconSettings size={16} className="sidebar-settings-icon" />
             {!collapsed && <span className="sidebar-settings-label">Settings</span>}
           </button>
         </div>

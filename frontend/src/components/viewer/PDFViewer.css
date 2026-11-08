@@ -2,171 +2,91 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: #3B1A05;
+  min-height: 0;
+  background: var(--bg-subtle);
 }
-
-/* PDF zoom now lives in the panel header (App.css .panel-zoom).  This bar
-   only carries the scroll-sync toggle, so the layout collapses to a
-   single right-aligned group. */
 .pdf-controls {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
-  padding: 10px 20px;
-  background: linear-gradient(135deg, rgba(139, 69, 19, 0.06) 0%, rgba(210, 105, 30, 0.06) 100%);
-  border-bottom: 2px solid #F0E6D6;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  padding: 9px 12px;
+  min-height: 49px;
+  background: var(--bg-main);
+  border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
 }
-
 .pdf-controls-right {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-
-/* ── Scroll-sync toggle ── */
 .pdf-sync-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 6px 12px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1.5px solid rgba(240, 230, 214, 0.3);
-  border-radius: 8px;
+  gap: 6px;
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
   cursor: pointer;
-  font-family: inherit;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
-
 .pdf-sync-btn.active {
-  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
-  border-color: transparent;
-  box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.35);
+  color: var(--brand-primary);
+  background: var(--brand-subtle);
+  border-color: var(--brand-border);
 }
-
-.pdf-sync-btn:hover:not(.active) {
-  background: rgba(255, 255, 255, 0.14);
-  border-color: rgba(240, 230, 214, 0.5);
+.pdf-sync-btn:hover {
+  border-color: var(--border-default);
 }
-
-.pdf-sync-icon {
-  font-size: 14px;
-  line-height: 1;
-}
-
-.pdf-sync-label {
-  font-size: 11px;
-  font-weight: 700;
-  color: #FDF6EC;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
-}
-
 .pdf-sync-status {
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.5px;
-  border-radius: 4px;
-  padding: 1px 5px;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 4px;
+  border-radius: 3px;
+  background: var(--bg-subtle);
 }
-
 .pdf-sync-status.on {
-  background: rgba(255, 255, 255, 0.25);
-  color: #FDF6EC;
+  background: var(--bg-surface);
+  color: var(--brand-primary);
 }
-
-.pdf-sync-status.off {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(253, 246, 236, 0.55);
-}
-
-/* ── Hide button ── */
-.pdf-hide-btn {
-  padding: 6px 14px;
-  background: white;
-  color: #5C2E0A;
-  border: 1.5px solid rgba(139, 69, 19, 0.25);
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  font-family: inherit;
-  box-shadow: 0 1px 4px rgba(139, 69, 19, 0.1);
-}
-
-.pdf-hide-btn:hover {
-  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
-  border-color: transparent;
-  color: white;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(139, 69, 19, 0.3);
-}
-
 .pdf-container {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: auto;
   padding: 24px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 20px;
+  gap: 24px;
 }
-
-.pdf-container::-webkit-scrollbar {
-  width: 12px;
-}
-
-.pdf-container::-webkit-scrollbar-track {
-  background: #1E0C02;
-}
-
-.pdf-container::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, #8B4513 0%, #D2691E 100%);
-  border-radius: 8px;
-  border: 2px solid #1E0C02;
-}
-
-.pdf-container::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, #5C2E0A 0%, #A0521A 100%);
-}
-
 .pdf-page {
-  margin-bottom: 3px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  margin-inline: auto;
+  box-shadow: var(--shadow-md);
   position: relative;
-  background-color: #fff;
-  border-radius: 8px;
-  overflow: visible;
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  background: #ffffff;
+  color-scheme: light;
+  border-radius: 3px;
   padding-bottom: 40px;
+  flex-shrink: 0;
 }
-
-.pdf-page:hover {
-  transform: scale(1.005);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
-}
-
 .pdf-page canvas {
   display: block;
-  border-radius: 8px 8px 0 0;
+  border-radius: 3px 3px 0 0;
 }
-
 .pdf-page .textLayer {
   position: absolute;
   left: 0;
   top: 0;
-  /* width and height are set dynamically in JS to match the canvas CSS dimensions exactly */
   overflow: hidden;
   opacity: 1;
-  line-height: 1.0;
+  line-height: 1;
 }
-
 .pdf-page .textLayer > span {
   color: transparent;
   position: absolute;
@@ -174,23 +94,23 @@
   cursor: text;
   transform-origin: 0% 0%;
 }
-
 .pdf-page .textLayer ::selection {
-  background: rgba(210, 105, 30, 0.3);
+  background: rgb(234 88 12 / 25%);
 }
-
 .page-number {
   position: absolute;
-  bottom: 8px;
+  bottom: 12px;
   left: 50%;
   transform: translateX(-50%);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 700;
-  background: linear-gradient(135deg, #8B4513 0%, #D2691E 100%);
-  padding: 6px 14px;
-  border-radius: 99px;
-  box-shadow: 0px 2px 8px rgba(139, 69, 19, 0.3);
-  letter-spacing: 0.5px;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+@media (max-width: 640px) {
+  .pdf-container {
+    padding: 12px;
+    gap: 12px;
+  }
 }

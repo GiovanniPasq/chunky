@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react'
+import Modal from '../common/Modal'
+import Button from '../common/Button'
 
 /**
  * A single action button rendered in the dialog's footer.
@@ -16,6 +18,7 @@ export interface ConfirmDialogAction {
 
 interface Props {
   isOpen: boolean
+  title?: string
   /** Called when the user clicks the dimmed backdrop (acts as Cancel). */
   onDismiss: () => void
   /** Dialog body — typically a single ``<p>`` with the question. */
@@ -24,37 +27,18 @@ interface Props {
   actions: ConfirmDialogAction[]
 }
 
-/**
- * Shared modal-confirmation primitive.
- *
- * Replaces two near-identical overlays in App.tsx that both built the
- * same fixed scaffolding (full-viewport dimmed overlay → centred card
- * with click-outside-to-cancel → message body → action row).  Reuses
- * the existing ``.confirm-switch-*`` classes from App.css so the
- * visual treatment matches what was already shipped.
- *
- * Returns ``null`` when ``isOpen`` is false so callers can render it
- * unconditionally without an extra wrapper conditional.
- */
-export default function ConfirmDialog({ isOpen, onDismiss, children, actions }: Props) {
-  if (!isOpen) return null
+/** Shared confirmation flow with managed focus, dismissal, and actions. */
+export default function ConfirmDialog({ isOpen, title = 'Confirm changes', onDismiss, children, actions }: Props) {
   return (
-    <div className="confirm-switch-overlay" onClick={onDismiss}>
-      <div className="confirm-switch-dialog" onClick={e => e.stopPropagation()}>
-        {children}
-        <div className="confirm-switch-actions">
-          {actions.map((a, i) => (
-            <button
-              key={i}
-              className={`btn-${a.variant ?? 'secondary'}`}
-              onClick={a.onClick}
-              disabled={a.disabled}
-            >
-              {a.label}
-            </button>
-          ))}
-        </div>
+    <Modal open={isOpen} onClose={onDismiss} title={title}>
+      <div className="ui-modal-body">{children}</div>
+      <div className="ui-modal-footer">
+        {actions.map((action, index) => (
+          <Button key={index} size="md" variant={action.variant ?? 'secondary'} onClick={action.onClick} disabled={action.disabled}>
+            {action.label}
+          </Button>
+        ))}
       </div>
-    </div>
+    </Modal>
   )
 }

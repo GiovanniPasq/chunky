@@ -11,6 +11,17 @@ import ProgressModal from '../modals/ProgressModal'
 import EnrichDiffModal from '../modals/EnrichDiffModal'
 import SummaryReviewModal from '../modals/SummaryReviewModal'
 import { useMarkdownEnrichment } from '../../hooks/useMarkdownEnrichment'
+import {
+  IconSparkles,
+  IconTrash,
+  IconDownload,
+  IconEdit,
+  IconSave,
+  IconClose,
+} from '../common/Icons'
+import Button from '../common/Button'
+import ActionMenu from '../common/ActionMenu'
+import ConfirmDialog from '../modals/ConfirmDialog'
 import './MarkdownViewer.css'
 
 interface Props {
@@ -18,8 +29,6 @@ interface Props {
   documentName: string
   /** Display scale (managed and rendered by the parent — see App.tsx). */
   scale?: number
-  /** Padding around the rendered Markdown (managed by the parent). */
-  padding?: number
   scrollSyncEnabled?: boolean
   onSaveMarkdown: (content: string) => Promise<void>
   onDeleteMarkdown: () => void
@@ -100,7 +109,7 @@ const LazySection = memo(function LazySection({
 // ── Component ──────────────────────────────────────────────────────────────
 
 function MarkdownViewer({
-  content, documentName, scale = 1.0, padding = 20,
+  content, documentName, scale = 1.0,
   scrollSyncEnabled = true,
   onSaveMarkdown, onDeleteMarkdown,
   onConvert, converterLabel, activeConverter, converting,
@@ -343,78 +352,41 @@ function MarkdownViewer({
         onConfirm={handleConfirmSummary}
       />
 
-      {/* Delete confirmation dialog */}
-      {showDeleteConfirm && (
-        <div className="reconvert-confirm-overlay" onClick={() => setShowDeleteConfirm(false)}>
-          <div className="reconvert-confirm" onClick={e => e.stopPropagation()}>
-            <p>Delete the currently displayed Markdown variant? Other variants of this document stay intact.</p>
-            <div className="reconvert-confirm-actions">
-              <button className="btn-secondary" onClick={() => setShowDeleteConfirm(false)}>Cancel</button>
-              <button className="btn-danger" onClick={handleConfirmDelete}>Delete</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        isOpen={showDeleteConfirm}
+        title="Delete Markdown variant?"
+        onDismiss={() => setShowDeleteConfirm(false)}
+        actions={[
+          { label: 'Cancel', onClick: () => setShowDeleteConfirm(false) },
+          { label: 'Delete variant', onClick: handleConfirmDelete, variant: 'danger' },
+        ]}
+      >
+        <p>Delete the currently displayed Markdown variant? Other variants of this document stay intact.</p>
+      </ConfirmDialog>
 
-      {/* Primary controls bar — actions only.  Zoom + padding live in the
-          panel header (see App.tsx) so this row never overflows. */}
       <div className="md-controls">
+        <span className="toolbar-context">{editMode ? 'Editing Markdown' : 'Markdown'}</span>
         <div className="md-controls-right">
-          <button
-            className="md-action-btn convert-now"
-            onClick={onConvert}
-            disabled={converting || editMode}
-            title={editMode
-              ? 'Save or cancel Markdown edits before reconverting'
-              : `Convert this PDF with ${converterLabel}`}
-          >
-            <span>✨</span> Convert with {converterLabel}
-          </button>
-          <button
-            className="md-action-btn delete-md"
-            onClick={() => setShowDeleteConfirm(true)}
-            disabled={editMode}
-            title={editMode
-              ? 'Save or cancel Markdown edits before deleting this variant'
-              : 'Delete this Markdown variant'}
-          >
-            <span>🗑</span> Delete
-          </button>
-          <button
-            className="md-action-btn download"
-            onClick={handleDownloadMarkdown}
-            disabled={!content && !editContent}
-            title={editMode
-              ? 'Download the edited Markdown currently shown'
-              : 'Download this Markdown variant'}
-          >
-            <span>⬇</span> Export
-          </button>
-
-          <div className="md-edit-actions">
-            {!editMode ? (
-              <>
-                <button className="md-action-btn edit" onClick={handleEnterEdit}>
-                  ✏️ Edit
-                </button>
-                <button
-                  className="md-action-btn enrich"
-                  onClick={handleOpenEnrich}
-                  title="Review the document summary, then clean and LLM-correct the markdown piece-by-piece. Preview the diff before saving."
-                  disabled={pipelineProgress !== null || pipelineResult !== null || summaryModalOpen}
-                >
-                  ✨ Enrich
-                </button>
-              </>
-            ) : (
-              <>
-                <button className="md-action-btn save-md" onClick={handleSaveMd} disabled={savingMd}>
-                  {savingMd ? '⏳ Saving…' : '💾 Save'}
-                </button>
-                <button className="md-action-btn cancel" onClick={handleCancelEdit}>✕ Cancel</button>
-              </>
-            )}
-          </div>
+          {editMode ? (
+            <>
+              <Button variant="ghost" onClick={handleCancelEdit} disabled={savingMd}><IconClose size={14} />Cancel</Button>
+              <Button variant="primary" onClick={handleSaveMd} loading={savingMd} disabled={!markdownDirty}>
+                {!savingMd && <IconSave size={14} />}{savingMd ? 'Saving…' : 'Save changes'}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button onClick={handleEnterEdit}><IconEdit size={14} />Edit</Button>
+              <Button onClick={handleOpenEnrich} disabled={pipelineProgress !== null || pipelineResult !== null || summaryModalOpen} title="Review the summary, then preview Markdown corrections before saving">
+                <IconSparkles size={14} />Enrich
+              </Button>
+            </>
+          )}
+          <ActionMenu label="Markdown actions" actions={[
+            { label: 'Export Markdown', icon: <IconDownload size={14} />, onSelect: handleDownloadMarkdown, disabled: !content && !editContent },
+            { label: `Convert with ${converterLabel}`, icon: <IconSparkles size={14} />, onSelect: onConvert, disabled: converting || editMode },
+            { label: 'Delete variant', icon: <IconTrash size={14} />, onSelect: () => setShowDeleteConfirm(true), disabled: editMode, danger: true },
+          ]} />
         </div>
       </div>
 
@@ -469,11 +441,10 @@ function MarkdownViewer({
               className="md-raw-editor"
               value={editContent}
               onChange={e => setEditContent(e.target.value)}
-              style={{ padding: `${padding}px` }}
               spellCheck={false}
             />
           ) : (
-            <div className="markdown-content" style={{ padding: `${padding}px` }}>
+            <div className="markdown-content">
               {lazyContent.type === 'paged' ? (
                 lazyContent.pages.map(({ page, sections }) => (
                   <div key={page}>

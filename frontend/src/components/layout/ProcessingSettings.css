@@ -1,0 +1,43 @@
+.processing-settings {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+.processing-setting {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 20px;
+  padding: 0 2px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.2;
+  text-align: left;
+  cursor: pointer;
+}
+.processing-setting:hover {
+  color: var(--brand-primary);
+  background: var(--brand-subtle);
+}
+.processing-setting > svg {
+  flex-shrink: 0;
+}
+.processing-setting-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 640px) {
+  .processing-settings {
+    gap: 4px;
+  }
+  .processing-setting {
+    font-size: 9px;
+  }
+}

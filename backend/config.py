@@ -192,7 +192,7 @@ class Settings(BaseSettings):
     omits the field."""
 
     # ── App ────────────────────────────────────────────────────
-    APP_VERSION: str = "0.7.1"
+    APP_VERSION: str = "0.8.0"
 
 
 @lru_cache

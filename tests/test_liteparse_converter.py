@@ -31,9 +31,25 @@ class LiteParseConverterTests(unittest.TestCase):
             with patch.dict(sys.modules, {"liteparse": fake_module}):
                 result = LiteParseConverter().convert(pdf_path)
 
-        self.assertEqual(constructor_options, {"output_format": "markdown"})
+        self.assertEqual(constructor_options, {"output_format": "markdown", "keep_headers_footers": True})
         self.assertEqual(parsed_paths, [str(pdf_path)])
         self.assertEqual(result, "# Markdown")
+
+    def test_preserves_text_on_short_pages_with_repeated_headings(self) -> None:
+        import pymupdf
+
+        with TemporaryDirectory() as tmp:
+            pdf_path = Path(tmp) / "short.pdf"
+            with pymupdf.open() as document:
+                for index in range(2):
+                    page = document.new_page()
+                    page.insert_text((72, 72), "Document preparation audit", fontsize=22)
+                    page.insert_text((72, 120), f"Page {index + 1}: Preserve searchable text.")
+                document.save(pdf_path)
+            result = LiteParseConverter().convert(pdf_path)
+        self.assertIn("Document preparation audit", result)
+        self.assertIn("Page 1", result)
+        self.assertIn("Page 2", result)
 
 
 if __name__ == "__main__":

@@ -168,7 +168,6 @@ def _classify_blocks(md: str, paragraph_max_chars: int | None = None) -> list[_B
     closing fence (for code) or a blank line (for tables) appears.
     """
     blocks: list[_Block] = []
-    cursor = 0
     in_fence = False
     fence_block_start = -1
 

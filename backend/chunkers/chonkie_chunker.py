@@ -32,6 +32,8 @@ from fastapi import HTTPException
 from backend.models.schemas import ChunkItem, ChunkRequest, ChunkerType
 from backend.registry import register_chunker
 from .base import TextChunker
+from .source_windows import fast_windows, token_windows
+from .tables import table_chunks
 
 _LIB = "chonkie"
 _LIB_LABEL = "Chonkie"
@@ -54,7 +56,23 @@ class ChonkieChunker(TextChunker):
                     f"chunker_type='{request.chunker_type}'"
                 ),
             )
-        return handler(self, request)
+        try:
+            return handler(self, request)
+        except ImportError as exc:
+            extras = {
+                ChunkerType.code: 'code',
+                ChunkerType.semantic: 'semantic',
+                ChunkerType.neural: 'neural',
+            }.get(request.chunker_type)
+            if extras is None:
+                raise
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"{request.chunker_type.value.title()} chunking requires optional dependencies. "
+                    f"Install 'chonkie[{extras}]' in the backend environment."
+                ),
+            ) from exc
 
     # ------------------------------------------------------------------
     # Strategies
@@ -63,49 +81,32 @@ class ChonkieChunker(TextChunker):
     @register_chunker(
         library=_LIB, library_label=_LIB_LABEL,
         strategy="token", label="Token",
-        description="Splits on GPT-2 token boundaries via tiktoken.",
+        description="GPT-2 token windows with Unicode-safe boundaries. Overlap may be smaller to keep characters intact.",
     )
     def _split_token(self, request: ChunkRequest) -> list[ChunkItem]:
-        from chonkie import TokenChunker
-
-        # tokenizer='gpt2' uses tiktoken's GPT-2 BPE encoding, making
-        # chunk_size and chunk_overlap consistent with LangChain's
-        # TokenTextSplitter (which also defaults to gpt2 via tiktoken).
-        # The default tokenizer='character' would count characters instead,
-        # producing ~4× smaller chunks than the label "tokens" implies.
-        chunker = TokenChunker(
-            tokenizer="gpt2",
-            chunk_size=request.chunk_size,
-            chunk_overlap=request.chunk_overlap,
-        )
-        return self._chunks_from_chonkie(chunker, request.content)
+        return token_windows(request.content, request.chunk_size, request.chunk_overlap)
 
     @register_chunker(
         library=_LIB, library_label=_LIB_LABEL,
         strategy="fast", label="Fast",
         description=(
             "SIMD-accelerated byte-based chunking. chunk_size is a byte target; "
-            "chunk_overlap is not supported."
+            "chunk_overlap is not supported. UTF-8 boundaries may add up to 3 bytes to the target."
         ),
     )
     def _split_fast(self, request: ChunkRequest) -> list[ChunkItem]:
-        from chonkie import FastChunker
-
-        # FastChunker does not support chunk_overlap.
-        chunker = FastChunker(
-            chunk_size=request.chunk_size,
-        )
-        return self._chunks_from_chonkie(chunker, request.content)
+        return fast_windows(request.content, request.chunk_size)
 
     @register_chunker(
         library=_LIB, library_label=_LIB_LABEL,
         strategy="sentence", label="Sentence",
-        description="Splits at sentence boundaries. Preserves semantic completeness.",
+        description="Uses a character target while preserving whole sentences. Long sentences may exceed the target; overlap includes only whole sentences that fit.",
     )
     def _split_sentence(self, request: ChunkRequest) -> list[ChunkItem]:
         from chonkie import SentenceChunker
 
         chunker = SentenceChunker(
+            tokenizer="character",
             chunk_size=request.chunk_size,
             chunk_overlap=request.chunk_overlap,
         )
@@ -126,6 +127,7 @@ class ChonkieChunker(TextChunker):
         # chunk_overlap intentionally omitted — not a supported parameter.
         # See: https://docs.chonkie.ai/oss/chunkers/recursive-chunker
         chunker = RecursiveChunker(
+            tokenizer="character",
             chunk_size=request.chunk_size,
         )
         return self._chunks_from_chonkie(chunker, request.content)
@@ -134,26 +136,23 @@ class ChonkieChunker(TextChunker):
         library=_LIB, library_label=_LIB_LABEL,
         strategy="table", label="Table",
         description=(
-            "Splits Markdown tables using Chonkie's row-based defaults. "
+            "Splits Markdown tables into groups of 3 data rows, repeats headers, and preserves surrounding prose. "
             "chunk_size and chunk_overlap are not used."
         ),
     )
     def _split_table(self, request: ChunkRequest) -> list[ChunkItem]:
-        from chonkie import TableChunker
+        if request.content.lstrip().lower().startswith('<table'):
+            from chonkie import TableChunker
 
-        # TableChunker.chunk_size is in *rows* (default=3), not characters or
-        # tokens.  Passing request.chunk_size (e.g. 512) would mean 512 rows
-        # per chunk — effectively never splitting any real table.  Use the
-        # library default so tables are split at sensible row boundaries.
-        chunker = TableChunker()
-        return self._chunks_from_chonkie(chunker, request.content)
+            return self._chunks_from_chonkie(TableChunker(), request.content, map_source=True)
+        return table_chunks(request.content)
 
     @register_chunker(
         library=_LIB, library_label=_LIB_LABEL,
         strategy="code", label="Code",
         description=(
             "Splits source code using AST-based structural analysis and chunk_size. "
-            "chunk_overlap is not supported."
+            "chunk_overlap is not supported. Requires optional chonkie[code] dependencies."
         ),
     )
     def _split_code(self, request: ChunkRequest) -> list[ChunkItem]:
@@ -162,15 +161,18 @@ class ChonkieChunker(TextChunker):
         # CodeChunker splits on AST node boundaries; chunk_overlap is not
         # a supported parameter (structural splits don't allow arbitrary overlap).
         chunker = CodeChunker(
+            tokenizer="character",
             chunk_size=request.chunk_size,
         )
-        return self._chunks_from_chonkie(chunker, request.content)
+        # Tree-sitter's node coordinates are UTF-8 byte offsets. Remap the
+        # returned text to character positions, as the application API expects.
+        return self._chunks_from_chonkie(chunker, request.content, map_source=True)
 
     @register_chunker(
         library=_LIB, library_label=_LIB_LABEL,
         strategy="semantic", label="Semantic",
         description=(
-            "Groups content by embedding similarity using chunk_size as a target. "
+            "Groups content by embedding similarity using the embedding model's token count as a target. Long sentences may exceed it. "
             "chunk_overlap is not supported."
         ),
     )
@@ -211,9 +213,14 @@ class ChonkieChunker(TextChunker):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _chunks_from_chonkie(chunker, content: str) -> list[ChunkItem]:
+    def _chunks_from_chonkie(chunker, content: str, *, map_source: bool = False) -> list[ChunkItem]:
         """Convert Chonkie Chunk objects to ChunkItem."""
         raw_chunks = chunker.chunk(content)
+        if map_source:
+            items = TextChunker.build_chunks(content, [chunk.text for chunk in raw_chunks], char_overlap=0)
+            for item, raw in zip(items, raw_chunks):
+                item.metadata['token_count'] = getattr(raw, 'token_count', None)
+            return items
         items: list[ChunkItem] = []
         for i, chunk in enumerate(raw_chunks):
             start = getattr(chunk, "start_index", 0)

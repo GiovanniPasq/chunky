@@ -16,6 +16,20 @@ import {
 } from '../../config'
 import ChunkEditModal from '../chunks/ChunkEditModal'
 import ProgressModal from '../modals/ProgressModal'
+import ConfirmDialog from '../modals/ConfirmDialog'
+import {
+  IconMerge,
+  IconSparkles,
+  IconTrash,
+  IconRefresh,
+  IconSave,
+  IconDownload,
+  IconEdit,
+  IconSpinner,
+} from '../common/Icons'
+import Button from '../common/Button'
+import ActionMenu from '../common/ActionMenu'
+import StatusBadge from '../common/StatusBadge'
 import './MarkdownViewer.css'
 import './ChunkViewer.css'
 
@@ -28,6 +42,8 @@ interface Props {
   chunksReady: boolean
   chunking: boolean
   savingChunks: boolean
+  chunksDirty: boolean
+  chunksStale?: boolean
   scrollSyncEnabled?: boolean
   chunkEnrichment?: EnrichmentSettings
   /**
@@ -94,6 +110,8 @@ function ChunkViewer({
   chunksReady,
   chunking,
   savingChunks,
+  chunksDirty,
+  chunksStale = false,
   scrollSyncEnabled = true,
   chunkEnrichment,
   mdFilename,
@@ -257,29 +275,12 @@ function ChunkViewer({
         errorMessage={chunkEnrichOp?.errorMessage}
       />
 
-      {pendingOp && (
-        <div className="confirm-overlay">
-          <div className="confirm-card" role="dialog" aria-modal="true">
-            <div className="confirm-card-header">
-              <h3 className="confirm-title">Enrichment in progress</h3>
-            </div>
-            <div className="confirm-card-body">
-              <p className="confirm-message">
-                An enrichment operation is currently running. Proceeding will interrupt it.
-                Do you want to continue?
-              </p>
-            </div>
-            <div className="confirm-card-footer">
-              <button className="confirm-btn confirm-btn--cancel" onClick={() => setPendingOp(null)}>
-                Cancel
-              </button>
-              <button className="confirm-btn confirm-btn--ok" onClick={handleConfirmInterrupt}>
-                OK
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog isOpen={!!pendingOp} title="Enrichment in progress" onDismiss={() => setPendingOp(null)} actions={[
+        { label: 'Cancel', onClick: () => setPendingOp(null) },
+        { label: 'Interrupt and continue', onClick: handleConfirmInterrupt, variant: 'danger' },
+      ]}>
+        <p>Enrichment is running. Continuing will interrupt it before applying your changes.</p>
+      </ConfirmDialog>
 
       {editingChunkIndex !== null && chunks?.[editingChunkIndex] && (
         <ChunkEditModal
@@ -319,7 +320,8 @@ function ChunkViewer({
                   onClick={handleMergeSelected}
                   title="Merge selected chunks removing overlap"
                 >
-                  ⛓ Merge
+                  <IconMerge size={13} />
+                  <span>Merge</span>
                 </button>
               )}
               {selectedChunks.size > 0 && (
@@ -329,14 +331,16 @@ function ChunkViewer({
                     onClick={handleEnrichSelected}
                     title="Enrich selected chunks with LLM"
                   >
-                    ✨ Enrich
+                    <IconSparkles size={13} />
+                    <span>Enrich</span>
                   </button>
                   <button
                     className="md-action-btn delete-chunks"
                     onClick={handleDeleteSelected}
                     title="Delete selected chunks"
                   >
-                    🗑 Delete
+                    <IconTrash size={13} />
+                    <span>Delete</span>
                   </button>
                 </>
               )}
@@ -344,31 +348,16 @@ function ChunkViewer({
           )}
         </div>
         <div className="md-controls-right">
-          <button
-            className="md-action-btn rechunk"
-            onClick={onRechunk}
-            disabled={chunking || savingChunks}
-            title={`Re-run the chunker over the displayed Markdown (${chunkerLabel})`}
-          >
-            <span>↻</span> Re-chunk with {chunkerLabel}
-          </button>
-          <button
-            className="md-action-btn save-chunks"
-            onClick={onSaveChunks}
-            disabled={!chunksReady || savingChunks || chunking}
-            title="Save chunks to disk"
-          >
-            <span>{savingChunks ? '⏳' : '💾'}</span>
-            {savingChunks ? 'Saving…' : chunking ? 'Chunking…' : 'Save Chunks'}
-          </button>
-          <button
-            className="md-action-btn download"
-            onClick={handleDownloadChunks}
-            disabled={!chunks || chunks.length === 0}
-            title="Download the current chunks as JSON"
-          >
-            <span>⬇</span> Export
-          </button>
+          {chunksReady && <StatusBadge tone={chunksStale || chunksDirty || !chunksFilename ? 'warning' : 'success'}>{chunksStale ? 'Needs regeneration' : chunksDirty ? 'Unsaved changes' : chunksFilename ? 'Saved' : 'Not saved yet'}</StatusBadge>}
+          <Button onClick={onRechunk} disabled={chunking || savingChunks} loading={chunking} title={`Regenerate chunks with ${chunkerLabel}`}>
+            {!chunking && <IconRefresh size={14} />}{chunking ? 'Chunking…' : 'Re-chunk'}
+          </Button>
+          <Button variant="primary" onClick={onSaveChunks} loading={savingChunks} disabled={!chunksReady || chunksStale || chunking || (!chunksDirty && !!chunksFilename)} title={chunksStale ? 'Re-chunk this version to match the current Markdown before saving' : 'Save the current chunk set'}>
+            {!savingChunks && <IconSave size={14} />}{savingChunks ? 'Saving…' : 'Save chunks'}
+          </Button>
+          <ActionMenu label="Chunk actions" actions={[
+            { label: 'Export JSON', icon: <IconDownload size={14} />, onSelect: handleDownloadChunks, disabled: !chunks || chunks.length === 0 },
+          ]} />
         </div>
       </div>
 
@@ -435,7 +424,8 @@ function ChunkViewer({
                         title="Edit chunk"
                         disabled={isEnriching}
                       >
-                        ✏️ Edit
+                        <IconEdit size={12} />
+                        <span>Edit</span>
                       </button>
                       <button
                         className={`chunk-enrich-btn${isEnriching ? ' loading' : ''}`}
@@ -443,7 +433,17 @@ function ChunkViewer({
                         title="Enrich chunk with LLM"
                         disabled={isEnriching}
                       >
-                        {isEnriching ? '⏳ Enriching…' : '✨ Enrich'}
+                        {isEnriching ? (
+                          <>
+                            <IconSpinner size={12} />
+                            <span>Enriching…</span>
+                          </>
+                        ) : (
+                          <>
+                            <IconSparkles size={12} />
+                            <span>Enrich</span>
+                          </>
+                        )}
                       </button>
                       <button
                         className="chunk-delete-btn"
@@ -451,7 +451,8 @@ function ChunkViewer({
                         title="Delete chunk"
                         disabled={isEnriching}
                       >
-                        🗑 Delete
+                        <IconTrash size={12} />
+                        <span>Delete</span>
                       </button>
                     </div>
                   </div>

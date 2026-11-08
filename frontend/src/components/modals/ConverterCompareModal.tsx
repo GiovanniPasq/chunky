@@ -1,3 +1,4 @@
+import Modal from '../common/Modal'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -300,16 +301,7 @@ export default function ConverterCompareModal({ isOpen, filename, settings, onCl
 
   return (
     <>
-      <div className="compare-overlay" onClick={requestClose}>
-        <div className="compare-modal" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Compare converters">
-          <div className="compare-header">
-            <div>
-              <h3>Compare converters</h3>
-              <p>{filename} · selected pages only, no files are saved</p>
-            </div>
-            <button className="compare-close" onClick={requestClose} aria-label="Close">✕</button>
-          </div>
-
+      <Modal open={isOpen} onClose={requestClose} title="Compare converters" description={`${filename} · selected pages only; no files are saved`} className="compare-modal">
           <div className="compare-controls">
             <label>
               Left
@@ -395,8 +387,7 @@ export default function ConverterCompareModal({ isOpen, filename, settings, onCl
               onCopy={content => handleCopy('right', content)}
             />
           </div>
-        </div>
-      </div>
+      </Modal>
       <ConfirmDialog
         isOpen={confirmCloseOpen}
         onDismiss={() => { if (!cancellingClose) setConfirmCloseOpen(false) }}
