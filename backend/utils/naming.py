@@ -5,8 +5,9 @@ Markdown-source token embedded in chunk filenames.
 Centralised here so that every layer that builds or parses one of these
 filenames — document_service (writes ``{stem}_{converter}.md``),
 chunk_storage_service (writes/reads ``{doc}_{md_source}_{lib}-{algo}…``), and
-the routers that surface them — speaks one vocabulary.  Adding a new
-converter or chunker library only requires updating this module.
+the routers that surface them — speaks one vocabulary. Keep these tokens
+aligned with capability registration and worker dispatch when adding a
+converter or chunker library.
 """
 
 from __future__ import annotations

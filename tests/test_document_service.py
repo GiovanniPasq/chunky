@@ -40,6 +40,58 @@ class _FakeVLMConverter:
 
 
 class DocumentServiceConversionTests(unittest.TestCase):
+    def test_bracketed_document_lists_uploaded_and_converted_markdown(self) -> None:
+        with TemporaryDirectory() as folder:
+            service = _make_service(Path(folder))
+            name = 'Report [2026]'
+            (service._pdfs_dir / f'{name}.pdf').write_bytes(self._pdf_bytes())
+            (service._mds_dir / f'{name}.md').write_text('Uploaded Markdown')
+            (service._mds_dir / f'{name}_vlm.md').write_text('Converted Markdown')
+            self.assertEqual({item.filename for item in service.list_markdown_versions(f'{name}.pdf')},
+                             {f'{name}.md', f'{name}_vlm.md'})
+            self.assertEqual(service.get_document(f'{name}.pdf').md_filename, f'{name}_vlm.md')
+
+    def test_source_cleanup_preserves_documents_with_overlapping_names(self) -> None:
+        for stem in ('report', 'Report [2026]'):
+            for operation in ('delete', 'replace'):
+                with self.subTest(stem=stem, operation=operation), TemporaryDirectory() as folder:
+                    service = _make_service(Path(folder))
+                    owners = (stem, f'{stem}_notes', f'{stem}_vlm')
+                    cache_root = service._mds_dir / '.checkpoints'
+                    for owner in owners:
+                        (service._pdfs_dir / f'{owner}.pdf').write_bytes(self._pdf_bytes())
+                        (service._mds_dir / f'{owner}_vlm.md').write_text(f'Markdown: {owner}')
+                        (service._mds_dir / f'{owner}.summary.json').write_text(f'Summary: {owner}')
+                        for name in (f'{owner}_vlm', f'{owner}_vlm_enrich'):
+                            path = cache_root / name
+                            path.mkdir(parents=True)
+                            (path / 'cached').write_text(owner)
+                    if operation == 'delete':
+                        service.delete_document(f'{stem}.pdf')
+                    else:
+                        service.upload_file(SimpleNamespace(filename=f'{stem}.pdf', file=BytesIO(self._pdf_bytes())))
+                    self.assertFalse((service._mds_dir / f'{stem}_vlm.md').exists())
+                    self.assertFalse((service._mds_dir / f'{stem}.summary.json').exists())
+                    self.assertFalse((cache_root / f'{stem}_vlm').exists())
+                    self.assertFalse((cache_root / f'{stem}_vlm_enrich').exists())
+                    for sibling in owners[1:]:
+                        self.assertTrue((service._pdfs_dir / f'{sibling}.pdf').exists())
+                        self.assertEqual((service._mds_dir / f'{sibling}_vlm.md').read_text(), f'Markdown: {sibling}')
+                        self.assertEqual((service._mds_dir / f'{sibling}.summary.json').read_text(), f'Summary: {sibling}')
+                        for name in (f'{sibling}_vlm', f'{sibling}_vlm_enrich'):
+                            self.assertTrue((cache_root / name / 'cached').exists())
+
+    def test_variant_cleanup_preserves_a_separate_pdf_summary_with_the_same_stem(self) -> None:
+        with TemporaryDirectory() as folder:
+            service = _make_service(Path(folder))
+            for stem in ('report', 'report_vlm'):
+                (service._pdfs_dir / f'{stem}.pdf').write_bytes(self._pdf_bytes())
+                (service._mds_dir / f'{stem}.summary.json').write_text(f'Summary: {stem}')
+            (service._mds_dir / 'report_vlm.md').write_text('Converted Markdown')
+            service.delete_markdown_variant('report.pdf', 'report_vlm.md')
+            self.assertEqual((service._mds_dir / 'report.summary.json').read_text(), 'Summary: report')
+            self.assertEqual((service._mds_dir / 'report_vlm.summary.json').read_text(), 'Summary: report_vlm')
+
     @staticmethod
     def _pdf_bytes(page_count: int = 1) -> bytes:
         import pymupdf

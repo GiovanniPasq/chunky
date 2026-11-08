@@ -138,27 +138,3 @@ class CheckpointStore:
                 "Failed to remove checkpoint directory '%s': %s",
                 self._dir, exc,
             )
-
-
-def discard_all_for_stem(stem: str, mds_dir: Path) -> None:
-    """Remove every checkpoint directory belonging to ``stem``.
-
-    Used at upload-overwrite and delete time, when the source PDF is going
-    away (or being replaced) and any cached pages would be either
-    unreferenced or actively misleading.  Wildcard matches future converter
-    tokens too (``{stem}_vlm``, ``{stem}_<future>``), so this stays correct
-    if checkpointing is later extended to other converters.
-    """
-    root = mds_dir / CHECKPOINT_ROOT_NAME
-    if not root.exists():
-        return
-    for candidate in root.glob(f"{stem}_*"):
-        if not candidate.is_dir():
-            continue
-        try:
-            shutil.rmtree(candidate)
-        except OSError as exc:
-            logger.warning(
-                "Failed to remove checkpoint directory '%s': %s",
-                candidate, exc,
-            )

@@ -73,7 +73,7 @@ def md_files_for_stem(mds_dir: Path, stem: str) -> list[Path]:
     if not mds_dir.exists():
         return []
     return [
-        f for f in mds_dir.glob(f"{stem}*.md")
+        f for f in mds_dir.glob("*.md")
         if markdown_belongs_to_stem(f, stem)
     ]
 

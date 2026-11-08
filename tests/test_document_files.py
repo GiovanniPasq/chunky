@@ -11,6 +11,18 @@ from backend.services.document_files import (
 
 
 class DocumentFilesTests(unittest.TestCase):
+    def test_bracketed_filenames_are_matched_literally(self) -> None:
+        with TemporaryDirectory() as folder:
+            directory = Path(folder)
+            for name in ('Report [2026].md', 'Report [2026]_docling.md', 'Report 2_docling.md'):
+                (directory / name).write_text('Body.', encoding='utf-8')
+            self.assertEqual(
+                {path.name for path in md_files_for_stem(directory, 'Report [2026]')},
+                {'Report [2026].md', 'Report [2026]_docling.md'},
+            )
+            self.assertEqual(find_markdown_for_document('Report [2026].pdf', directory).name,
+                             'Report [2026]_docling.md')
+
     def test_explicit_owner_keeps_converter_like_upload_standalone(self) -> None:
         self.assertEqual(
             document_stem_for_markdown("notes_vlm.md", "notes_vlm.md"),

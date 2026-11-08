@@ -574,11 +574,9 @@ class DocumentSummaryResponse(BaseModel):
 class SummaryGenerateRequest(BaseModel):
     """Body of ``POST /api/enrich/summary/generate``.
 
-    ``force`` discards any cached record before generation so the modal's
-    Regenerate button produces a fresh summary even when one already
-    exists.  When ``force`` is false, an existing record (even an old
-    LLM-generated one) is returned as a fast path and no LLM calls are
-    made.
+    ``force=True`` regenerates the summary, replacing the stored record only
+    after success. Otherwise, a non-empty cached record is reused when its
+    source hash matches; user-edited summaries remain authoritative.
     """
 
     filename: str = Field(..., description="Stored markdown filename (e.g. 'report_vlm.md').")

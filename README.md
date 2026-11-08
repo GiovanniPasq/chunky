@@ -122,7 +122,7 @@ uv run python -m unittest discover -s tests
 ./.venv/bin/python -m unittest discover -s tests
 ```
 
-Run frontend type checking and production build from `frontend/`:
+Run frontend tests, type checking, and the production build from `frontend/`:
 
 ```bash
 npm test

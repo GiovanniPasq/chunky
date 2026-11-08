@@ -25,9 +25,9 @@ logger = logging.getLogger(__name__)
 
 from fastapi import HTTPException, UploadFile
 
-from backend.converters.vlm_checkpoint import CheckpointStore, discard_all_for_stem
-from backend.services.enrichment_checkpoint import discard_all_for_stem as discard_enrich_for_stem
-from backend.services.document_summary import discard_all_for_stem as discard_summary_for_stem
+from backend.converters.vlm_checkpoint import CheckpointStore
+from backend.services.enrichment_checkpoint import EnrichmentCheckpointStore
+from backend.services.document_summary import DocumentSummaryStore
 from backend.converters.base import PDFConverter
 from backend.converters.cloud import CloudConverter
 from backend.converters.docling import DoclingConverter
@@ -336,19 +336,15 @@ class DocumentService:
     # ------------------------------------------------------------------
 
     def _discard_derived_caches(self, stem: str) -> None:
-        """Wipe every on-disk cache derived from a source document.
+        """Remove caches owned by this document, without prefix/glob matching.
 
-        Centralises the three cascade calls (VLM checkpoints, enrichment
-        checkpoints, document summaries) so adding a new cache tier later
-        only has to be wired into one place — call sites (upload-overwrite,
-        delete) can't accidentally forget one of the three.  Each underlying
-        ``discard_all_for_stem`` is independently best-effort: I/O failures
-        are logged but never raised, so cleanup of one tier never blocks
-        the others.
+        Each store handles missing files and logs cleanup failures independently.
+        Enrichment is keyed by Markdown variant; summaries are shared per source.
         """
-        discard_all_for_stem(stem, self._mds_dir)
-        discard_enrich_for_stem(stem, self._mds_dir)
-        discard_summary_for_stem(stem, self._mds_dir)
+        CheckpointStore(stem, self._mds_dir).discard()
+        for md_stem in (stem, *(f"{stem}_{token}" for token in _KNOWN_CONVERTERS)):
+            EnrichmentCheckpointStore(md_stem, self._mds_dir).discard()
+        DocumentSummaryStore(stem, self._mds_dir).discard()
 
     def _discard_markdown_variant_caches(
         self,
@@ -375,8 +371,7 @@ class DocumentService:
             self._discard_derived_caches(md_stem)
             return
 
-        discard_enrich_for_stem(md_stem, self._mds_dir)
-        discard_summary_for_stem(md_stem, self._mds_dir)
+        EnrichmentCheckpointStore(md_stem, self._mds_dir).discard()
         if md_stem == f"{doc_stem}_vlm":
             CheckpointStore(doc_stem, self._mds_dir).discard()
 
@@ -537,15 +532,14 @@ class DocumentService:
         # Direct upload: only the exact ``{stem}.md`` file. Other files
         # that merely share the prefix (``report_notes.md``, ``report2.md``)
         # are separate documents, not versions of this one.
-        for f in sorted(self._mds_dir.glob(f"{stem}*.md")):
-            if f.stem == stem:
-                versions.append(MarkdownVersion(
-                    filename=f.name,
-                    source="uploaded",
-                    converter=None,
-                    has_failures=_file_has_failure_markers(f),
-                ))
-                continue
+        uploaded = self._mds_dir / f"{stem}.md"
+        if uploaded.is_file():
+            versions.append(MarkdownVersion(
+                filename=uploaded.name,
+                source="uploaded",
+                converter=None,
+                has_failures=_file_has_failure_markers(uploaded),
+            ))
 
         return versions
 
@@ -1228,9 +1222,7 @@ class DocumentService:
         # and would silently feed stale page content into the next document
         # uploaded under the same name.  Both VLM and enrichment checkpoint
         # dirs live under ``mds/.checkpoints/`` and must be cleaned together.
-        # Document summaries (``mds/{stem}.summary.json`` plus legacy
-        # per-variant records) follow the same lifecycle and are cleaned here
-        # as well.
+        # The shared document summary follows the same lifecycle.
         self._discard_derived_caches(stem)
 
         try:

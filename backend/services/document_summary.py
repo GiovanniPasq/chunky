@@ -237,35 +237,6 @@ class DocumentSummaryStore:
             logger.warning("Failed to remove document summary '%s': %s", self._path, exc)
 
 
-def discard_all_for_stem(stem: str, mds_dir: Path) -> None:
-    """Delete the summary record for ``stem``.
-
-    The current naming uses a single ``{stem}.summary.json`` per document
-    (shared across converter variants).  We also delete any legacy
-    per-variant files (``{stem}_{converter}.summary.json``) that may be
-    left over from an older build so the cleanup is idempotent across
-    versions.  Called from document delete / re-upload flows alongside
-    the VLM and enrichment checkpoint cleanups.
-    """
-    if not mds_dir.exists():
-        return
-    candidates: list[Path] = []
-    target = mds_dir / f"{stem}{SUMMARY_SUFFIX}"
-    if target.exists():
-        candidates.append(target)
-    # Legacy per-variant files (from earlier builds): glob requires the
-    # literal ``{stem}_`` prefix, so other documents whose stems just
-    # happen to start with ``{stem}`` are not touched.
-    candidates.extend(mds_dir.glob(f"{stem}_*{SUMMARY_SUFFIX}"))
-    for path in candidates:
-        try:
-            path.unlink()
-        except FileNotFoundError:
-            continue
-        except OSError as exc:
-            logger.warning("Failed to remove document summary '%s': %s", path, exc)
-
-
 # ---------------------------------------------------------------------------
 # Union helpers (pure-Python, no LLM)
 # ---------------------------------------------------------------------------
