@@ -4,7 +4,11 @@ import Button from '../common/Button'
 import { exportDocuments, getExportDirectory, type ExportOptions } from '../../services/exportsApi'
 import './ExportModal.css'
 
-export default function ExportModal({ filenames, onClose }: { filenames: string[]; onClose: () => void }) {
+export default function ExportModal({ filenames, hasUnsavedChanges, onClose }: {
+  filenames: string[]
+  hasUnsavedChanges: boolean
+  onClose: () => void
+}) {
   const [options, setOptions] = useState<Omit<ExportOptions, 'filenames'>>({
     destination: 'download', include_markdown: true, include_chunks: true,
     include_pdfs: false, versions: 'latest', folder: '',
@@ -37,6 +41,7 @@ export default function ExportModal({ filenames, onClose }: { filenames: string[
     <Modal open onClose={onClose} title="Export documents" dismissible={!busy} className="export-modal"
       description={`${filenames.length} document${filenames.length === 1 ? '' : 's'} selected. Exports include saved files only; your workspace stays in place.`}>
       <div className="ui-modal-body export-options">
+        {hasUnsavedChanges && <p className="export-help" role="note">Unsaved edits and chunks are excluded. Your drafts will stay open.</p>}
         <fieldset disabled={busy}>
           <legend>Include</legend>
           <label><input type="checkbox" checked={options.include_markdown} onChange={e => set('include_markdown', e.target.checked)} /> Markdown</label>

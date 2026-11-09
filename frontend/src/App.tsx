@@ -21,7 +21,7 @@ import {
   IconClose,
   IconCompare,
 } from './components/common/Icons'
-import MarkdownViewer from './components/viewer/MarkdownViewer'
+import MarkdownViewer, { type MarkdownViewerHandle } from './components/viewer/MarkdownViewer'
 import ChunkViewer from './components/viewer/ChunkViewer'
 import SettingsModal from './components/modals/SettingsModal'
 import ExportModal from './components/modals/ExportModal'
@@ -311,12 +311,30 @@ export default function App() {
   }, [runOrConfirm])
 
   const [exportFiles, setExportFiles] = useState<string[] | null>(null)
+  const [pendingExportFiles, setPendingExportFiles] = useState<string[] | null>(null)
+  const [savingForExport, setSavingForExport] = useState(false)
+  const markdownViewerRef = useRef<MarkdownViewerHandle>(null)
+  const hasUnsavedChunks = chunksDirty || !!(chunks && !selectedChunks)
   const handleExport = (filenames: string[]) => {
-    if (selectedDoc && filenames.includes(selectedDoc) && (hasUnsavedWork || (chunks && !selectedChunks))) {
-      showToast('Save or cancel the active Markdown and chunk changes before exporting. Exports include saved files only.', 'error')
-      return
+    if (selectedDoc && filenames.includes(selectedDoc) && (markdownDirty || hasUnsavedChunks)) {
+      setPendingExportFiles(filenames)
+    } else {
+      setExportFiles(filenames)
     }
-    setExportFiles(filenames)
+  }
+  const saveAndExport = async () => {
+    if (!pendingExportFiles) return
+    setSavingForExport(true)
+    try {
+      // Save chunks against their original Markdown revision before saving
+      // the draft. Normal stale-version tracking applies if that source changes.
+      if (hasUnsavedChunks && !await handleSaveChunks()) return
+      if (markdownDirty && !await markdownViewerRef.current?.saveDraft()) return
+      setExportFiles(pendingExportFiles)
+      setPendingExportFiles(null)
+    } finally {
+      setSavingForExport(false)
+    }
   }
   const { caps } = useCapabilities()
   const [pageMappingOpen, setPageMappingOpen] = useState(false)
@@ -633,6 +651,7 @@ export default function App() {
     }
     return (
       <MarkdownViewer
+        ref={markdownViewerRef}
         content={documentData.md_content}
         documentName={selectedDoc!}
         scale={mdScale}
@@ -706,6 +725,24 @@ export default function App() {
         />
       )}
 
+      {/* ── Export confirmation ── */}
+      <ConfirmDialog
+        isOpen={!!pendingExportFiles}
+        title="Save changes before exporting?"
+        onDismiss={() => setPendingExportFiles(null)}
+        dismissible={!savingForExport}
+        actions={[
+          { label: 'Cancel', onClick: () => setPendingExportFiles(null), disabled: savingForExport },
+          { label: 'Export saved files', onClick: () => {
+            setExportFiles(pendingExportFiles)
+            setPendingExportFiles(null)
+          }, disabled: savingForExport },
+          { label: savingForExport ? 'Saving…' : 'Save and export', onClick: saveAndExport, variant: 'primary', disabled: savingForExport || savingMd || savingChunks },
+        ]}
+      >
+        <p>You have unsaved changes. Save them to include them in the export, or export the saved files and keep your drafts open.</p>
+      </ConfirmDialog>
+
       {/* ── Unsaved chunks confirmation ── */}
       <ConfirmDialog
         isOpen={!!pendingChunkAction}
@@ -759,7 +796,7 @@ export default function App() {
         docsWithFailures={docsWithFailures}
         docsWithCheckpoints={docsWithCheckpoints}
         keyboardNavigationDisabled={
-          !!exportFiles || settingsOpen ||
+          !!exportFiles || !!pendingExportFiles || settingsOpen ||
           compareOpen ||
           !!pendingDoc ||
           !!pendingChunkAction ||
@@ -1015,7 +1052,9 @@ export default function App() {
           <p>This saved Markdown has no source-page map. Reconvert with a page-aware converter to link PDF and Markdown pages.</p>
           <p>Reconversion replaces the saved Markdown for that converter. Save any edits first; existing chunks may need regeneration.</p>
         </ConfirmDialog>
-        {exportFiles && <ExportModal filenames={exportFiles} onClose={() => setExportFiles(null)} />}
+        {exportFiles && <ExportModal filenames={exportFiles}
+          hasUnsavedChanges={!!selectedDoc && exportFiles.includes(selectedDoc) && (markdownDirty || hasUnsavedChunks)}
+          onClose={() => setExportFiles(null)} />}
         <SettingsModal
           isOpen={settingsOpen}
           initialTab={settingsSection}

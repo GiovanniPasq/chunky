@@ -364,20 +364,114 @@ test('exports saved documents to ZIP and a backend folder', async ({ page }) => 
   expect(requests[1]).toMatchObject({ destination: 'folder', folder: 'dataset', versions: 'all' })
 })
 
-test('does not export unsaved changes or hidden selected documents', async ({ page }) => {
+test('offers export choices without discarding drafts or including hidden selected documents', async ({ page }) => {
   await page.goto('/')
   await openDocument(page)
   await page.getByRole('button', { name: 'Edit', exact: true }).click()
   await page.locator('.md-raw-editor').fill('Unsaved document')
   await page.getByRole('button', { name: 'Export all', exact: true }).click()
-  await expect(page.getByRole('dialog', { name: 'Export documents' })).not.toBeVisible()
-  await expect(page.getByText(/Save or cancel the active Markdown and chunk changes/)).toBeVisible()
+  const confirmation = page.getByRole('dialog', { name: 'Save changes before exporting?' })
+  await expect(confirmation).toBeVisible()
+  await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(page.locator('.md-raw-editor')).toHaveValue('Unsaved document')
+  await page.getByRole('button', { name: 'Export all', exact: true }).click()
+  await confirmation.getByRole('button', { name: 'Export saved files', exact: true }).click()
+  const exportDialog = page.getByRole('dialog', { name: 'Export documents' })
+  await expect(exportDialog).toBeVisible()
+  await expect(exportDialog.getByRole('note')).toContainText('Unsaved edits and chunks are excluded')
+  await exportDialog.getByRole('button', { name: 'Close', exact: true }).click()
+  await expect(page.locator('.md-raw-editor')).toHaveValue('Unsaved document')
   await page.getByRole('button', { name: 'Cancel', exact: true }).click()
   await page.getByRole('button', { name: 'Select', exact: true }).click()
   await page.getByRole('button', { name: 'Select all', exact: true }).click()
   await page.getByRole('textbox', { name: 'Search documents' }).fill('Notes.md')
   await page.getByRole('button', { name: 'Export selected (1)', exact: true }).click()
   await expect(page.getByRole('dialog', { name: 'Export documents' })).toContainText('1 document selected')
+})
+
+test('saves Markdown before export and keeps the draft when saving fails', async ({ page }) => {
+  let failSave = true
+  let savedContent = ''
+  await page.route('**/api/documents/*/markdowns/*', async route => {
+    if (route.request().method() !== 'PUT') return route.fallback()
+    if (failSave) return route.fulfill({ status: 500, json: { detail: 'Save failed' } })
+    savedContent = route.request().postDataJSON().content
+    return route.fallback()
+  })
+  await page.goto('/')
+  await openDocument(page)
+  await page.getByRole('button', { name: 'Edit', exact: true }).click()
+  await page.locator('.md-raw-editor').fill('# Saved for export')
+  await page.getByRole('button', { name: 'Export all', exact: true }).click()
+  const confirmation = page.getByRole('dialog', { name: 'Save changes before exporting?' })
+  await confirmation.getByRole('button', { name: 'Save and export', exact: true }).click()
+  await expect(page.getByText('Failed to save Markdown').first()).toBeVisible()
+  await expect(confirmation).toBeVisible()
+  await expect(page.getByRole('dialog', { name: 'Export documents' })).not.toBeVisible()
+  await expect(page.locator('.md-raw-editor')).toHaveValue('# Saved for export')
+  failSave = false
+  await confirmation.getByRole('button', { name: 'Save and export', exact: true }).click()
+  const exportDialog = page.getByRole('dialog', { name: 'Export documents' })
+  await expect(exportDialog).toBeVisible()
+  expect(savedContent).toBe('# Saved for export')
+  await expect(exportDialog.getByRole('note')).not.toBeVisible()
+  await exportDialog.getByRole('button', { name: 'Close', exact: true }).click()
+  await expect(page.locator('.workspace-save-state')).toContainText('All changes saved')
+  await expect(page.locator('.markdown-content')).toContainText('Saved for export')
+})
+
+test('saves generated and edited chunks before opening export', async ({ page }) => {
+  let failSave = true
+  let savedChunks: { content: string }[] = []
+  await page.route('**/api/chunks/save', async route => {
+    if (failSave) return route.fulfill({ status: 500, json: { detail: 'Save failed' } })
+    savedChunks = route.request().postDataJSON().chunks
+    return route.fallback()
+  })
+  await page.goto('/')
+  await openDocument(page)
+  await page.getByRole('button', { name: 'Chunks', exact: true }).click()
+  await expect(page.locator('.chunk-block')).toHaveCount(1)
+  await page.getByRole('button', { name: 'Export all', exact: true }).click()
+  const confirmation = page.getByRole('dialog', { name: 'Save changes before exporting?' })
+  await confirmation.getByRole('button', { name: 'Save and export', exact: true }).click()
+  await expect(page.getByText('Failed to save chunks').first()).toBeVisible()
+  await expect(confirmation).toBeVisible()
+  await expect(page.getByRole('dialog', { name: 'Export documents' })).not.toBeVisible()
+  failSave = false
+  await confirmation.getByRole('button', { name: 'Save and export', exact: true }).click()
+  const exportDialog = page.getByRole('dialog', { name: 'Export documents' })
+  await expect(exportDialog).toBeVisible()
+  expect(savedChunks).toHaveLength(1)
+  await exportDialog.getByRole('button', { name: 'Close', exact: true }).click()
+  await page.locator('.chunk-edit-btn').click()
+  await page.getByRole('textbox', { name: 'Chunk content' }).fill('Edited for export')
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click()
+  await page.getByRole('button', { name: 'Export all', exact: true }).click()
+  await confirmation.getByRole('button', { name: 'Save and export', exact: true }).click()
+  await expect(exportDialog).toBeVisible()
+  expect(savedChunks[0].content).toBe('Edited for export')
+})
+
+test('saves chunk edits against their source before saving a Markdown draft for export', async ({ page }) => {
+  const saves: string[] = []
+  page.on('request', request => {
+    if (request.method() === 'PUT' && request.url().includes('/markdowns/')) saves.push('markdown')
+    if (request.method() === 'POST' && request.url().endsWith('/api/chunks/save')) saves.push('chunks')
+  })
+  await page.goto('/')
+  await openDocument(page)
+  await page.getByRole('group', { name: 'Left panel view' }).getByRole('button', { name: 'Markdown', exact: true }).click()
+  await expect(page.locator('.chunk-block')).toHaveCount(1)
+  await page.locator('.chunk-edit-btn').click()
+  await page.getByRole('textbox', { name: 'Chunk content' }).fill('Edited chunk')
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click()
+  await page.locator('.md-controls').getByRole('button', { name: 'Edit', exact: true }).click()
+  await page.locator('.md-raw-editor').fill('# Updated source')
+  await page.getByRole('button', { name: 'Export all', exact: true }).click()
+  await page.getByRole('dialog', { name: 'Save changes before exporting?' }).getByRole('button', { name: 'Save and export', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'Export documents' })).toBeVisible()
+  expect(saves).toEqual(['chunks', 'markdown'])
 })
 
 test('Alt/Option arrows navigate focused document rows and respect filters and dialogs', async ({ page }) => {

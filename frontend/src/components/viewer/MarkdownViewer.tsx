@@ -1,5 +1,5 @@
 import FeatureIcon from '../common/FeatureIcon'
-import { useRef, useEffect, useState, useMemo, memo } from 'react'
+import { useRef, useEffect, useState, useMemo, useImperativeHandle, memo, type Ref } from 'react'
 import MarkdownContent from '../common/MarkdownContent'
 import type { EnrichmentSettings } from '../../types'
 import { useScrollSync } from '../../hooks/useScrollSync'
@@ -26,7 +26,12 @@ import ActionMenu from '../common/ActionMenu'
 import ConfirmDialog from '../modals/ConfirmDialog'
 import './MarkdownViewer.css'
 
+export interface MarkdownViewerHandle {
+  saveDraft: () => Promise<boolean>
+}
+
 interface Props {
+  ref?: Ref<MarkdownViewerHandle>
   content: string
   documentName: string
   /** Display scale (managed and rendered by the parent — see App.tsx). */
@@ -94,6 +99,7 @@ const LazySection = memo(function LazySection({
 // ── Component ──────────────────────────────────────────────────────────────
 
 function MarkdownViewer({
+  ref,
   content, documentName, scale = 1.0,
   scrollSyncEnabled = true, hasSourcePdf = false,
   onSaveMarkdown, onDeleteMarkdown,
@@ -223,6 +229,7 @@ function MarkdownViewer({
   }, [editMode])
 
   const handleSaveMd = async () => {
+    if (!markdownDirty) return true
     const ta = textareaRef.current
     if (ta) {
       const max = ta.scrollHeight - ta.clientHeight
@@ -232,10 +239,14 @@ function MarkdownViewer({
       await onSaveMarkdown(editContent)
       setEnrichError(null)
       setEditMode(false)
+      return true
     } catch {
       setEnrichError('Failed to save Markdown')
+      return false
     }
   }
+
+  useImperativeHandle(ref, () => ({ saveDraft: handleSaveMd }))
 
   const handleCancelEdit = () => {
     const ta = textareaRef.current
