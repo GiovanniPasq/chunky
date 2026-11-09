@@ -69,7 +69,8 @@
 
 .enrich-diff-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  min-width: 600px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
   line-height: 1.55;
@@ -187,14 +188,18 @@
 
 .enrich-diff-edit-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   grid-template-rows: auto 1fr;
+  grid-template-areas: "original-heading enriched-heading" "original enriched";
   height: calc(100% - 33px); /* leave room for the toolbar */
   /* Body's overflow:auto wraps this; let the textareas handle scrolling. */
   align-items: stretch;
 }
 
 .enrich-diff-textarea {
+  min-width: 0;
+  min-height: 0;
+  grid-area: enriched;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
   line-height: 1.55;
@@ -221,56 +226,16 @@
 
 .enrich-diff-textarea[readonly] {
   cursor: default;
+  grid-area: original;
 }
+
+.enrich-diff-original-heading { grid-area: original-heading; }
+.enrich-diff-enriched-heading { grid-area: enriched-heading; }
 
 /* ── Footer ── */
 
 .enrich-diff-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 12px var(--modal-gutter);
-  border-top: 1px solid var(--border-subtle);
   flex-shrink: 0;
-  background: var(--bg-main);
-}
-
-.enrich-diff-reject,
-.enrich-diff-accept {
-  padding: 7px 18px;
-  font-size: 13px;
-  font-weight: 600;
-  border-radius: 6px;
-  cursor: pointer;
-  transition:
-    background 0.15s,
-    transform 0.05s;
-}
-
-.enrich-diff-reject {
-  background: transparent;
-  border: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-}
-
-.enrich-diff-reject:hover:not(:disabled) {
-  background: var(--bg-subtle);
-}
-
-.enrich-diff-accept {
-  background: var(--button-primary);
-  border: 1px solid var(--button-primary);
-  color: white;
-}
-
-.enrich-diff-accept:hover:not(:disabled) {
-  background: var(--button-primary-hover);
-}
-
-.enrich-diff-reject:disabled,
-.enrich-diff-accept:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 @media (max-width: 900px) {
@@ -282,9 +247,9 @@
     padding: 12px var(--modal-gutter);
   }
 
-  .enrich-diff-grid,
   .enrich-diff-edit-grid {
     grid-template-columns: 1fr;
+    grid-template-areas: "original-heading" "original" "enriched-heading" "enriched";
   }
 
   .enrich-diff-edit-grid {
@@ -292,7 +257,6 @@
   }
 
   .enrich-diff-col-header + .enrich-diff-col-header,
-  .enrich-diff-cell + .enrich-diff-cell,
   .enrich-diff-textarea + .enrich-diff-textarea {
     border-left: none;
   }
@@ -304,8 +268,7 @@
 }
 
 @media (max-width: 560px) {
-  .enrich-diff-reject,
-  .enrich-diff-accept {
+  .enrich-diff-footer .ui-button {
     flex: 1 1 100%;
   }
 }

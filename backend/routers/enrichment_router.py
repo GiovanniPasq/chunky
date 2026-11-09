@@ -523,8 +523,8 @@ async def generate_summary(http_request: Request, body: SummaryGenerateRequest):
     """Run the summary stages (cleanup → split → extract → reduce) and
     return the resulting :class:`DocumentSummaryResponse` over SSE.
 
-    ``force=True`` discards any cached record before generation; this is
-    the path the review modal's Regenerate button uses.  When ``force``
+    ``force=True`` replaces the cached record only after generation succeeds;
+    this is the path the review modal's Regenerate button uses. When ``force``
     is false and a cached record exists, this endpoint short-circuits
     and emits a single ``summary_ready`` (cached=True) followed by
     ``done`` — no LLM calls.

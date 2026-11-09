@@ -1,4 +1,5 @@
 import Modal from '../common/Modal'
+import Button from '../common/Button'
 import ViewTabs from '../common/ViewTabs'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { PipelineResult } from '../../services/apiService'
@@ -30,9 +31,8 @@ interface Segment {
  * Standard LCS line-level diff.  Returns a flat list of segments where
  * each entry corresponds to exactly one line on either or both sides.
  *
- * O(n·m) time and space.  For documents above ``MAX_DIFF_CHARS`` total
- * we render a "too large" notice instead of computing the diff — the
- * caller can still edit via the Edit tab.
+ * O(n·m) time and space. The caller bounds both character count and
+ * matrix size before computing the diff; larger documents use Edit.
  */
 function lineDiff(left: string, right: string): Segment[] {
   const lhs = left.split('\n')
@@ -179,10 +179,16 @@ function buildRows(segments: Segment[]): Row[] {
 
 // ── Component ───────────────────────────────────────────────────────────────
 
-// Diff cost is O(n·m).  Above this combined-length threshold we skip the
-// computation and render a notice — the user can still edit the content
-// directly.
 const MAX_DIFF_CHARS = 4_000_000
+const MAX_DIFF_CELLS = 2_000_000
+
+function lineCount(content: string): number {
+  let count = 1
+  for (let i = 0; i < content.length; i++) {
+    if (content[i] === '\n') count++
+  }
+  return count
+}
 
 export default function EnrichDiffModal({
   isOpen,
@@ -208,13 +214,14 @@ export default function EnrichDiffModal({
   const tooLarge = useMemo(() => {
     if (!result) return false
     return original.length + editedContent.length > MAX_DIFF_CHARS
+      || (lineCount(original) + 1) * (lineCount(editedContent) + 1) > MAX_DIFF_CELLS
   }, [original, editedContent, result])
 
   const rows = useMemo<Row[]>(() => {
-    if (!result || tooLarge) return []
+    if (!isOpen || !result || tooLarge || tab !== 'diff') return []
     const segments = lineDiff(original, editedContent)
     return buildRows(segments)
-  }, [original, editedContent, result, tooLarge])
+  }, [isOpen, original, editedContent, result, tooLarge, tab])
 
   const hasChanges = useMemo(() => rows.some(r => r.kind !== 'equal' && r.kind !== 'collapsed'), [rows])
 
@@ -252,11 +259,11 @@ export default function EnrichDiffModal({
           : <EditView original={original} edited={editedContent} onChange={setEditedContent} />}
 
 
-        <div className="enrich-diff-footer">
-          <button className="enrich-diff-reject" onClick={onReject} disabled={saving}>Reject</button>
-          <button className="enrich-diff-accept" onClick={() => onAccept(editedContent)} disabled={saving}>
+        <div className="ui-modal-footer enrich-diff-footer">
+          <Button onClick={onReject} disabled={saving}>Reject</Button>
+          <Button variant="primary" onClick={() => onAccept(editedContent)} loading={saving}>
             {saving ? 'Saving…' : 'Accept and save'}
-          </button>
+          </Button>
         </div>
     </Modal>
   )
@@ -396,8 +403,8 @@ function EditView({ original, edited, onChange }: { original: string; edited: st
         </label>
       </div>
       <div className="enrich-diff-edit-grid">
-        <div className="enrich-diff-col-header">Original (read-only)</div>
-        <div className="enrich-diff-col-header">Enriched (editable)</div>
+        <div className="enrich-diff-col-header enrich-diff-original-heading">Original (read-only)</div>
+        <div className="enrich-diff-col-header enrich-diff-enriched-heading">Enriched (editable)</div>
         <textarea
           ref={leftRef}
           className="enrich-diff-textarea"
