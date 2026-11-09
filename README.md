@@ -29,6 +29,8 @@
   <img src="assets/demo.gif" width="800" alt="Chunky demo: upload a PDF, convert and edit Markdown, configure chunks, and enrich them with a local model">
 </p>
 
+**If you like this project, a star ⭐️ would mean a lot :)**
+
 ---
 
 ## Overview
@@ -98,8 +100,6 @@ docker compose up --build
 | Frontend | http://localhost:5173      |
 | Backend  | http://localhost:8000      |
 | Swagger  | http://localhost:8000/docs |
-
-If Chunky is useful to you, a star on GitHub helps others discover the project.
 
 ---
 
@@ -212,6 +212,27 @@ Use an existing adapter in [backend/converters](backend/converters) as a referen
 Subclass `PDFConverter`, validate the input path, and return Markdown from
 `convert(pdf_path, total_pages=None)`. Keep heavy library imports lazy.
 
+```python
+# backend/converters/my_converter.py
+from pathlib import Path
+from backend.registry import register_converter
+from .base import PDFConverter
+
+@register_converter(
+    name="my_converter",
+    label="My Converter",
+    description="Short description shown in the UI.",
+)
+class MyConverter(PDFConverter):
+    def __init__(self) -> None:
+        from my_library import MyParser  # replace with your library's actual API
+        self._parser = MyParser()
+
+    def convert(self, pdf_path: Path, total_pages: int | None = None) -> str:
+        self.validate_path(pdf_path)
+        return self._parser.to_markdown(str(pdf_path))
+```
+
 Register the converter in:
 
 - `@register_converter` and the imports in `backend/routers/capabilities_router.py`
@@ -227,6 +248,31 @@ advertise `page_mapping=True` only when the adapter preserves source pages.
 
 Use [backend/chunkers](backend/chunkers) as a reference. For a new strategy,
 add a `@register_chunker` method, a `ChunkerType` entry, and its class `_DISPATCH` entry.
+
+For example, add this method inside `LangChainChunker`, using its existing imports:
+
+```python
+@register_chunker(
+    library="langchain",
+    library_label="LangChain",
+    strategy="custom_recursive",
+    label="Custom Recursive",
+    description="Splits paragraphs and lines using a character budget.",
+)
+def _split_custom_recursive(self, request: ChunkRequest) -> list[ChunkItem]:
+    splitter = RecursiveCharacterTextSplitter(
+        separators=["\n\n", "\n", " ", ""],
+        chunk_size=request.chunk_size,
+        chunk_overlap=request.chunk_overlap,
+    )
+    return self.build_chunks(
+        request.content, splitter.split_text(request.content),
+        char_overlap=request.chunk_overlap,
+    )
+```
+
+Add `custom_recursive` to `ChunkerType` and map
+`ChunkerType.custom_recursive` to `_split_custom_recursive` in `_DISPATCH`.
 
 For a new library, implement `TextChunker.chunk(request)` and add it to
 `ChunkerLibrary`, `backend/chunkers/__init__.py`, `_LIBRARY_MAP` in
