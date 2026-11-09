@@ -29,7 +29,9 @@
   <img src="assets/demo.gif" width="800" alt="Chunky demo: upload a PDF, convert and edit Markdown, configure chunks, and enrich them with a local model">
 </p>
 
-**If you like this project, a star ⭐️ would mean a lot :)**
+<p align="center">
+  <strong>If you like this project, a star ⭐️ would mean a lot :)</strong>
+</p>
 
 ---
 
@@ -182,7 +184,7 @@ Review and clean Markdown before chunking:
 2. **Cleanup** — removes conversion noise and repeated headers/footers while preserving code
 3. **LLM correction** — preview suggested repairs before applying them
 
-Available for individual documents and batches.
+Single documents offer a review preview; bulk enrichment saves results automatically.
 
 ### Chunk enrichment
 
