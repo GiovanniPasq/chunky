@@ -9,6 +9,15 @@
   A local, open-source workspace to inspect PDF conversion, refine Markdown, compare chunking strategies, and review chunks before indexing.
 </p>
 <p align="center">
+  <a href="#overview">Overview</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#getting-started">Getting Started</a> ·
+  <a href="#pdf-to-markdown-converters">Converters</a> ·
+  <a href="#chunking-strategies">Chunking</a> ·
+  <a href="#enrichment">Enrichment</a> ·
+  <a href="#extending-chunky">Extending Chunky</a>
+</p>
+<p align="center">
 <img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white"/>
 <img src="https://img.shields.io/badge/Node.js-24+-339933?style=for-the-badge&logo=node.js&logoColor=white"/>
 <img src="https://img.shields.io/badge/FastAPI-0.162+-009688?style=for-the-badge&logo=fastapi&logoColor=white"/>
@@ -95,46 +104,6 @@ docker compose up --build
 | Swagger  | http://localhost:8000/docs |
 
 If Chunky is useful to you, a star on GitHub helps others discover the project.
-
----
-
-## Exporting saved outputs
-
-Use **Export all**, or **Select → Export selected**, for a ZIP download or a folder
-on the backend machine. Choose Markdown, saved chunk JSON, optional PDFs, and
-latest matching outputs or all versions. Save active edits first. Each export
-includes a manifest with missing-file and stale-chunk warnings.
-
-Folder exports use `EXPORTS_DIR` (default `docs/exports`), with an optional child
-folder and a unique directory per export. Set an absolute `EXPORTS_DIR` in the
-backend environment to change the root; mount it explicitly when using Docker.
-Workspace files stay in place. Downloads use a location picker where supported.
-
-## Development checks
-
-Run the backend regression suite from the repository root:
-
-```bash
-# Using uv (recommended):
-uv run python -m unittest discover -s tests
-
-# Or using the local virtual environment:
-./.venv/bin/python -m unittest discover -s tests
-```
-
-Run frontend tests, type checking, and the production build from `frontend/`:
-
-```bash
-npm test
-npm run typecheck
-npm run build
-
-# Browser regression tests (install the browser once):
-npx playwright install chromium
-npm run test:e2e
-# To use an installed Google Chrome instead:
-PLAYWRIGHT_CHANNEL=chrome npm run test:e2e
-```
 
 ---
 
